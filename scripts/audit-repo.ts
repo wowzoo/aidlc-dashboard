@@ -34,7 +34,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { CREDENTIALS, MACHINE, customerNames } from "./leak-patterns";
+import { CREDENTIALS, MACHINE, customerNames, maskPublicSlug } from "./leak-patterns";
 
 const ROOT = path.join(import.meta.dir, "..");
 
@@ -102,7 +102,9 @@ function scanText(
     // Fresh regex per file: a caller-supplied /g would carry lastIndex between files.
     const re = new RegExp(pattern.source, pattern.flags.replace("g", ""));
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i] ?? "";
+      // The published `origin` slug is masked before matching — it is public by
+      // definition and the install URLs cannot omit it (see maskPublicSlug).
+      const line = maskPublicSlug(lines[i] ?? "");
       const m = re.exec(line);
       if (!m) continue;
       hits.push({

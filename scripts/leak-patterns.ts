@@ -64,6 +64,48 @@ export const MACHINE: readonly LeakPattern[] = [
 ];
 
 /**
+ * `owner/repo` of `origin` — the PUBLISHED slug, derived from the remote and never
+ * written here.
+ *
+ * WHY THIS EXISTS. `origin`'s owner is public by definition (that is where this code
+ * is published), and `siblingRemoteOwners()` already excludes it for that reason. But
+ * the same string is usually also the operator's local account name, so
+ * `operatorNames()` flags it — and that collision only became visible when something
+ * had to NAME the published repo: `install.sh` and the README carry
+ * `github.com/<owner>/<repo>` install URLs, which cannot work without it. The audit
+ * failed on its own installer.
+ *
+ * So the exception is as narrow as the fact justifying it: only the exact
+ * `<owner>/<repo>` of `origin` is excused, and only where it appears verbatim. The
+ * operator's name anywhere ELSE — a home path, a hyphenated slug, a stray mention —
+ * still hits, which is what the pattern is for. Blind on a clone with no `origin`,
+ * like the customer list; there the mask is empty and nothing is excused.
+ */
+export function publicRepoSlug(): string | undefined {
+  const r = spawnSync("git", ["remote", "get-url", "origin"], { encoding: "utf-8" });
+  if (r.status !== 0) return undefined;
+  const url = (r.stdout ?? "").trim();
+  // git@github.com:owner/repo.git | https://github.com/owner/repo(.git)
+  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i.exec(url);
+  if (!m?.[1] || !m[2]) return undefined;
+  return `${m[1]}/${m[2]}`;
+}
+
+/**
+ * Blank out the published `owner/repo` so the patterns do not fire on it. Callers run
+ * this per line BEFORE matching; the replacement keeps the line's length so reported
+ * column/line numbers stay truthful.
+ */
+export function maskPublicSlug(line: string): string {
+  const slug = SLUG;
+  if (slug === undefined) return line;
+  return line.split(slug).join("\u0000".repeat(slug.length));
+}
+
+/** Resolved once — one `git` call per process, not per line. */
+const SLUG: string | undefined = publicRepoSlug();
+
+/**
  * The operator's own account name, derived at runtime — never written here.
  *
  * It used to be a literal, which meant this file published the very string the audit
