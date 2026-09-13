@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CREDENTIALS, MACHINE, customerNames } from "./leak-patterns";
+import { CREDENTIALS, MACHINE, customerNames, maskPublicSlug } from "./leak-patterns";
 
 const ROOT = path.join(import.meta.dir, "..");
 
@@ -172,7 +172,10 @@ for (const rel of staged) {
   }
 }
 for (const rel of staged) {
-  const body = read(path.join(stage, rel));
+  // Masked exactly as the repository audit masks it: the published `origin` slug is
+  // public by definition, and the README shipped inside the archive carries the
+  // install URL that cannot omit it.
+  const body = maskPublicSlug(read(path.join(stage, rel)));
   // The reason is named; the match is redacted to three characters. A build log that
   // prints the secret in full to prove it found one has published it again.
   for (const { pattern, why } of SECRETS) {

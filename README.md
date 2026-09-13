@@ -8,6 +8,38 @@ AI-DLC v2 실런의 **현황·진행·사용량을 한 화면에서 보는 웹 �
 관측만 한다. 서버는 `localhost` 에만 바인딩된다. 유일하게 쓰는 파일은 크레딧 이력을 담는
 `data/usage.db` 이며 워크스페이스 밖에 있다.
 
+## 설치
+
+### 한 줄 설치 (macOS / Linux)
+
+```bash
+curl -fsSL https://github.com/wowzoo/aidlc-dashboard/releases/latest/download/install.sh | sh
+```
+
+최신 릴리스를 `~/.aidlc-dashboard` 에 풀고, `~/.local/bin/aidlc-dashboard` 실행기를 만들고,
+bun 이 없으면 공식 설치 스크립트를 실행한다(실행 전에 알려준다). 설치 후:
+
+```bash
+aidlc-dashboard                       # 폴더 선택 화면
+aidlc-dashboard ~/path/to/workspace   # 바로 그 트리로
+```
+
+`~/.local/bin` 이 PATH 에 없으면 전체 경로(`~/.aidlc-dashboard/start.sh`)를 안내한다.
+
+**다시 실행하면 그 자리에서 갱신된다.** 수집한 크레딧 이력(`data/usage.db`)은 그대로 보존한다.
+
+조절할 것이 있으면 환경변수로:
+
+| 변수 | 뜻 |
+|---|---|
+| `AIDLC_DIR` | 설치 위치 (기본 `~/.aidlc-dashboard`) |
+| `AIDLC_VERSION` | 버전 고정 (예: `1.7.0`, 기본은 최신) |
+| `AIDLC_NO_BUN=1` | bun 이 없어도 설치하지 않는다 |
+| `AIDLC_NO_BIN=1` | `~/.local/bin` 실행기를 만들지 않는다 |
+
+Windows 는 [Releases](https://github.com/wowzoo/aidlc-dashboard/releases) 에서 zip 을 받아 풀고
+`.\start.cmd` 를 쓴다.
+
 ## 실행
 
 ### 실행 스크립트 (가장 쉬운 방법)
