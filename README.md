@@ -37,7 +37,19 @@ aidlc-dashboard ~/path/to/workspace   # 바로 그 트리로
 | `AIDLC_NO_BUN=1` | bun 이 없어도 설치하지 않는다 |
 | `AIDLC_NO_BIN=1` | `~/.local/bin` 실행기를 만들지 않는다 |
 
-Windows 는 [Releases](https://github.com/wowzoo/aidlc-dashboard/releases) 에서 zip 을 받아 풀고
+### 한 줄 설치 (Windows)
+
+PowerShell 에서:
+
+```powershell
+irm https://github.com/wowzoo/aidlc-dashboard/releases/latest/download/install.ps1 | iex
+```
+
+`irm | iex` 는 메모리에서 실행되므로 서명 없는 `.ps1` 을 막는 실행 정책에 걸리지 않는다.
+`%USERPROFILE%\.aidlc-dashboard` 에 풀고 `%USERPROFILE%\.local\bin\aidlc-dashboard.cmd` 실행기를
+만든다. 환경변수는 위 표와 같다(`$env:AIDLC_DIR` 형태로 지정).
+
+zip 을 직접 받고 싶으면 [Releases](https://github.com/wowzoo/aidlc-dashboard/releases) 에서 받아 풀고
 `.\start.cmd` 를 쓴다.
 
 ## 실행
@@ -155,8 +167,10 @@ bun run src/server.ts --root ~/path/to/ws    # 바로 그 워크스페이스로 
 - **Claude 토큰 패널은 워크스페이스 경로로 트랜스크립트를 찾는다.** 즉 cwd 가 그 워크스페이스인
   상태로 Claude Code 를 실행했을 때만 잡힌다. 다른 디렉터리에서 실행했거나 워크스페이스를
   옮긴 뒤라면 `데이터 없음` 이 된다. 이때는 찾으려던 경로를 화면에 밝힌다.
-- ⚠️**Windows 런처(`start.cmd`/`start.ps1`)는 Windows 에서 실행 검증하지 못했다.** macOS 런처는
-  bash 3.2 더블클릭 경로까지 확인했다.
+- ⚠️**Windows 쪽(`start.cmd`·`start.ps1`·`install.ps1`)은 Windows 에서 실행 검증하지 못했다.**
+  `install.ps1` 은 PowerShell 7 로 문법을 검사하고 macOS 에서 실제로 돌려 최신 릴리스 해석·내려받기
+  ·압축 해제·`data/` 보존·교체·404 실패까지 확인했지만, `cmd.exe` shim 과 실행 정책은 Windows 에서만
+  확인할 수 있다. macOS 런처는 bash 3.2 더블클릭 경로까지 확인했다.
 
 ---
 
