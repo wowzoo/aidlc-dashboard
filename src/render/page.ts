@@ -11,13 +11,17 @@
 
 import { renderTokens } from "../credit/claude/token-view";
 import { renderCredit } from "../credit/view/credit-view";
-import type { DashboardModel } from "../model/types";
+import type { DashboardModel, Locale } from "../model/types";
 import { VERSION } from "../version";
+import { renderBlockerCard } from "./blockers";
 import { esc } from "./common";
 import { renderDeferrals } from "./deferrals";
 import { renderHealth } from "./health";
+import { type Strings, strings } from "./i18n";
+import { DEFAULT_LOCALE } from "./locale";
 import { renderOverview } from "./overview";
 import { renderTimeline } from "./timeline";
+import { warningTextIn } from "./warnings";
 
 const STYLE = `
 :root {
@@ -347,6 +351,8 @@ tr.mx-skip { opacity:.4; } tr.mx-skip td { font-size:var(--fs-1); color:var(--mu
 .blocker-age { margin-left:auto; color:var(--mute); font-size:var(--fs-1); }
 .blocker-q { margin-top:5px; font-size:var(--fs-3); }
 .blocker-path { margin-top:3px; color:var(--mute); font-size:var(--fs-1); word-break:break-all; }
+/* 병목 행의 경로는 /view 링크 — 밑줄 없이 색만으로 눌릴 수 있음을 알린다(.dfr-source 와 동일). */
+.blocker-path a { text-decoration:none; }
 .pill { font-size:var(--fs-1); border-radius:var(--r-pill); padding:1px 7px; border:1px solid currentColor; white-space:nowrap; }
 .pill.has-help { cursor:help; text-decoration:underline dotted; text-underline-offset:2px; }
 .pill.ok { color:var(--ok); } .pill.warn { color:var(--warn); }
@@ -458,11 +464,15 @@ table.tbl td code { white-space:nowrap; }
 .window-toggle a:hover { border-color:var(--accent); color:var(--accent); }
 .window-toggle a[aria-checked="true"] { border-color:var(--accent); background:var(--accent);
   color:var(--bg); font-weight:600; }
+.window-toggle.lang a { padding:2px 9px; font-size:var(--fs-1); }
 footer { color:var(--mute); font-size:var(--fs-1); text-align:center; padding:0 0 26px; }
 `;
 
 /** The refresh poll + stream filter. Kept tiny and dependency-free. */
-const SCRIPT = (pollMs: number) => `
+const SCRIPT = (pollMs: number, s: Strings) => {
+  // JSON.stringify, not quotes: `Couldn't` would otherwise end the JS literal it lands in.
+  const j = (v: string) => JSON.stringify(v);
+  return `
 (function () {
   var wrap = document.getElementById('body-wrap');
   var btn = document.getElementById('reload-btn');
@@ -491,7 +501,7 @@ const SCRIPT = (pollMs: number) => `
       btn.disabled = true;
       btn.setAttribute('aria-busy', 'true');
       var reloadLabel = btn.querySelector('.reload-label');
-      if (reloadLabel) reloadLabel.textContent = '새로고침 중';
+      if (reloadLabel) reloadLabel.textContent = ${j(s.page.jsReloading)};
     }
     try {
       // The single manual control refreshes both credit usage and the workspace.
@@ -516,14 +526,14 @@ const SCRIPT = (pollMs: number) => `
       window.scrollTo(0, y);
       bindFilter();
       if (state) {
-        state.textContent = '갱신 ' + new Date().toLocaleTimeString();
+        state.textContent = ${j(s.page.jsRefreshedPrefix)} + new Date().toLocaleTimeString();
         state.classList.remove('err');
       }
     } catch (e) {
       // Server down, or a sync replacing files mid-read. Say so rather than
       // leaving a stale page that looks current.
       if (state) {
-        state.textContent = '갱신 실패 — 재시도 중';
+        state.textContent = ${j(s.page.jsRefreshFailed)};
         state.classList.add('err');
       }
     } finally {
@@ -533,7 +543,7 @@ const SCRIPT = (pollMs: number) => `
         btn.disabled = false;
         btn.removeAttribute('aria-busy');
         var reloadLabel = btn.querySelector('.reload-label');
-        if (reloadLabel) reloadLabel.textContent = '새로고침';
+        if (reloadLabel) reloadLabel.textContent = ${j(s.page.reloadLabel)};
       }, 300);
     }
   }
@@ -560,12 +570,12 @@ const SCRIPT = (pollMs: number) => `
         if (r.ok) { a.classList.add('opened'); return; }
         return r.json().catch(function () { return {}; }).then(function (j) {
           a.classList.add('failed');
-          a.setAttribute('title', (j && j.error) || ('열기 실패 (' + r.status + ')'));
+          a.setAttribute('title', (j && j.error) || ${j(s.page.jsOpenFailedStatus)}.replace('{status}', r.status));
         });
       })
       .catch(function () {
         a.classList.add('failed');
-        a.setAttribute('title', '열기 실패 — 서버에 닿지 못했다');
+        a.setAttribute('title', ${j(s.page.jsOpenFailedUnreachable)});
       })
       .then(function () {
         a.classList.remove('busy');
@@ -598,11 +608,34 @@ ${
 }
 })();
 `;
+};
 
-function warnings(m: DashboardModel): string {
+/**
+ * Language chips in the header.
+ *
+ * Reuses `.window-toggle` deliberately: the content has the same SHAPE as the trend
+ * window picker — two or three short mutually-exclusive chips in a radiogroup — which is
+ * the test for reaching at an existing class rather than merely sharing a container.
+ * `.lang` only tightens the padding for the header's denser row.
+ *
+ * `?lang=` is a plain link, so this works with JavaScript off, and the server persists
+ * the choice in a cookie — every other link on the page therefore needs no `lang` param,
+ * unlike `?cw=`.
+ */
+function langToggle(current: Locale, s: Strings): string {
+  const chip = (l: Locale, label: string) =>
+    `<a role="radio" aria-checked="${l === current ? "true" : "false"}" href="?lang=${l}">${esc(
+      label,
+    )}</a>`;
+  return `<span class="window-toggle lang" role="radiogroup" aria-label="${esc(
+    s.page.langGroupLabel,
+  )}">${chip("ko", s.page.langKo)}${chip("en", s.page.langEn)}</span>`;
+}
+
+function warnings(m: DashboardModel, s: Strings): string {
   if (m.warnings.length === 0) return "";
-  return `<div class="warnbox"><b>읽기 경고</b><ul>${m.warnings
-    .map((w) => `<li>${esc(w)}</li>`)
+  return `<div class="warnbox"><b>${esc(s.page.warningsHeading)}</b><ul>${m.warnings
+    .map((w) => `<li>${esc(warningTextIn(w, s))}</li>`)
     .join("")}</ul></div>`;
 }
 
@@ -610,49 +643,71 @@ function warnings(m: DashboardModel): string {
  * The refreshable part of the page: everything inside #body-wrap. Served on its
  * own at /api/body so the poll swaps only this.
  *
- * The primary column is usage then the deferral ledger — what the run has spent and
- * what it still owes. The secondary column presents run structure before its timing
- * analysis, so the reader sees what ran before interpreting how long it took.
+ * The primary column leads with what stops the run, then usage, then the deferral
+ * ledger — what is owed now, what the run has spent, what it still owes later. The
+ * secondary column presents run structure before its timing analysis, so the reader
+ * sees what ran before interpreting how long it took.
+ *
+ * Blockers and the deferral ledger are BOTH mounted because they answer different
+ * questions from different files: a blank `[Answer]:` in `*-questions.md` stops the
+ * run now, while `## Assumptions & Open Questions` records debt a later stage owes.
+ * Measured on run C — 0 blockers and 230 open items — so neither count implies the
+ * other and neither panel can stand in for the other.
  */
-export function renderBody(m: DashboardModel): string {
+export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): string {
+  const s = strings(locale);
   // Tag details elements so the poll can restore what the reader had open.
   const keyed = (html: string, prefix: string): string => {
     let i = 0;
     return html.replace(/<details/g, () => `<details data-key="${prefix}-${i++}"`);
   };
-  // Usage leads the primary column, followed by the decisions that explain the
-  // run. Overview cards lead the secondary column and provide context for timing.
-  // Which usage panel renders is resolved during assembly (model.usage), so the
+  // Blockers lead the primary column, then usage, then the decisions the run
+  // deferred. Overview cards lead the secondary column and provide context for
+  // timing. Which usage panel renders is resolved during assembly (model.usage), so the
   // renderer just dispatches on the discriminant — the two panels share the card
   // slot, the `?cw=` window contract and the `credit-*` CSS.
   const usage =
     m.usage.kind === "claude"
-      ? renderTokens(m.usage.tokens, m.usage.tokens.trend.window)
-      : renderCredit(m.usage.credit, m.usage.credit.trend.window);
+      ? renderTokens(m.usage.tokens, m.usage.tokens.trend.window, s)
+      : renderCredit(m.usage.credit, m.usage.credit.trend.window, s);
   // Filtered rather than interpolated: renderHealth's panels are both behind
   // SHOW_ flags, so it emits nothing today and a blank line would be left behind.
   const primary = [
+    keyed(renderBlockerCard(m, s), "b"),
     keyed(usage, "credit"),
-    keyed(renderDeferrals(m), "d"),
-    keyed(renderHealth(m), "h"),
+    keyed(renderDeferrals(m, s), "d"),
+    keyed(renderHealth(m, s), "h"),
   ]
     .filter((part) => part.trim().length > 0)
     .join("\n");
-  return `${warnings(m)}
+  return `${warnings(m, s)}
 <div class="col primary-col">
 ${primary}
 </div>
 <div class="col secondary-col">
-${keyed(renderOverview(m), "o")}
-${keyed(renderTimeline(m), "t")}
+${keyed(renderOverview(m, s), "o")}
+${keyed(renderTimeline(m, s), "t")}
 </div>`;
 }
 
-/** The full document. */
-export function renderPage(m: DashboardModel, pollMs: number): string {
+/**
+ * The full document.
+ *
+ * `locale` threads through every panel via `strings(locale)` and reaches the markup
+ * as `<html lang>` — what a screen reader picks a voice from and what a browser's
+ * translate prompt reads. `langToggle` puts the switch in the header, naming each
+ * language in its own language so a reader who cannot read this page can find the
+ * way out.
+ */
+export function renderPage(
+  m: DashboardModel,
+  pollMs: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const s = strings(locale);
   const title = `AI-DLC · ${m.identity.slug ?? m.identity.record}`;
   return `<!DOCTYPE html>
-<html lang="ko">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -663,22 +718,25 @@ export function renderPage(m: DashboardModel, pollMs: number): string {
 <header class="top">
   <h1>${esc(m.identity.slug ?? m.identity.record)}</h1>
   <span class="path">${esc(m.identity.root)} · space ${esc(m.identity.space)} · harness ${esc(
-    m.identity.harnessDir ?? "미검출",
+    m.identity.harnessDir ?? s.page.harnessNotFound,
   )}</span>
   <nav>
-    <a class="pickbtn" href="/pick">📁 폴더 변경</a>
+    ${langToggle(locale, s)}
+    <a class="pickbtn" href="/pick">${esc(s.page.pickFolder)}</a>
     <button id="reload-btn" class="pickbtn reload" type="button"
-            title="지금 다시 읽기 (r) — SKIP↔EXECUTE 변경처럼 폴링이 놓칠 수 있는 수정을 즉시 반영">
-      <span class="reload-icon" aria-hidden="true">⟳</span><span class="reload-label">새로고침</span>
+            title="${esc(s.page.reloadTitle)}">
+      <span class="reload-icon" aria-hidden="true">⟳</span><span class="reload-label">${esc(
+        s.page.reloadLabel,
+      )}</span>
     </button>
     <span id="poll-state" class="mute">${esc(m.generatedAt)}</span>
   </nav>
 </header>
 <main id="body-wrap">
-${renderBody(m)}
+${renderBody(m, locale)}
 </main>
-<footer>읽기 전용 — 이 대시보드는 워크스페이스에 쓰지 않음. · v${esc(VERSION)}</footer>
-<script>${SCRIPT(pollMs)}</script>
+<footer>${esc(s.page.footer)} · v${esc(VERSION)}</footer>
+<script>${SCRIPT(pollMs, s)}</script>
 </body>
 </html>`;
 }

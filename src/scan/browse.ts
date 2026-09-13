@@ -43,8 +43,11 @@ export interface BrowseResult {
   entries: BrowseEntry[];
   /** True when `dir` itself is a selectable workspace. */
   isWorkspace: boolean;
-  /** Set when the requested path could not be listed. */
+  /** Set when the requested path could not be listed — a CODE plus the OS message, since
+   *  the sentence around it is copy (`render/i18n`) and the message is data. */
   error?: string;
+  /** The OS message behind `error`, when the failure was a listing failure. */
+  browseFailure?: { dir: string; message: string };
 }
 
 /** True when `dir` holds an `aidlc/` subdirectory — i.e. is a workspace root. */
@@ -85,7 +88,7 @@ export function browse(dir: string, showHidden = false): BrowseResult {
     // if home is what already failed.
     if (resolved !== home) {
       const fallback = browse(home, showHidden);
-      return { ...fallback, error: `${resolved} 열기 불가: ${message}` };
+      return { ...fallback, browseFailure: { dir: resolved, message } };
     }
     return {
       dir: resolved,

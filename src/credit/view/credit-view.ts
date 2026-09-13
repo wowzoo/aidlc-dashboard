@@ -13,32 +13,38 @@
  */
 
 import { bar, esc, pill, section, shortTs } from "../../render/common";
+import type { Strings } from "../../render/i18n";
+import type { PollHalt } from "../pipeline/polling-scheduler";
 import type { TrendWindow } from "../trend/trend";
 import type { ParsedUsage } from "../types";
 import type { CreditStatus, CreditViewModel } from "./credit-model";
 import { buildAriaLabel, renderGauge, renderLineChart } from "./svg-chart";
 
-const WINDOW_LABEL: Record<TrendWindow, string> = {
-  "7d": "최근 7일",
-  "30d": "최근 30일",
-  all: "전체 기간",
-};
+/** 문구는 카탈로그(`render/i18n`) 소관 — 여기는 창 순서와 톤만 정한다. */
+function windowLabel(w: TrendWindow, s: Strings): string {
+  return w === "7d"
+    ? s.usage.windowLong7d
+    : w === "30d"
+      ? s.usage.windowLong30d
+      : s.usage.windowLongAll;
+}
 
 /** 창 토글 라디오 정의(표시 순서). */
-const WINDOWS: readonly { w: TrendWindow; label: string }[] = [
-  { w: "7d", label: "7일" },
-  { w: "30d", label: "30일" },
-  { w: "all", label: "전체" },
-];
+const WINDOW_ORDER: readonly TrendWindow[] = ["7d", "30d", "all"];
+
+function windowChipLabel(w: TrendWindow, s: Strings): string {
+  return w === "7d" ? s.usage.window7d : w === "30d" ? s.usage.window30d : s.usage.windowAll;
+}
 
 /** 상태별 배지. host `pill()` 재사용. */
-const STATUS_PILL: Record<CreditStatus, string> = {
-  loading: pill("수집 중", "mute"),
-  ok: pill("정상", "ok"),
-  partial: pill("부분 데이터", "warn"),
-  failure: pill("수집 실패", "bad"),
-  none: pill("데이터 없음", "mute"),
-};
+function statusPill(status: CreditStatus, s: Strings): string {
+  const t = s.usage;
+  if (status === "loading") return pill(t.statusLoading, "mute");
+  if (status === "ok") return pill(t.statusOk, "ok");
+  if (status === "partial") return pill(t.statusPartial, "warn");
+  if (status === "failure") return pill(t.statusFailure, "bad");
+  return pill(t.statusNone, "mute");
+}
 
 /** 숫자 포맷(결측·NaN 은 em dash). */
 function fmtNumber(n: number | null): string {
@@ -67,13 +73,14 @@ export function resolveWindow(cw: string | null | undefined): TrendWindow {
  * `resetDate`는 파싱은 하되 표에 싣지 않는다 — 화면에서 뺀 필드이므로 `ParsedUsage`·저장·추이
  * 에는 그대로 남아 있다.
  */
-function metricsTable(current: ParsedUsage): string {
+function metricsTable(current: ParsedUsage, s: Strings): string {
+  const t = s.usage;
   const rows: [string, string][] = [
-    ["플랜", esc(current.planName ?? "—")],
-    ["누적 사용량", fmtNumber(current.usedAmount)],
-    ["잔량", fmtNumber(current.remainingAmount)],
-    ["플랜 한도", fmtNumber(current.planLimit)],
-    ["사용률", fmtRatio(current.usageRatio)],
+    [t.rowPlan, esc(current.planName ?? "—")],
+    [t.rowUsed, fmtNumber(current.usedAmount)],
+    [t.rowRemaining, fmtNumber(current.remainingAmount)],
+    [t.rowLimit, fmtNumber(current.planLimit)],
+    [t.rowRatio, fmtRatio(current.usageRatio)],
   ];
   const body = rows
     .map(([k, v]) => `<tr><th>${esc(k)}</th><td class="g-n">${v}</td></tr>`)
@@ -82,9 +89,9 @@ function metricsTable(current: ParsedUsage): string {
 }
 
 /** 사용률 진행 막대 + 접근성 progressbar. 계산 불가(null)는 빈 트랙 + 안내. */
-function progressBlock(ratio: number | null): string {
+function progressBlock(ratio: number | null, s: Strings): string {
   const pct = ratio === null ? null : Math.max(0, Math.min(100, ratio * 100));
-  const label = ratio === null ? "사용률 계산 불가" : `사용률 ${fmtRatio(ratio)}`;
+  const label = ratio === null ? s.usage.ratioUnavailable : s.usage.ratioLabel(fmtRatio(ratio));
   const valueNow = pct === null ? "" : ` aria-valuenow="${pct.toFixed(1)}"`;
   return `<div class="credit-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"${valueNow} aria-label="${esc(label)}">
   ${bar(pct)}
@@ -93,10 +100,31 @@ function progressBlock(ratio: number | null): string {
 }
 
 /** 실패 경고 배너(role=alert). 사유·원문 모두 esc. */
-function warningBanner(warning: { raw: string; reason: string }): string {
+function warningBanner(warning: { raw: string; reason: string }, s: Strings): string {
+  const t = s.usage;
   return `<div class="warnbox" role="alert">
-  최신 데이터를 가져오지 못했습니다 (${esc(warning.reason)}). 아래는 마지막 성공값입니다.
-  <details><summary>실패 원문 보기</summary><pre>${esc(warning.raw || "(원문 없음)")}</pre></details>
+  ${esc(t.fetchFailed(warning.reason))}
+  <details><summary>${esc(t.rawSummary)}</summary><pre>${esc(
+    warning.raw || t.rawEmpty,
+  )}</pre></details>
+</div>`;
+}
+
+/**
+ * 자동 수집 중단 고지.
+ *
+ * `warningBanner` 와 **별개 사실**이라 별도 블록이다 — 배너는 "마지막 시도가 실패했다"이고
+ * 이쪽은 "그래서 더 시도하지 않는다"다. 합치면 독자가 화면의 숫자를 아직 갱신되는 값으로 읽고,
+ * 실제로는 영원히 그대로다.
+ */
+function haltNotice(halt: PollHalt, s: Strings): string {
+  const t = s.usage;
+  // 분 **숫자만** 넘긴다 — 단위를 붙이는 것은 카탈로그 소관이다(렌더 모듈의 한국어 리터럴은
+  // `### Page language` 가 막으려는 바로 그 결함이다).
+  const retryEvery = String(Math.max(1, Math.round(halt.retryEveryMs / 60_000)));
+  return `<div class="warnbox" role="status">
+  ${esc(t.pollHalted(String(halt.failures), retryEvery))}
+  ${halt.lastReason === undefined ? "" : `<div class="note">${esc(t.pollHaltedReason(halt.lastReason))}</div>`}
 </div>`;
 }
 
@@ -107,20 +135,24 @@ function warningBanner(warning: { raw: string; reason: string }): string {
  * `header.top nav` 스코프라 이 자리에서는 아무 스타일도 주지 않았고, 그래서 세 창이
  * 맨 링크 세 개로 붙어 "7월 30일"처럼 읽혔다.
  */
-function windowToggle(current: TrendWindow): string {
-  const radios = WINDOWS.map(
-    ({ w, label }) =>
-      `<a role="radio" aria-checked="${w === current ? "true" : "false"}" href="?cw=${w}">${esc(label)}</a>`,
+function windowToggle(current: TrendWindow, s: Strings): string {
+  const radios = WINDOW_ORDER.map(
+    (w) =>
+      `<a role="radio" aria-checked="${w === current ? "true" : "false"}" href="?cw=${w}">${esc(
+        windowChipLabel(w, s),
+      )}</a>`,
   ).join("");
-  return `<div class="window-toggle" role="radiogroup" aria-label="추이 기간 선택">${radios}</div>`;
+  return `<div class="window-toggle" role="radiogroup" aria-label="${esc(
+    s.usage.trendToggleLabel,
+  )}">${radios}</div>`;
 }
 
 /** 추이 패널: 창 토글 + 라인차트(SVG) + 텍스트 요약(접근성 병기). */
-function trendPanel(model: CreditViewModel, window: TrendWindow): string {
-  const chart = renderLineChart(model.trend);
-  const summaryText = buildAriaLabel(model.trend, WINDOW_LABEL[model.trend.window]);
+function trendPanel(model: CreditViewModel, window: TrendWindow, s: Strings): string {
+  const chart = renderLineChart(model.trend, s);
+  const summaryText = buildAriaLabel(model.trend, windowLabel(model.trend.window, s), s);
   return `<div class="credit-trend">
-  ${windowToggle(window)}
+  ${windowToggle(window, s)}
   <div class="credit-chart">${chart}</div>
   <p class="note">${esc(summaryText)}</p>
 </div>`;
@@ -133,44 +165,45 @@ function trendPanel(model: CreditViewModel, window: TrendWindow): string {
  * @param model  u3 소유 뷰모델(assembleCredit 산출).
  * @param window 현재 추이 창(창 토글 aria-checked 표시용).
  */
-export function renderCredit(model: CreditViewModel, window: TrendWindow): string {
+export function renderCredit(model: CreditViewModel, window: TrendWindow, s: Strings): string {
+  const t = s.usage;
   const parts: string[] = [];
 
-  const stalePill = model.freshness.stale ? ` ${pill("오래된 데이터", "warn")}` : "";
-  parts.push(`<div class="credit-head">${STATUS_PILL[model.status]}${stalePill}</div>`);
+  const stalePill = model.freshness.stale ? ` ${pill(t.stalePill, "warn")}` : "";
+  parts.push(`<div class="credit-head">${statusPill(model.status, s)}${stalePill}</div>`);
 
   if (model.status === "loading") {
-    parts.push(`<p class="note" role="status">크레딧 사용량을 처음 수집하고 있습니다.</p>`);
+    parts.push(`<p class="note" role="status">${esc(t.firstCollection)}</p>`);
   }
 
   if (model.status === "none") {
-    parts.push(
-      `<p class="note">아직 수집된 크레딧 데이터가 없습니다. 수집이 진행되면 이 자리에 표시됩니다.</p>`,
-    );
+    parts.push(`<p class="note">${esc(t.noCreditYet)}</p>`);
+  }
+
+  if (model.pollHalt !== null) {
+    parts.push(haltNotice(model.pollHalt, s));
   }
 
   if (model.status === "failure" && model.warning !== null) {
-    parts.push(warningBanner(model.warning));
+    parts.push(warningBanner(model.warning, s));
   }
 
   if (model.freshness.stale) {
-    parts.push(
-      `<p class="note warn">마지막 성공 이후 10분 이상 경과 — 표시값이 최신이 아닐 수 있습니다.</p>`,
-    );
+    parts.push(`<p class="note warn">${esc(t.staleNote)}</p>`);
   }
 
   if (model.current !== null) {
     parts.push(`<div class="credit-current">
-  <div class="credit-gauge">${renderGauge(model.current.usageRatio)}</div>
-  ${metricsTable(model.current)}
+  <div class="credit-gauge">${renderGauge(model.current.usageRatio, s)}</div>
+  ${metricsTable(model.current, s)}
 </div>`);
-    parts.push(progressBlock(model.current.usageRatio));
+    parts.push(progressBlock(model.current.usageRatio, s));
     parts.push(
-      `<p class="note">마지막 성공: ${esc(shortTs(model.lastSuccessAt ?? undefined))}</p>`,
+      `<p class="note">${esc(t.lastSuccess(shortTs(model.lastSuccessAt ?? undefined)))}</p>`,
     );
   }
 
-  parts.push(trendPanel(model, window));
+  parts.push(trendPanel(model, window, s));
 
-  return section("크레딧", parts.join("\n"), "credit");
+  return section(t.creditSection, parts.join("\n"), "credit");
 }

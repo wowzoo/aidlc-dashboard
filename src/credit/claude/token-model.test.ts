@@ -32,6 +32,7 @@ function agg(over: Partial<TranscriptAggregate> = {}): TranscriptAggregate {
     filesCapped: 0,
     malformedLines: 0,
     unreadableFiles: 0,
+    sessionTime: null,
     ...over,
   };
 }
@@ -45,6 +46,77 @@ describe("assembleTokens", () => {
     expect(m.lastActivityAt).toBe("2026-08-25T10:00:00Z");
   });
 
+  test("캐시 적중률의 분모는 프롬프트 세 버킷이다 — output 은 들어가지 않는다", () => {
+    // input 10 + cacheRead 1000 + cacheCreate 50 = 1060, output 100 은 분모 밖.
+    const m = assembleTokens(agg(), "30d");
+    expect(m.cachedPromptRatio).toBeCloseTo(1000 / 1060, 10);
+  });
+
+  test("캐시 생성만 있으면 적중률은 0 이다 — cacheCreate 를 빼면 100% 가 나오던 자리", () => {
+    const m = assembleTokens(
+      agg({ totals: { input: 0, output: 500, cacheRead: 0, cacheCreate: 9000, thinking: 0 } }),
+      "30d",
+    );
+    expect(m.cachedPromptRatio).toBe(0);
+  });
+
+  test("프롬프트 토큰이 없으면 null — 0 으로 단정하지 않는다", () => {
+    const m = assembleTokens(
+      agg({ totals: { input: 0, output: 120, cacheRead: 0, cacheCreate: 0, thinking: 0 } }),
+      "30d",
+    );
+    expect(m.cachedPromptRatio).toBeNull();
+  });
+
+  test("세션 시간이 없으면 null 이고, 상태를 partial 로 만들지 않는다", () => {
+    const m = assembleTokens(agg(), "30d");
+    expect(m.sessionTime).toBeNull();
+    expect(m.status).toBe("ok");
+  });
+
+  test("세션 시간은 초로 환산되고 API 비율을 함께 싣는다", () => {
+    const m = assembleTokens(
+      agg({
+        sessionTime: {
+          sessions: 3,
+          straddling: 0,
+          totalMs: 7_200_000,
+          apiMs: 1_800_000,
+          toolMs: 600_000,
+        },
+      }),
+      "30d",
+    );
+    expect(m.sessionTime).toEqual({
+      sessions: 3,
+      straddling: 0,
+      totalSec: 7200,
+      apiSec: 1800,
+      toolSec: 600,
+      apiRatio: 0.25,
+    });
+  });
+
+  test("걸친 세션은 partial 도 note 도 만들지 않는다 — 결함이 아니라 정상 현상이다", () => {
+    const m = assembleTokens(
+      agg({
+        sessionTime: { sessions: 1, straddling: 4, totalMs: 1000, apiMs: 100, toolMs: 0 },
+      }),
+      "7d",
+    );
+    expect(m.status).toBe("ok");
+    expect(m.notes).toEqual([]);
+    expect(m.sessionTime?.straddling).toBe(4);
+  });
+
+  test("세션 벽시계가 0이면 API 비율은 null — 0 으로 단정하지 않는다", () => {
+    const m = assembleTokens(
+      agg({ sessionTime: { sessions: 1, straddling: 0, totalMs: 0, apiMs: 0, toolMs: 0 } }),
+      "30d",
+    );
+    expect(m.sessionTime?.apiRatio).toBeNull();
+  });
+
   test("메시지가 없으면 none", () => {
     const m = assembleTokens(agg({ messages: 0, daily: [], byModel: [] }), "7d");
     expect(m.status).toBe("none");
@@ -54,13 +126,13 @@ describe("assembleTokens", () => {
   test("디렉터리 미발견 → 시도한 경로를 note 로 밝힌다", () => {
     const m = assembleTokens(agg({ dir: null, messages: 0, triedPath: "/home/x/-ws" }), "30d");
     expect(m.status).toBe("none");
-    expect(m.notes.join(" ")).toContain("/home/x/-ws");
+    expect(m.notes).toEqual([{ code: "no-transcripts", triedPath: "/home/x/-ws" }]);
   });
 
   test("바이트 상한에 걸리면 partial + 과소 집계임을 밝힌다", () => {
     const m = assembleTokens(agg({ filesCapped: 3 }), "all");
     expect(m.status).toBe("partial");
-    expect(m.notes.join(" ")).toContain("과소 집계");
+    expect(m.notes.map((n) => n.code)).toContain("files-capped");
   });
 
   test("전량 상한에 걸려 메시지가 0 이어도 none 이 아니라 partial 이다", () => {
@@ -72,7 +144,7 @@ describe("assembleTokens", () => {
       "30d",
     );
     expect(m.status).toBe("partial");
-    expect(m.notes.join(" ")).toContain("과소 집계");
+    expect(m.notes.map((n) => n.code)).toContain("files-capped");
   });
 
   test("깨진 줄만 있고 메시지가 0 이어도 partial 이다", () => {

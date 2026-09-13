@@ -11,6 +11,7 @@ import type { StageArtifact } from "../scan/artifacts";
 import type { CellState, ConstructionMatrix, ReceiptReason } from "../scan/matrix";
 import type { AidlcState, StageStatus } from "../scan/parser";
 import { bar, esc, pill, section, shortTs } from "./common";
+import type { Strings } from "./i18n";
 
 /** Glyph per stage status, matching the state file's checkbox vocabulary. */
 const STAGE_GLYPH: Record<StageStatus, string> = {
@@ -22,12 +23,12 @@ const STAGE_GLYPH: Record<StageStatus, string> = {
   pending: "·",
 };
 
-function hero(state: AidlcState, identity: DashboardModel["identity"]): string {
+function hero(state: AidlcState, identity: DashboardModel["identity"], s: Strings): string {
   const meta = [identity.scope ?? state.scope, state.projectType, identity.status]
     .filter((x) => x && x.length > 0)
     .join(" · ");
   const now = state.complete
-    ? "완료"
+    ? s.overview.runComplete
     : `${state.currentStageDisplay || "—"}${
         state.activeAgentDisplay ? ` · ${state.activeAgentDisplay}` : ""
       }`;
@@ -38,20 +39,29 @@ function hero(state: AidlcState, identity: DashboardModel["identity"]): string {
   </div>
   ${bar(state.overallPct, "bar-overall")}
   <div class="hero-meta">${esc(meta)}</div>
-  <div class="hero-now"><span class="k">현재</span> ${esc(now)}
+  <div class="hero-now"><span class="k">${esc(s.overview.nowLabel)}</span> ${esc(now)}
     <span class="hero-count">${state.overallDone}/${state.overallTotal} stage</span></div>
-  <div class="hero-meta small">${esc(identity.record)} · 갱신 ${esc(shortTs(state.lastUpdated))}</div>
+  <div class="hero-meta small">${esc(identity.record)} · ${esc(s.overview.updatedLabel)} ${esc(shortTs(state.lastUpdated))}</div>
 </div>`;
 }
 
 /** Badge + title per artifact kind. Questions and the diary are not contract
  *  deliverables, so they are marked rather than hidden — a stalled run is
  *  usually sitting on a question file. */
-const KIND_MARK: Record<StageArtifact["kind"], { mark: string; title: string }> = {
-  artifact: { mark: "📄", title: "산출물" },
-  questions: { mark: "💬", title: "질문/응답" },
-  diary: { mark: "📓", title: "stage 일지" },
+const KIND_MARK: Record<StageArtifact["kind"], string> = {
+  artifact: "📄",
+  questions: "💬",
+  diary: "📓",
 };
+
+/** Titles live in the catalogue; the glyph above does not need translating. */
+function kindTitle(kind: StageArtifact["kind"], s: Strings): string {
+  return kind === "artifact"
+    ? s.overview.kindArtifact
+    : kind === "questions"
+      ? s.overview.kindQuestions
+      : s.overview.kindDiary;
+}
 
 function fileSize(n: number): string {
   if (n <= 0) return "0";
@@ -62,43 +72,47 @@ function fileSize(n: number): string {
 /** One stage row. Files present → a <details> the user can expand; none →
  *  a plain row, so an empty toggle never invites a dead click. */
 function stageRow(
-  s: AidlcState["phases"][number]["stages"][number],
+  st: AidlcState["phases"][number]["stages"][number],
   files: StageArtifact[],
+  s: Strings,
 ): string {
-  const head = `<span class="glyph">${STAGE_GLYPH[s.status]}</span>${esc(s.display)}${
-    s.execute ? "" : ' <span class="skip">SKIP</span>'
+  const head = `<span class="glyph">${STAGE_GLYPH[st.status]}</span>${esc(st.display)}${
+    st.execute ? "" : ' <span class="skip">SKIP</span>'
   }`;
   if (files.length === 0) {
-    return `<li class="stage s-${esc(s.status)} no-art">${head}</li>`;
+    return `<li class="stage s-${esc(st.status)} no-art">${head}</li>`;
   }
   const items = files
     .map((f) => {
-      const k = KIND_MARK[f.kind];
       // Unit prefix is required, not cosmetic: a merged Construction row carries
       // one `code-generation-plan.md` per unit, so the basename alone is ambiguous.
       const unit = f.unit ? `<span class="art-unit">${esc(f.unit)}</span>` : "";
       return `<li class="art a-${f.kind}"><a href="/open?rel=${encodeURIComponent(
         f.rel,
-      )}" class="art-link" title="${esc(f.rel)} — 기본 편집기로 열기"><span class="art-mark" title="${
-        k.title
-      }">${k.mark}</span>${unit}<span class="art-name">${esc(f.name)}</span><span class="art-size">${esc(
+      )}" class="art-link" title="${esc(s.overview.openInEditor(f.rel))}"><span class="art-mark" title="${esc(
+        kindTitle(f.kind, s),
+      )}">${KIND_MARK[f.kind]}</span>${unit}<span class="art-name">${esc(f.name)}</span><span class="art-size">${esc(
         fileSize(f.size),
       )}</span></a></li>`;
     })
     .join("");
-  return `<li class="stage s-${esc(s.status)}"><details class="art-box">
+  return `<li class="stage s-${esc(st.status)}"><details class="art-box">
     <summary>${head}<span class="art-count">${files.length}</span></summary>
     <ul class="arts">${items}</ul>
   </details></li>`;
 }
 
-function phaseBlocks(state: AidlcState, artifacts: DashboardModel["artifacts"]): string {
+function phaseBlocks(
+  state: AidlcState,
+  artifacts: DashboardModel["artifacts"],
+  s: Strings,
+): string {
   const rows = state.phases.map((p) => {
     const count = p.skipped ? "skipped" : `${p.done}/${p.total}`;
     const stages = p.stages
-      .map((s) => {
-        const key = s.bolt ? `construction/${s.bolt}/${s.slug}` : `${p.key}/${s.slug}`;
-        return stageRow(s, artifacts[key] ?? []);
+      .map((st) => {
+        const key = st.bolt ? `construction/${st.bolt}/${st.slug}` : `${p.key}/${st.slug}`;
+        return stageRow(st, artifacts[key] ?? [], s);
       })
       .join("");
     return `<details class="phase"${p.declaredStatus === "Active" ? " open" : ""}>
@@ -112,28 +126,14 @@ function phaseBlocks(state: AidlcState, artifacts: DashboardModel["artifacts"]):
   return rows.join("\n");
 }
 
-/** Cell glyph + tooltip. The tooltip is where `missing` earns its keep. */
-/**
- * What each `unverified` cause means. Split per cause because only ONE of them has a known
- * engine verdict: a row with no `Run floor` fails the engine's exact-match test, so the
- * engine WILL re-run that unit — calling that "not incomplete" would be the same kind of
- * over-claim this cell state exists to avoid.
- */
-const RECEIPT_REASON: Record<ReceiptReason, string> = {
-  "no-run-floor":
-    "산출물은 다 있지만 완료 수령증에 `Run floor` 가 없습니다 — 엔진은 이 유닛을 미완으로 보고 다시 실행합니다. 실제 작업이 끝났는지는 감사 기록만으로 알 수 없습니다(필드 도입 전 원장)",
-  "team-claim":
-    "산출물은 다 있고, 완료 수령증은 claim 파일이 판정합니다 (team 소유) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다. 위의 유닛 진행 표가 권위 있는 값입니다",
-  "wave-fingerprint":
-    "산출물은 다 있고, 완료 수령증은 산출물 지문이 판정합니다 (wave 모드) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다",
-  "ambiguous-floor":
-    "산출물은 다 있고, 같은 시각의 사본 간 경계 때문에 attempt floor 가 재현되지 않습니다 — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다",
-};
-
+/** Cell glyph + tooltip. The tooltip is where `missing` earns its keep — the four
+ *  `unverified` causes each say their own thing, which is why the catalogue keys them
+ *  separately (see the ReceiptReason note in scan/matrix.ts). */
 function cellHtml(
   state: CellState,
   missing: string[],
   present: string[],
+  s: Strings,
   reason?: ReceiptReason,
 ): string {
   const glyph =
@@ -150,27 +150,27 @@ function cellHtml(
               : "·";
   const tip =
     state === "partial"
-      ? `미완: ${missing.join(", ")}`
+      ? s.overview.tipPartial(missing)
       : state === "complete"
-        ? `완료: ${present.join(", ")}`
+        ? s.overview.tipComplete(present)
         : state === "unsettled"
           ? // Artifacts met, receipt missing. The engine treats this as UNCOVERED, so
             // the cell must not read as done — a paused/stale/reopened unit lands here.
-            `산출물은 다 있으나 완료 수령증(UNIT_COMPLETED)이 없습니다 — 일시중지·재개 대기·미승인 상태일 수 있습니다 (파일: ${present.join(", ")})`
+            s.overview.tipUnsettled(present)
           : state === "unverified"
             ? // Not "not done" — "cannot be checked here". Merging this into unsettled put a
               // red cell over every gap in this reader's reproduction of the engine. But the
               // four causes do not agree on the ENGINE's verdict, so each says its own thing:
               // with no `Run floor` the engine's answer is known and it is "uncovered".
-              `${RECEIPT_REASON[reason ?? "no-run-floor"]} (파일: ${present.join(", ")})`
+              s.overview.tipUnverified(reason ?? "no-run-floor", present)
             : state === "n/a"
-              ? `이 유닛 kind 에 계약된 산출물 없음${present.length ? ` (있는 파일: ${present.join(", ")})` : ""}`
-              : "미착수";
+              ? s.overview.tipNotApplicable(present)
+              : s.overview.tipNotStarted;
   // `n/a` needs a class the CSS can target, and "/" is not usable in one.
   return `<td class="mx-cell c-${state === "n/a" ? "na" : state}" title="${esc(tip)}">${glyph}</td>`;
 }
 
-function matrixTable(mx: ConstructionMatrix): string {
+function matrixTable(mx: ConstructionMatrix, s: Strings): string {
   const head = mx.units
     .map(
       (u) =>
@@ -181,34 +181,35 @@ function matrixTable(mx: ConstructionMatrix): string {
     .join("");
 
   const rows = mx.stages
-    .map((s) => {
-      if (!s.execute) {
-        return `<tr class="mx-skip"><th>${esc(s.display)}</th><td colspan="${mx.units.length}">SKIP</td><td class="mx-n">—</td></tr>`;
+    .map((st) => {
+      if (!st.execute) {
+        return `<tr class="mx-skip"><th>${esc(st.display)}</th><td colspan="${mx.units.length}">SKIP</td><td class="mx-n">—</td></tr>`;
       }
-      const cells = s.cells
-        .map((c) => cellHtml(c.state, c.missing, c.present, c.receiptReason))
+      const cells = st.cells
+        .map((c) => cellHtml(c.state, c.missing, c.present, s, c.receiptReason))
         .join("");
       // The denominator counts only units the stage actually contracts something
       // for; n/a units would otherwise read as outstanding work.
-      const applicable = s.total - s.notApplicable;
-      const n = `${s.complete}${s.unsettled ? `+${s.unsettled}▩` : ""}${
-        s.unverified ? `+${s.unverified}▤` : ""
-      }${s.partial ? `+${s.partial}▨` : ""}/${applicable}${
-        s.notApplicable ? ` (–${s.notApplicable})` : ""
+      const applicable = st.total - st.notApplicable;
+      const n = `${st.complete}${st.unsettled ? `+${st.unsettled}▩` : ""}${
+        st.unverified ? `+${st.unverified}▤` : ""
+      }${st.partial ? `+${st.partial}▨` : ""}/${applicable}${
+        st.notApplicable ? ` (–${st.notApplicable})` : ""
       }`;
-      return `<tr><th>${esc(s.display)}${s.provisional ? '<span class="prov-mark" title="진행 중 — 수치는 계속 늘어남">~</span>' : ""}</th>${cells}<td class="mx-n">${esc(n)}</td></tr>`;
+      return `<tr><th>${esc(st.display)}${st.provisional ? `<span class="prov-mark" title="${esc(s.overview.provisionalTip)}">~</span>` : ""}</th>${cells}<td class="mx-n">${esc(n)}</td></tr>`;
     })
     .join("");
 
-  const anyNa = mx.stages.some((s) => s.notApplicable > 0);
-  const anyUnsettled = mx.stages.some((s) => s.unsettled > 0);
-  const anyUnverified = mx.stages.some((s) => s.unverified > 0);
-  const anyNoFloor = mx.stages.some((s) => s.cells.some((c) => c.receiptReason === "no-run-floor"));
+  const anyNa = mx.stages.some((st) => st.notApplicable > 0);
+  const anyUnsettled = mx.stages.some((st) => st.unsettled > 0);
+  const anyUnverified = mx.stages.some((st) => st.unverified > 0);
+  const anyNoFloor = mx.stages.some((st) =>
+    st.cells.some((c) => c.receiptReason === "no-run-floor"),
+  );
+  // The composition is logic and stays here; the fragments are catalogue entries.
   const note = mx.contractAware
-    ? `<p class="note">█ 완료(수령증 확인) · ▨ 착수했으나 산출물 미완(칸에 마우스를 올리면 무엇이 빠졌는지 표시) · · 미착수${
-        anyUnsettled
-          ? " · ▩ 산출물은 다 있으나 완료 수령증(UNIT_COMPLETED) 없음 — 엔진도 이 유닛을 미완으로 봅니다"
-          : ""
+    ? `<p class="note">${esc(s.overview.legendBase)}${
+        anyUnsettled ? esc(s.overview.legendUnsettled) : ""
       }${
         anyUnverified
           ? // The blanket "does not mean incomplete" was wrong for one of the four causes:
@@ -216,19 +217,19 @@ function matrixTable(mx: ConstructionMatrix): string {
             // what is unknown — the engine's own answer, where it is unknown — rather than
             // asserting the work is fine.
             anyNoFloor
-            ? " · ▤ 완료 수령증을 감사 기록만으로 확인할 수 없음 (칸에 마우스를 올려 이유 확인) — 그중 `Run floor` 가 없는 칸은 엔진이 미완으로 보고 다시 실행합니다"
-            : " · ▤ 완료 수령증을 감사 기록만으로 확인할 수 없음 — 미완이라고 판정된 것은 아닙니다 (칸에 마우스를 올려 이유 확인)"
+            ? esc(s.overview.legendUnverifiedNoFloor)
+            : esc(s.overview.legendUnverified)
           : ""
-      }${anyNa ? " · – 이 유닛 kind 에 계약된 산출물 없음(계 열의 괄호는 그 수)" : ""}</p>${
+      }${anyNa ? esc(s.overview.legendNa) : ""}</p>${
         mx.stateCompat === "verified"
           ? ""
-          : '<p class="note warn">state.md 와 harness 의 State Version 을 대조하지 못해 <b>확인되지 않은 계약</b>입니다 — 계약 내용은 그대로 보여주지만, 엔진과 같은 완료 판정이라고 보증하지 않습니다</p>'
+          : // Carries <b> markup, so it is interpolated raw — it is our own copy, not
+            // anything read from the tree.
+            `<p class="note warn">${s.overview.legendUnverifiedContract}</p>`
       }`
-    : `<p class="note warn">stage-graph.json 부재로 계약 판정 불가 — 칸은 파일 유무${
-        // Receipts come from the audit, not the catalogue, so ▩ can appear with no
-        // catalogue at all. Claiming "file presence only" was wrong whenever it did.
-        mx.receiptAware ? "와 완료 수령증" : ""
-      }만 뜻함</p>`;
+    : // Receipts come from the audit, not the catalogue, so ▩ can appear with no
+      // catalogue at all. Claiming "file presence only" was wrong whenever it did.
+      `<p class="note warn">${esc(s.overview.legendNoContract(mx.receiptAware))}</p>`;
 
   const batches = mx.batches.length
     ? `<div class="dag">${mx.batches
@@ -239,11 +240,11 @@ function matrixTable(mx: ConstructionMatrix): string {
               .join("")}</div>`,
         )
         .join('<span class="batch-arrow">→</span>')}</div>
-      <p class="note">배치 안의 유닛은 병렬 가능 — 의존 순서대로 묶인 위상 배치.</p>`
+      <p class="note">${esc(s.overview.batchNote)}</p>`
     : "";
 
   return `<div class="mx-wrap"><table class="mx">
-  <thead><tr><th></th>${head}<th class="mx-n">계</th></tr></thead>
+  <thead><tr><th></th>${head}<th class="mx-n">${esc(s.overview.totalColumn)}</th></tr></thead>
   <tbody>${rows}</tbody>
 </table></div>
 ${note}
@@ -255,7 +256,7 @@ ${batches}`;
  * team/unit-major — an engine-owned projection of receipts, reviews and gates — so it is
  * shown before the disk matrix and labelled as such, rather than being reconstructed.
  */
-function unitProgressTable(up: NonNullable<AidlcState["unitProgress"]>): string {
+function unitProgressTable(up: NonNullable<AidlcState["unitProgress"]>, s: Strings): string {
   const head = up.stageColumns.map((c) => `<th>${esc(c)}</th>`).join("");
   const rows = up.rows
     .map((r) => {
@@ -265,7 +266,10 @@ function unitProgressTable(up: NonNullable<AidlcState["unitProgress"]>): string 
           return `<td class="mx-cell">${st ? esc(STAGE_GLYPH[st] ?? "·") : "·"}</td>`;
         })
         .join("");
-      const owner = r.owner && r.owner !== "-" ? esc(r.owner) : '<span class="mute">미배정</span>';
+      const owner =
+        r.owner && r.owner !== "-"
+          ? esc(r.owner)
+          : `<span class="mute">${esc(s.overview.unassignedOwner)}</span>`;
       return `<tr><th>${esc(r.unit)}</th><td>${owner}</td>${cells}<td class="mx-cell">${
         r.gate ? esc(STAGE_GLYPH[r.gate] ?? "·") : "·"
       }</td>${r.merged ? `<td>${esc(r.merged)}</td>` : ""}</tr>`;
@@ -278,33 +282,30 @@ function unitProgressTable(up: NonNullable<AidlcState["unitProgress"]>): string 
   }</tr></thead>
   <tbody>${rows}</tbody>
 </table></div>
-<p class="note">state.md 의 <code>## Unit Progress</code> — 엔진이 수령증·리뷰·게이트를 반영해 매 <code>next</code> 마다 다시 쓰는
-  <b>권위 있는 값</b>입니다. 손으로 고친 내용은 라우팅·완료 근거가 되지 않습니다. 아래 매트릭스는 디스크에서 재구성한 별개의 진단입니다.</p>`;
+<p class="note">${s.overview.unitProgressNote}</p>`;
 }
 
-export function renderOverview(m: DashboardModel): string {
+export function renderOverview(m: DashboardModel, s: Strings): string {
   const parts: string[] = [];
 
-  parts.push(section("진행 개요", hero(m.state, m.identity)));
-  parts.push(section("Phase · Stage", phaseBlocks(m.state, m.artifacts)));
+  parts.push(section(s.overview.sectionProgress, hero(m.state, m.identity, s)));
+  // "Phase · Stage" is engine vocabulary in both languages, so it is not a catalogue entry.
+  parts.push(section("Phase · Stage", phaseBlocks(m.state, m.artifacts, s)));
 
   const up = m.state.unitProgress;
   if (up && !up.malformed && up.rows.length > 0) {
-    parts.push(section("유닛 진행 (state.md 권위)", unitProgressTable(up), "unit-progress"));
+    parts.push(section(s.overview.sectionUnitProgress, unitProgressTable(up, s), "unit-progress"));
   }
   if (m.matrix) {
-    parts.push(section("Construction 유닛 매트릭스", matrixTable(m.matrix), "matrix"));
+    parts.push(section(s.overview.sectionMatrix, matrixTable(m.matrix, s), "matrix"));
   } else {
     parts.push(
       section(
-        "Construction 유닛 매트릭스",
+        s.overview.sectionMatrix,
         // The absent node is runtime-graph.json's `bolt_dag` (a legacy name for
         // what is really the Unit-of-Work DAG). The field name is kept out of the
         // note: it names a concept — Bolt — that this dashboard never shows.
-        `<p class="note">유닛 정보 없음 — units-generation 미진입. ${pill(
-          "해당 없음",
-          "mute",
-        )}</p>`,
+        `<p class="note">${esc(s.overview.noUnits)} ${pill(s.overview.noUnitsPill, "mute")}</p>`,
       ),
     );
   }

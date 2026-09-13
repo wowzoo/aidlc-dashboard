@@ -22,10 +22,12 @@ describe("workspace explorer roots", () => {
     });
 
     expect(roots.map(({ label, path, kind }) => ({ label, path, kind }))).toEqual([
-      { label: "홈", path: "/Users/me", kind: "home" },
-      { label: "현재", path: "/Users/me/current", kind: "current" },
-      { label: "/", path: "/", kind: "filesystem" },
-      { label: "볼륨 Team", path: "/Volumes/Team", kind: "volume" },
+      // A root's label is a KEY plus the part read off the filesystem — the words live in
+      // render/i18n so the chip can be rendered in either language.
+      { label: { key: "home" }, path: "/Users/me", kind: "home" },
+      { label: { key: "current" }, path: "/Users/me/current", kind: "current" },
+      { label: { key: "raw", name: "/" }, path: "/", kind: "filesystem" },
+      { label: { key: "volume", name: "Team" }, path: "/Volumes/Team", kind: "volume" },
     ]);
     expect(roots.find((root) => root.active)?.path).toBe("/Volumes/Team");
   });

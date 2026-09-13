@@ -24,6 +24,57 @@ import type { CaptureSource, CreditSnapshot, ParsedUsage } from "../types";
 
 const VALID_SOURCES: readonly CaptureSource[] = ["auto", "manual"];
 
+const isFiniteNumber = (v: unknown): boolean => typeof v === "number" && Number.isFinite(v);
+const isString = (v: unknown): boolean => typeof v === "string";
+
+/** `ParsedUsage`의 값 필드와 각 필드의 허용 판정. `null`은 모든 필드에서 허용(결측). */
+const USAGE_FIELDS: Record<string, (v: unknown) => boolean> = {
+  planName: isString,
+  usedAmount: isFiniteNumber,
+  remainingAmount: isFiniteNumber,
+  planLimit: isFiniteNumber,
+  usageRatio: isFiniteNumber,
+  resetDate: isString,
+};
+
+/**
+ * `data` JSON을 `ParsedUsage` 계약으로 정규화한다. 계약을 만족시킬 수 없으면 `null`(손상 행).
+ *
+ * 이 함수가 없던 동안 `isValidSnapshot`은 성공 `data`를 "비-null 객체"로만 봤고, 그래서 `{}`가
+ * 정상으로 통과했다 — 실측: `readAll()`이 그 행을 넘겨주고 `assembleCredit`이 status `ok`로
+ * 판정한 뒤 `renderCredit`의 `fmtNumber`에서 `undefined.toLocaleString()`으로 터졌다. 렌더는
+ * `assemble`의 크레딧 격리 바깥이라 페이지 전체가 500이 됐다. 즉 "크레딧 실패가 대시보드를
+ * 내리지 않는다"(NFR1.5)를 저장 계층의 방어 공백이 뚫은 것이다.
+ *
+ * 없는 필드는 거부가 아니라 `null`(결측)로 채운다. 이 DB는 마이그레이션이 없어서(BR1.3) 필드가
+ * 하나 늘면 그 이전 행 전량이 손상으로 skip될 텐데, 그건 결측 하나를 이력 전체로 갚는 일이다.
+ * 대신 채운 게 하나라도 있으면 `partial=true`로 올린다 — 뷰가 이미 렌더하는 "부분 데이터"
+ * 상태이고, 값이 없는 스냅샷을 `ok`로 보이게 두지 않는다.
+ *
+ * 반면 **타입이 다른 값은 거부한다**(`usedAmount: "500"`). 결측과 달리 이건 이 저장소가 쓴 적 없는
+ * 모양이라 외부 훼손이고, `null`로 바꿔 삼키면 손상을 결측으로 위장하게 된다(BR1.4·BR1.5의
+ * 비파괴 skip이 맞는 처리).
+ */
+function normalizeUsage(value: unknown): ParsedUsage | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const o = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  let filled = false;
+  for (const [field, accepts] of Object.entries(USAGE_FIELDS)) {
+    const v = o[field];
+    if (v === undefined || v === null) {
+      out[field] = null;
+      if (v === undefined) filled = true;
+      continue;
+    }
+    if (!accepts(v)) return null;
+    out[field] = v;
+  }
+  if (o.partial !== undefined && typeof o.partial !== "boolean") return null;
+  out.partial = o.partial === true || filled;
+  return out as unknown as ParsedUsage;
+}
+
 /** DB 행 형태(역직렬화 이전 원시 표현). */
 interface SnapshotRow {
   sequence: number;
@@ -46,7 +97,8 @@ export function isValidSnapshot(value: unknown): value is CreditSnapshot {
   }
   if (typeof o.ok !== "boolean") return false;
   if (o.ok === true) {
-    return typeof o.data === "object" && o.data !== null;
+    // 비-null 객체 검사만으로는 `{}`가 통과한다 — normalizeUsage 헤더의 실측 참조.
+    return normalizeUsage(o.data) !== null;
   }
   return typeof o.raw === "string" && typeof o.reason === "string";
 }
@@ -64,7 +116,9 @@ function toSnapshot(row: SnapshotRow): CreditSnapshot | null {
 
     if (row.ok === 1) {
       if (row.data === null) return null;
-      const data = JSON.parse(row.data) as ParsedUsage;
+      // JSON.parse만 하고 넘기면 필드 계약이 검사되지 않는다 — 정규화를 통과한 값만 쓴다.
+      const data = normalizeUsage(JSON.parse(row.data));
+      if (data === null) return null;
       const candidate: CreditSnapshot = {
         sequence: row.sequence,
         capturedAt: row.capturedAt,

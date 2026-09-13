@@ -1,10 +1,18 @@
 // Workspace picker: explicit path entry, bounded discovery, and one unified
 // cross-platform filesystem explorer.
 
+import type { Locale } from "../model/types";
 import type { BrowseResult } from "../scan/browse";
-import { type ExplorerModel, type ExplorerRootKind, buildExplorer } from "../scan/explorer";
+import {
+  type ExplorerModel,
+  type ExplorerRootKind,
+  type ExplorerRootLabel,
+  buildExplorer,
+} from "../scan/explorer";
 import type { WorkspaceDiscovery, WorkspaceMatch } from "../scan/workspaces";
 import { esc } from "./common";
+import { type Strings, strings } from "./i18n";
+import { DEFAULT_LOCALE } from "./locale";
 
 const PICKER_STYLE = `
 :root {
@@ -84,6 +92,22 @@ h2 { margin:0; font-size:13px; font-weight:650; }
 .workspace-action {
   grid-row:1/3; grid-column:2; align-self:center; color:var(--accent); font-size:11px; font-weight:650;
 }
+/* 카드별 요약 — 서버가 라벨 있는 빈 칸을 그리고 스크립트가 숫자만 채운다. */
+.ws-summary {
+  grid-column:1/-1; min-height:17px; display:flex; align-items:baseline; gap:12px;
+  flex-wrap:wrap; margin-top:2px;
+}
+.ws-metric { display:inline-flex; align-items:baseline; gap:4px; }
+.ws-metric[hidden] { display:none; }
+.ws-metric b { color:var(--fg); font-size:13px; font-weight:650; }
+.ws-metric i { color:var(--mute); font-size:10.5px; font-style:normal; }
+/* 병목이 있으면 그 숫자만 경고색 — 0 은 평범한 사실이라 강조하지 않는다. */
+.ws-m-blockers.has-blockers b { color:var(--bad); }
+.ws-stage {
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--mute); font-size:10.5px;
+}
+.ws-state { color:var(--mute); font-size:10.5px; }
 .current-mark {
   position:absolute; top:8px; right:10px; color:var(--ok); font-size:10px; text-transform:uppercase;
 }
@@ -217,30 +241,49 @@ function browseHref(dir: string, showHidden: boolean): string {
   return `/browse?${query.toString()}`;
 }
 
-function workspaceRow(workspace: WorkspaceMatch, current?: string): string {
+function workspaceRow(workspace: WorkspaceMatch, s: Strings, current?: string): string {
   const isCurrent = current === workspace.path;
+  const t = s.picker;
+  // The summary slots are EMPTY and labelled. The client fetches `/api/summary` per card and
+  // writes only numbers into them, so every word on this card came from the catalogue — the
+  // same split that keeps a locale out of the model.
   return `<article class="workspace${isCurrent ? " current" : ""}">
-  ${isCurrent ? '<span class="current-mark">현재</span>' : ""}
+  ${isCurrent ? `<span class="current-mark">${esc(t.currentMark)}</span>` : ""}
   <a href="/select?dir=${encodeURIComponent(workspace.path)}">
     <span class="workspace-name">${esc(workspace.name)}</span>
-    <span class="workspace-kind">AI-DLC 워크스페이스</span>
+    <span class="workspace-kind">${esc(t.workspaceKind)}</span>
     <span class="workspace-path">${esc(workspace.path)}</span>
-    <span class="workspace-action">열기&nbsp;›</span>
+    <span class="workspace-action">${t.openAction}</span>
+    <span class="ws-summary" data-summary-dir="${esc(workspace.path)}" aria-live="polite">
+      <span class="ws-metric ws-m-pct" hidden><b></b><i>${esc(t.summaryPctLabel)}</i></span>
+      <span class="ws-metric ws-m-blockers" hidden><b></b><i>${esc(
+        t.summaryBlockersLabel,
+      )}</i></span>
+      <span class="ws-stage"></span>
+      <span class="ws-state"></span>
+    </span>
   </a>
 </article>`;
 }
 
-function directoryRow(entry: BrowseResult["entries"][number], showHidden: boolean): string {
+function directoryRow(
+  entry: BrowseResult["entries"][number],
+  showHidden: boolean,
+  s: Strings,
+): string {
+  const t = s.picker;
   const tag = entry.isWorkspace
-    ? '<span class="tag">워크스페이스</span>'
+    ? `<span class="tag">${esc(t.tagWorkspace)}</span>`
     : entry.isAidlcDir
-      ? '<span class="tag">aidlc 트리</span>'
+      ? `<span class="tag">${esc(t.tagAidlcTree)}</span>`
       : entry.unreadable
-        ? '<span class="tag unreadable">읽기 불가</span>'
+        ? `<span class="tag unreadable">${esc(t.tagUnreadable)}</span>`
         : "";
   const select =
     entry.isWorkspace || entry.isAidlcDir
-      ? `<a class="dir-pick" href="/select?dir=${encodeURIComponent(entry.fullPath)}">열기</a>`
+      ? `<a class="dir-pick" href="/select?dir=${encodeURIComponent(entry.fullPath)}">${esc(
+          t.open,
+        )}</a>`
       : "";
 
   return `<li class="dir-row" data-dir-name="${esc(entry.name.toLocaleLowerCase())}">
@@ -269,11 +312,36 @@ function rootIcon(kind: ExplorerRootKind): string {
   }
 }
 
+/** A root chip's words: the synthesised part from the catalogue, the read part verbatim. */
+function rootLabel(label: ExplorerRootLabel, s: Strings): string {
+  const t = s.explorer;
+  switch (label.key) {
+    case "home":
+      return t.rootHome;
+    case "current":
+      return t.rootCurrent;
+    case "volume":
+      return t.volume(label.name);
+    case "mount":
+      return t.mount(label.name);
+    case "media":
+      return t.media(label.name);
+    case "raw":
+      return label.name;
+    default: {
+      const unhandled: never = label;
+      return unhandled;
+    }
+  }
+}
+
 function renderExplorer(
   browse: BrowseResult,
   showHidden: boolean,
   explorer: ExplorerModel,
+  s: Strings,
 ): string {
+  const t = s.picker;
   const roots = explorer.roots
     .map(
       (root) =>
@@ -281,7 +349,7 @@ function renderExplorer(
           browseHref(root.path, showHidden),
         )}"${root.active ? ' aria-current="true"' : ""}>
   <span class="root-icon" aria-hidden="true">${rootIcon(root.kind)}</span>
-  <span>${esc(root.label)}</span>
+  <span>${esc(rootLabel(root.label, s))}</span>
 </a>`,
     )
     .join("");
@@ -296,43 +364,45 @@ function renderExplorer(
     })
     .join("");
   const selectCurrent = browse.isWorkspace
-    ? `<a class="select-current" href="/select?dir=${encodeURIComponent(browse.dir)}">이 폴더 열기</a>`
+    ? `<a class="select-current" href="/select?dir=${encodeURIComponent(browse.dir)}">${esc(
+        t.openThisFolder,
+      )}</a>`
     : "";
   const rows =
     browse.entries.length > 0
       ? `<ul class="dirs">${browse.entries
-          .map((entry) => directoryRow(entry, showHidden))
+          .map((entry) => directoryRow(entry, showHidden, s))
           .join("")}</ul>`
-      : '<p class="empty explorer-empty">표시할 하위 폴더가 없습니다.</p>';
+      : `<p class="empty explorer-empty">${esc(t.explorerEmpty)}</p>`;
 
   return `<section class="section explorer-section" aria-labelledby="explorer-title">
-  <div class="section-head"><h2 id="explorer-title">폴더 탐색</h2></div>
+  <div class="section-head"><h2 id="explorer-title">${esc(t.explorerHeading)}</h2></div>
   <div class="explorer-panel">
-    <nav class="explorer-roots" aria-label="탐색 루트">${roots}</nav>
+    <nav class="explorer-roots" aria-label="${esc(t.explorerRootsLabel)}">${roots}</nav>
     <div class="explorer-location">
-      <nav class="breadcrumbs" aria-label="현재 경로">${breadcrumbs}</nav>
+      <nav class="breadcrumbs" aria-label="${esc(t.breadcrumbLabel)}">${breadcrumbs}</nav>
       <div class="cwd">${esc(browse.dir)}</div>
     </div>
     <div class="explorer-tools">
       <div class="filter-wrap">
-        <label class="field-label sr" for="directory-filter">현재 폴더에서 디렉터리 이름 필터</label>
+        <label class="field-label sr" for="directory-filter">${esc(t.filterLabel)}</label>
         <span class="filter-icon" aria-hidden="true">⌕</span>
         <input id="directory-filter" type="search"
-               placeholder="폴더 이름 필터" autocomplete="off" spellcheck="false">
+               placeholder="${esc(t.filterPlaceholder)}" autocomplete="off" spellcheck="false">
         <button id="clear-directory-filter" class="filter-clear" type="button"
-                aria-label="필터 지우기" title="필터 지우기" hidden>×</button>
+                aria-label="${esc(t.filterClear)}" title="${esc(t.filterClear)}" hidden>×</button>
       </div>
       <div class="explorer-actions">
         ${selectCurrent}
-      <a href="${esc(browseHref(browse.dir, !showHidden))}">${
-        showHidden ? "숨김 폴더 감추기" : "숨김 폴더 보기"
-      }</a>
+      <a href="${esc(browseHref(browse.dir, !showHidden))}">${esc(
+        showHidden ? t.hideHidden : t.showHidden,
+      )}</a>
       </div>
     </div>
     <div class="directory-viewport">
       ${rows}
       <p id="directory-filter-empty" class="empty explorer-empty filter-empty" hidden>
-        일치하는 폴더가 없습니다.
+        ${esc(t.filterNoMatch)}
       </p>
     </div>
   </div>
@@ -345,20 +415,35 @@ export function renderPicker(
   current?: string,
   discovery: WorkspaceDiscovery = EMPTY_DISCOVERY,
   explorer: ExplorerModel = buildExplorer(browse.dir, { activeRoot: current }),
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
+  const s = strings(locale);
+  const t = s.picker;
+  const ex = s.explorer;
+  // The parameterised tips are catalogue sentences called with PLACEHOLDERS, so the client
+  // substitutes values into copy it never composes. JSON.stringify for the same reason
+  // page.ts uses it: an apostrophe in English copy must not terminate the JS literal.
+  const summaryTextJson = JSON.stringify({
+    noRunNone: t.summaryNoRunNone,
+    noRunAmbiguous: t.summaryNoRunAmbiguous,
+    unreadable: t.summaryUnreadable,
+    failed: t.summaryFailed,
+    progressTip: t.summaryProgressTip("{done}", "{total}", "{asOf}"),
+    blockersTip: t.summaryBlockersTip("{asked}"),
+  });
   const workspaces =
     discovery.workspaces.length > 0
       ? `<div class="workspace-list">${discovery.workspaces
-          .map((workspace) => workspaceRow(workspace, current))
+          .map((workspace) => workspaceRow(workspace, s, current))
           .join("")}</div>`
-      : '<p class="empty">검색된 워크스페이스가 없습니다.</p>';
+      : `<p class="empty">${esc(t.noWorkspacesFound)}</p>`;
 
   return `<!DOCTYPE html>
-<html lang="ko">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AI-DLC 워크스페이스 선택</title>
+<title>${esc(t.docTitle)}</title>
 <style>${PICKER_STYLE}</style>
 </head>
 <body>
@@ -366,53 +451,53 @@ export function renderPicker(
   <header class="masthead">
     <div>
       <p class="eyebrow">AI-DLC dashboard</p>
-      <h1>워크스페이스 선택</h1>
+      <h1>${esc(t.heading)}</h1>
     </div>
     <div class="scan-summary">
-      <strong>${discovery.workspaces.length}</strong>개 발견
-      <div>${discovery.scannedDirectories.toLocaleString("ko-KR")}개 폴더 확인</div>
+      <strong>${discovery.workspaces.length}</strong>${esc(t.foundSuffix)}
+      <div>${esc(t.scanned(discovery.scannedDirectories.toLocaleString(locale)))}</div>
     </div>
   </header>
 
   <main>
-    ${renderExplorer(browse, showHidden, explorer)}
+    ${renderExplorer(browse, showHidden, explorer, s)}
 
     <section class="section" aria-labelledby="manual-title">
-      <div class="section-head"><h2 id="manual-title">경로로 열기</h2></div>
-      ${browse.error ? `<p class="notice" role="alert">${esc(browse.error)}</p>` : ""}
+      <div class="section-head"><h2 id="manual-title">${esc(t.manualHeading)}</h2></div>
+      ${
+        // A listing failure is a code plus the OS message; the sentence is ours.
+        browse.browseFailure
+          ? `<p class="notice" role="alert">${esc(
+              ex.browseFailed(browse.browseFailure.dir, browse.browseFailure.message),
+            )}</p>`
+          : browse.error
+            ? `<p class="notice" role="alert">${esc(browse.error)}</p>`
+            : ""
+      }
       <form class="manual-form" action="/select" method="get">
-        <label class="field-label" for="manual-dir">워크스페이스 경로</label>
+        <label class="field-label" for="manual-dir">${esc(t.manualLabel)}</label>
         <input id="manual-dir" name="dir"
                placeholder="/Users/me/Development/project"
                value="${browse.isWorkspace ? esc(browse.dir) : ""}"
                autocomplete="off" spellcheck="false">
-        <button type="submit">워크스페이스 열기</button>
+        <button type="submit">${esc(t.manualButton)}</button>
       </form>
-      <p class="field-note"><code>aidlc/</code> 폴더가 있는 루트 경로 · <code>~</code> 사용 가능</p>
+      <p class="field-note">${t.manualNote}</p>
     </section>
 
     <section class="section" aria-labelledby="found-title">
       <div class="section-head">
-        <h2 id="found-title">찾은 워크스페이스</h2>
+        <h2 id="found-title">${esc(t.foundHeading)}</h2>
         <a id="rescan-link" class="quiet-link rescan-link" href="/pick">
-          <span class="rescan-icon" aria-hidden="true">↻</span><span>다시 검색</span>
+          <span class="rescan-icon" aria-hidden="true">↻</span><span>${esc(t.rescan)}</span>
         </a>
       </div>
       ${workspaces}
-      ${
-        discovery.truncated
-          ? '<p class="truncated">검색 한도에 도달했습니다. 위에서 경로를 직접 지정할 수 있습니다.</p>'
-          : ""
-      }
+      ${discovery.truncated ? `<p class="truncated">${esc(t.truncated)}</p>` : ""}
     </section>
   </main>
 
-  ${
-    current
-      ? `<footer class="footer">현재 워크스페이스 · <code>${esc(current)}</code> ·
-         <a href="/">대시보드로 돌아가기</a></footer>`
-      : ""
-  }
+  ${current ? `<footer class="footer">${t.footer(esc(current))}</footer>` : ""}
 </div>
 <script>
 const rescan = document.getElementById("rescan-link");
@@ -452,6 +537,69 @@ clearDirectoryFilter?.addEventListener("click", () => {
   applyDirectoryFilter();
   directoryFilter.focus();
 });
+
+// Per-card summaries, fetched after paint. Discovery already walked up to 5,000
+// directories to draw this list, so nothing here may delay it further — the labels are
+// on screen from the first byte and the numbers arrive as they land.
+const SUMMARY_TEXT = ${summaryTextJson};
+const summarySlots = [...document.querySelectorAll(".ws-summary")];
+
+function fillSummary(slot, data) {
+  const pct = slot.querySelector(".ws-m-pct");
+  const blockers = slot.querySelector(".ws-m-blockers");
+  const stage = slot.querySelector(".ws-stage");
+  const state = slot.querySelector(".ws-state");
+  if (data.kind === "no-run") {
+    state.textContent =
+      data.reason === "ambiguous" ? SUMMARY_TEXT.noRunAmbiguous : SUMMARY_TEXT.noRunNone;
+    return;
+  }
+  if (data.kind !== "ok") {
+    state.textContent = data.kind === "unreadable" ? SUMMARY_TEXT.unreadable : SUMMARY_TEXT.failed;
+    return;
+  }
+  const p = data.progress;
+  const b = data.blockers;
+  pct.querySelector("b").textContent = p.pct + "%";
+  // The two numbers come from different sources with different freshness, so each says
+  // where it came from rather than letting the card average them into one figure.
+  pct.title = SUMMARY_TEXT.progressTip
+    .replace("{done}", p.done)
+    .replace("{total}", p.total)
+    .replace("{asOf}", p.asOf || "—");
+  pct.hidden = false;
+  blockers.querySelector("b").textContent = String(b.count);
+  blockers.title = SUMMARY_TEXT.blockersTip.replace("{asked}", b.asked);
+  blockers.classList.toggle("has-blockers", b.count > 0);
+  blockers.hidden = false;
+  stage.textContent = p.currentStageDisplay || p.currentStage;
+}
+
+async function loadSummaries() {
+  const queue = summarySlots.slice();
+  // Four at a time: each read is bounded (see scan/summary.ts) but they are synchronous on
+  // one event loop, so an unbounded fan-out would make the server answer the LAST card no
+  // sooner while delaying everything else on the page.
+  const lanes = Math.min(4, queue.length);
+  await Promise.all(
+    Array.from({ length: lanes }, async () => {
+      while (queue.length > 0) {
+        const slot = queue.shift();
+        try {
+          const res = await fetch(
+            "/api/summary?dir=" + encodeURIComponent(slot.dataset.summaryDir),
+            { cache: "no-store" },
+          );
+          fillSummary(slot, res.ok ? await res.json() : { kind: "failed" });
+        } catch {
+          fillSummary(slot, { kind: "failed" });
+        }
+      }
+    }),
+  );
+}
+
+loadSummaries();
 </script>
 </body>
 </html>`;
@@ -462,6 +610,7 @@ export function renderNoRoot(
   browse: BrowseResult,
   showHidden: boolean,
   discovery?: WorkspaceDiscovery,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return renderPicker(browse, showHidden, undefined, discovery);
+  return renderPicker(browse, showHidden, undefined, discovery, undefined, locale);
 }

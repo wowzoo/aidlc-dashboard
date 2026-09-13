@@ -201,6 +201,68 @@ describe("SnapshotStore 방어적 역직렬화", () => {
     expect(row.n).toBe(4);
   });
 
+  test("case5c: data 필드 계약 — 결측은 null 정규화 + partial, 타입 불일치는 손상 skip", () => {
+    // 회귀: `data` 를 "비-null 객체"로만 검사하던 동안 `{}` 가 정상으로 통과해
+    // renderCredit 의 fmtNumber 에서 `undefined.toLocaleString()` 으로 페이지 전체가
+    // 500 이 됐다(NFR1.5 위반). 저장 계층에서 계약을 세우는 것이 그 구멍의 수선이다.
+    const dbPath = tmpDbPath();
+    const store = new SnapshotStore(dbPath);
+    store.init();
+    store.append(success(1, "2026-08-16T10:00:00.000Z"));
+
+    const raw = new Database(dbPath);
+    const insert = raw.query(
+      "INSERT INTO credit_snapshots (sequence, capturedAt, source, ok, data, raw, reason) VALUES (?,?,?,?,?,?,?)",
+    );
+    // (a) 필드가 하나도 없는 객체 → 거부가 아니라 전 필드 결측 + partial 로 정규화.
+    //     마이그레이션이 없는 DB(BR1.3)에서 필드 추가가 이력 전량을 날리지 않게 하는 쪽.
+    insert.run(2, "2026-08-16T11:00:00.000Z", "auto", 1, "{}", null, null);
+    // (b) 타입 불일치 → 이 저장소가 쓴 적 없는 모양이므로 손상 skip.
+    insert.run(
+      3,
+      "2026-08-16T12:00:00.000Z",
+      "auto",
+      1,
+      JSON.stringify({ ...success(3, "x").data, usedAmount: "500" }),
+      null,
+      null,
+    );
+    // (c) 객체가 아닌 data → 손상 skip.
+    insert.run(4, "2026-08-16T13:00:00.000Z", "auto", 1, "[1,2,3]", null, null);
+    raw.close();
+
+    let all: CreditSnapshot[] = [];
+    expect(() => {
+      all = store.readAll();
+    }).not.toThrow();
+    expect(all.map((s) => s.sequence)).toEqual([1, 2]);
+
+    const normalized = all[1];
+    expect(normalized?.ok).toBe(true);
+    if (normalized?.ok) {
+      expect(normalized.data.usedAmount).toBeNull();
+      expect(normalized.data.planName).toBeNull();
+      // 결측을 채웠으므로 ok 가 아니라 "부분 데이터"로 보여야 한다.
+      expect(normalized.data.partial).toBe(true);
+    }
+
+    // 손상 행도 물리 삭제되지 않는다(비파괴 skip).
+    const check = new Database(dbPath);
+    const row = check.query("SELECT COUNT(*) AS n FROM credit_snapshots").get() as { n: number };
+    check.close();
+    expect(row.n).toBe(4);
+  });
+
+  test("case5d: isValidSnapshot 은 성공 data 의 필드 타입까지 본다", () => {
+    const base = { sequence: 1, capturedAt: "2026-08-16T10:00:00.000Z", source: "auto", ok: true };
+    // 정규화 가능한 모양은 통과(결측은 결측으로 읽힌다).
+    expect(isValidSnapshot({ ...base, data: {} })).toBe(true);
+    // 정규화 불가한 모양은 거부.
+    expect(isValidSnapshot({ ...base, data: { usedAmount: "500" } })).toBe(false);
+    expect(isValidSnapshot({ ...base, data: { partial: "no" } })).toBe(false);
+    expect(isValidSnapshot({ ...base, data: [] })).toBe(false);
+  });
+
   test("case5b: latest()도 손상 최상단 행을 skip하고 다음 유효 행 반환, 무예외", () => {
     const dbPath = tmpDbPath();
     const store = new SnapshotStore(dbPath);

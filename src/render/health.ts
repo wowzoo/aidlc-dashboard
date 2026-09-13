@@ -5,6 +5,7 @@
 import type { DashboardModel } from "../model/types";
 import type { DiaryRecord } from "../scan/memory-diary";
 import { esc, pill, section, shortTs } from "./common";
+import type { Strings } from "./i18n";
 
 function diaryWhere(record: DiaryRecord): string {
   return record.unit ? `${record.unit} / ${record.stage}` : record.stage;
@@ -16,72 +17,50 @@ interface DiaryKind {
   tooltip: string;
 }
 
-function diaryKind(record: DiaryRecord): DiaryKind {
+function diaryKind(record: DiaryRecord, s: Strings): DiaryKind {
+  const t = s.health;
   if (record.axis === "deviations") {
-    return {
-      label: "계획 변경",
-      tone: "warn",
-      tooltip: "실행 중 원래 계획에서 달라진 내용과 그 이유를 기록한 항목",
-    };
+    return { label: t.kindDeviation, tone: "warn", tooltip: t.kindDeviationTip };
   }
   if (record.axis === "tradeoffs") {
-    return {
-      label: "선택 근거",
-      tone: "ok",
-      tooltip: "여러 대안 사이에서 무엇을 얻고 포기하며 선택했는지 기록한 항목",
-    };
+    return { label: t.kindTradeoff, tone: "ok", tooltip: t.kindTradeoffTip };
   }
   if (record.axis === "interpretations") {
-    return {
-      label: "해석",
-      tone: "mute",
-      tooltip: "모호한 요구나 지시를 어떤 의미로 이해했는지 기록한 항목",
-    };
+    return { label: t.kindInterpretation, tone: "mute", tooltip: t.kindInterpretationTip };
   }
   if (record.questionStatus === "resolved") {
-    return {
-      label: "해결됨",
-      tone: "ok",
-      tooltip: "이전에 열린 질문이나 이슈가 해결되었음을 표시한 항목",
-    };
+    return { label: t.kindResolved, tone: "ok", tooltip: t.kindResolvedTip };
   }
   if (record.questionStatus === "followUp") {
-    return {
-      label: "후속 확인",
-      tone: "warn",
-      tooltip: "아직 확인하거나 결정해야 할 작업이 남은 항목",
-    };
+    return { label: t.kindFollowUp, tone: "warn", tooltip: t.kindFollowUpTip };
   }
-  return {
-    label: "참고",
-    tone: "mute",
-    tooltip: "열린 질문이지만 후속 조치나 해결 여부가 명시되지 않은 항목",
-  };
+  return { label: t.kindNote, tone: "mute", tooltip: t.kindNoteTip };
 }
 
-function diaryItem(record: DiaryRecord): string {
-  const kind = diaryKind(record);
+function diaryItem(record: DiaryRecord, s: Strings): string {
+  const kind = diaryKind(record, s);
   const text = record.text.length > 320 ? `${record.text.slice(0, 320)}…` : record.text;
   return `<li class="diary-item">
   <div class="diary-meta">${pill(kind.label, kind.tone, kind.tooltip)}
     <span class="diary-where">${esc(diaryWhere(record))}</span>
     <span class="diary-time">${esc(shortTs(record.ts))}</span>
     <a class="diary-source" href="/open?rel=${encodeURIComponent(record.rel)}" title="${esc(
-      record.rel,
-    )} 열기">원문</a>
+      s.health.openTip(record.rel),
+    )}">${esc(s.health.sourceLink)}</a>
   </div>
   <div class="diary-text">${esc(text)}</div>
 </li>`;
 }
 
-function diaryList(records: DiaryRecord[], visible: number): string {
-  if (records.length === 0) return `<p class="note">기록 없음.</p>`;
+function diaryList(records: DiaryRecord[], visible: number, s: Strings): string {
+  if (records.length === 0) return `<p class="note">${esc(s.health.noRecords)}</p>`;
   const shown = records.slice(0, visible);
   const rest = records.slice(visible);
-  return `<ul class="diary-list">${shown.map(diaryItem).join("")}</ul>${
+  const item = (r: DiaryRecord) => diaryItem(r, s);
+  return `<ul class="diary-list">${shown.map(item).join("")}</ul>${
     rest.length > 0
-      ? `<details class="diary-more"><summary>나머지 ${rest.length}건</summary>
-  <ul class="diary-list">${rest.map(diaryItem).join("")}</ul></details>`
+      ? `<details class="diary-more"><summary>${esc(s.health.more(rest.length))}</summary>
+  <ul class="diary-list">${rest.map(item).join("")}</ul></details>`
       : ""
   }`;
 }
@@ -96,7 +75,7 @@ interface DiaryStageRollup {
   latest: string;
 }
 
-function diaryStageTable(records: DiaryRecord[]): string {
+function diaryStageTable(records: DiaryRecord[], s: Strings): string {
   const grouped = new Map<string, DiaryStageRollup>();
   for (const record of records) {
     const key = `${record.phase}/${record.unit ?? ""}/${record.stage}`;
@@ -130,18 +109,24 @@ function diaryStageTable(records: DiaryRecord[]): string {
   <td class="g-n">${row.note || ""}</td><td class="g-n">${total}</td></tr>`;
     })
     .join("");
-  return `<details class="diary-audit"><summary>Stage별 전체 기록 · 정규화 ${records.length}건</summary>
+  const t = s.health;
+  return `<details class="diary-audit"><summary>${esc(t.stageRollup(records.length))}</summary>
   <div class="diary-table-wrap"><table class="tbl diary-table">
-    <thead><tr><th>stage</th><th>결정</th><th>변경</th><th>후속</th><th>해결</th><th>참고</th><th>계</th></tr></thead>
+    <thead><tr><th>${esc(t.colStage)}</th><th>${esc(t.colDecision)}</th><th>${esc(
+      t.colDeviation,
+    )}</th><th>${esc(t.colFollowUp)}</th><th>${esc(t.colResolved)}</th><th>${esc(
+      t.colNote,
+    )}</th><th>${esc(t.colTotal)}</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>
 </details>`;
 }
 
-function diaryBody(m: DashboardModel): string {
+function diaryBody(m: DashboardModel, s: Strings): string {
+  const t = s.health;
   const d = m.diaries;
-  if (d.stages.length === 0) return `<p class="note">stage 일지(memory.md) 없음.</p>`;
-  if (d.records.length === 0) return `<p class="note">기록된 결정이나 후속 이슈 없음.</p>`;
+  if (d.stages.length === 0) return `<p class="note">${esc(t.noDiaryFiles)}</p>`;
+  if (d.records.length === 0) return `<p class="note">${esc(t.noDiaryRecords)}</p>`;
 
   const newest = (records: DiaryRecord[]) => [...records].reverse();
   const followUps = newest(
@@ -162,43 +147,39 @@ function diaryBody(m: DashboardModel): string {
   const kpis = `<div class="diary-stats">
   <div class="diary-stat ${followUps.length > 0 ? "warn" : "ok"}"><span class="diary-stat-n">${
     followUps.length
-  }</span><span class="diary-stat-l">후속 확인</span></div>
-  <div class="diary-stat ok"><span class="diary-stat-n">${resolved.length}</span><span class="diary-stat-l">해결 기록</span></div>
-  <div class="diary-stat"><span class="diary-stat-n">${deviations.length}</span><span class="diary-stat-l">계획 변경</span></div>
-  <div class="diary-stat"><span class="diary-stat-n">${decisions.length}</span><span class="diary-stat-l">결정 근거</span></div>
+  }</span><span class="diary-stat-l">${esc(t.statFollowUp)}</span></div>
+  <div class="diary-stat ok"><span class="diary-stat-n">${resolved.length}</span><span class="diary-stat-l">${esc(t.statResolved)}</span></div>
+  <div class="diary-stat"><span class="diary-stat-n">${deviations.length}</span><span class="diary-stat-l">${esc(t.statDeviation)}</span></div>
+  <div class="diary-stat"><span class="diary-stat-n">${decisions.length}</span><span class="diary-stat-l">${esc(t.statDecision)}</span></div>
 </div>`;
 
   const followUpBody =
     followUps.length > 0
-      ? diaryList(followUps, 6)
-      : `<p class="note">${pill(
-          "정리됨",
-          "ok",
-          "해결 표시 없이 남아 있는 후속 확인 후보가 없음을 의미",
-        )} 해결 표시 없이 남은 후속 후보 없음.</p>`;
+      ? diaryList(followUps, 6, s)
+      : `<p class="note">${pill(t.tidyPill, "ok", t.tidyPillTip)} ${esc(t.tidyNote)}</p>`;
 
   return `${kpis}
 <div class="diary-focus">
-  <h3>후속 확인 후보</h3>
+  <h3>${esc(t.headingFollowUp)}</h3>
   ${followUpBody}
 </div>
 <div class="diary-columns">
-  <div class="diary-group"><h3>최근 결정</h3>${diaryList(decisions, 4)}</div>
-  <div class="diary-group"><h3>최근 계획 변경</h3>${diaryList(deviations, 4)}</div>
+  <div class="diary-group"><h3>${esc(t.headingRecentDecisions)}</h3>${diaryList(decisions, 4, s)}</div>
+  <div class="diary-group"><h3>${esc(t.headingRecentDeviations)}</h3>${diaryList(deviations, 4, s)}</div>
 </div>
 ${
   resolved.length > 0
-    ? `<details class="diary-resolved"><summary>해결 기록 ${resolved.length}건</summary>${diaryList(
-        resolved,
-        6,
-      )}</details>`
+    ? `<details class="diary-resolved"><summary>${esc(
+        t.resolvedRecords(resolved.length),
+      )}</summary>${diaryList(resolved, 6, s)}</details>`
     : ""
 }
-${diaryStageTable(d.records)}`;
+${diaryStageTable(d.records, s)}`;
 }
 
-function streamBody(m: DashboardModel): string {
-  if (m.recentEvents.length === 0) return `<p class="note">감사 기록 비어 있음.</p>`;
+function streamBody(m: DashboardModel, s: Strings): string {
+  const t = s.health;
+  if (m.recentEvents.length === 0) return `<p class="note">${esc(t.emptyLedger)}</p>`;
 
   const opts = m.eventCounts
     .map(([k, v]) => `<option value="${esc(k)}">${esc(k)} (${v})</option>`)
@@ -216,14 +197,17 @@ function streamBody(m: DashboardModel): string {
     )
     .join("\n");
 
+  const shards = new Set(m.recentEvents.map((e) => e.shard)).size;
   return `<div class="filter-row">
-  <label>종류 <select id="ev-filter"><option value="">전체 (${m.totalEvents}건)</option>${opts}</select></label>
-  <span class="mute">최근 ${m.recentEvents.length}건 표시 · 전체 ${m.totalEvents}건 · shard ${
-    m.health.hooks.length ? "" : ""
-  }${esc(String(new Set(m.recentEvents.map((e) => e.shard)).size))}개</span>
+  <label>${esc(t.filterLabel)} <select id="ev-filter"><option value="">${esc(
+    t.filterAll(m.totalEvents),
+  )}</option>${opts}</select></label>
+  <span class="mute">${esc(t.streamMeta(m.recentEvents.length, m.totalEvents, shards))}</span>
 </div>
 <table class="tbl stream" id="ev-table">
-  <thead><tr><th>시각</th><th>이벤트</th><th>stage / unit</th><th>내용</th></tr></thead>
+  <thead><tr><th>${esc(t.colTime)}</th><th>${esc(t.colEvent)}</th><th>${esc(
+    t.colStageUnit,
+  )}</th><th>${esc(t.colDetail)}</th></tr></thead>
   <tbody>${rows}</tbody>
 </table>`;
 }
@@ -251,9 +235,9 @@ function streamBody(m: DashboardModel): string {
 const SHOW_STREAM = false;
 const SHOW_DIARY = false;
 
-export function renderHealth(m: DashboardModel): string {
+export function renderHealth(m: DashboardModel, s: Strings): string {
   return [
-    ...(SHOW_DIARY ? [section("결정과 이슈", diaryBody(m), "decisions")] : []),
-    ...(SHOW_STREAM ? [section("감사 원장", streamBody(m), "stream")] : []),
+    ...(SHOW_DIARY ? [section(s.health.sectionDiary, diaryBody(m, s), "decisions")] : []),
+    ...(SHOW_STREAM ? [section(s.health.sectionStream, streamBody(m, s), "stream")] : []),
   ].join("\n");
 }

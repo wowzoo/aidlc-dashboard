@@ -15,14 +15,22 @@ import { projectSlug } from "../credit/claude/transcript-reader";
 import { NoRunError, assemble } from "../model/assemble";
 import { dur, hours } from "../render/common";
 import { renderHealth } from "../render/health";
+import { strings } from "../render/i18n";
+
+const KO = strings("ko");
 import { renderBody, renderPage } from "../render/page";
 import { renderPicker } from "../render/picker";
 import { listStageArtifacts } from "../scan/artifacts";
 import { browse, resolveWorkspace } from "../scan/browse";
 import { openArtifact } from "../scan/open-file";
 import { findHarnessDir } from "../scan/stage-catalog";
+import { MAX_VIEW_BYTES, readArtifactSource } from "../scan/view-file";
 
 const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+
+/** Warning CODES, which is what these tests assert on. They used to substring-match the
+ *  Korean sentence, so rewording broke the suite while a wrong code passed silently. */
+const codes = (m: { warnings: { code: string }[] }): string[] => m.warnings.map((w) => w.code);
 
 describe("assemble on the fixture workspace", () => {
   const m = assemble(FIXTURE);
@@ -259,9 +267,11 @@ describe("assemble on the fixture workspace", () => {
   test("flags the stale runtime-graph and quantifies the drift", () => {
     const g = m.provenance["runtime-graph"];
     expect(g.stale).toBe(true);
-    expect(g.staleReason).toContain("뒤처짐");
-    // The graph holds 1 firing; the audit holds 3 → 2 missing.
-    expect(g.staleReason).toContain("2건");
+    // Code and facts, not a sentence — the graph holds 1 firing, the audit 3 → 2 missing.
+    expect(g.staleReason).toMatchObject({
+      code: "graph-behind",
+      sensorDrift: { fired: 3, missing: 2 },
+    });
   });
 
   test("does NOT flag state.md merely for lagging the audit", () => {
@@ -362,32 +372,32 @@ describe("render", () => {
       };
 
       // Neither field: silent.
-      expect(assemble(root).warnings.some((w) => w.includes("Unit Progress"))).toBe(false);
+      expect(codes(assemble(root)).some((c) => c.startsWith("unit-progress"))).toBe(false);
       // `solo` + `unit-major` is a NORMAL run with no such table. It warned when the
       // condition was an OR, which told a correctly configured run it was missing one.
       expect(
         withFields(
           "\n- **Unit Ownership**: solo\n- **Construction Iteration**: unit-major",
-        ).warnings.some((w) => w.includes("절이 없습니다")),
+        ).warnings.some((w) => w.code === "unit-progress-missing"),
       ).toBe(false);
       // `team` without `unit-major` is the misconfiguration, and gets its own line.
       expect(
         withFields(
           "\n- **Unit Ownership**: team\n- **Construction Iteration**: stage-major",
-        ).warnings.some((w) => w.includes("unit-major 가 아닙니다")),
+        ).warnings.some((w) => w.code === "team-without-unit-major"),
       ).toBe(true);
       // Both, no table: the authority is missing and the matrix is only a reconstruction.
       const teamOnly = withFields(
         "\n- **Unit Ownership**: team\n- **Construction Iteration**: unit-major",
       );
-      expect(teamOnly.warnings.find((w) => w.includes("절이 없습니다"))).toContain("Unit Progress");
+      expect(codes(teamOnly)).toContain("unit-progress-missing");
       // Both, WITH the table: parsed and rendered as the authority above the matrix.
       const withTable = withFields(
         "\n- **Unit Ownership**: team\n- **Construction Iteration**: unit-major",
         "\n## Unit Progress\n\n| unit | owner | code-generation | gate |\n| --- | --- | --- | --- |\n| PU-A-core | jiho | [x] | [x] |\n",
       );
       expect(withTable.state.unitProgress?.rows[0]?.owner).toBe("jiho");
-      expect(withTable.warnings.some((w) => w.includes("절이 없습니다"))).toBe(false);
+      expect(codes(withTable)).not.toContain("unit-progress-missing");
       expect(renderBody(withTable)).toContain("유닛 진행 (state.md 권위)");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -409,8 +419,8 @@ describe("render", () => {
         'export const CURRENT_STATE_VERSION = "9";\n',
       );
       const m = assemble(root);
-      const warn = m.warnings.find((w) => w.includes("State Version 7"))!;
-      expect(warn).toContain("harness 는 9");
+      const warn = m.warnings.find((w) => w.code === "state-version-mismatch");
+      expect(warn).toMatchObject({ stateVersion: "7", harnessVersion: "9" });
       expect(m.matrix?.contractAware).toBe(false);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -433,7 +443,7 @@ describe("render", () => {
         fs.readFileSync(sp, "utf-8").replace("- **State Version**: 7", "- **State Version**: "),
       );
       const m = assemble(root);
-      expect(m.warnings.some((w) => w.includes("State Version 을 읽을 수 없습니다"))).toBe(true);
+      expect(codes(m)).toContain("state-version-unreadable");
       // Two axes: the contract is still shown, the engine-equivalence claim is withheld.
       expect(m.matrix?.contractAware).toBe(true);
       expect(m.matrix?.stateCompat).toBe("unknown");
@@ -457,7 +467,7 @@ describe("render", () => {
         "aidlc/spaces/default/intents/260101-demo-migration/aidlc-state.md",
       );
       const before = assemble(root);
-      expect(before.warnings.filter((w) => w.includes("카탈로그가 모르는"))).toEqual([]);
+      expect(codes(before)).not.toContain("roster-mismatch");
       fs.writeFileSync(
         statePath,
         fs
@@ -465,9 +475,8 @@ describe("render", () => {
           .replace("] code-generation —", "] application-design —"),
       );
       const after = assemble(root);
-      const warn = after.warnings.find((w) => w.includes("카탈로그가 모르는"))!;
-      expect(warn).toContain("application-design");
-      expect(warn).toContain("State Version: 7");
+      const warn = after.warnings.find((w) => w.code === "roster-mismatch");
+      expect(warn).toMatchObject({ unknownToCatalog: ["application-design"], stateVersion: "7" });
       // And the matrix stops claiming contract-awareness rather than judging cells
       // against a contract from a different graph generation.
       expect(after.matrix?.contractAware).toBe(false);
@@ -508,7 +517,7 @@ describe("render", () => {
     // render/health.ts are now behind SHOW_ flags; renderBody must drop the empty
     // string rather than interpolate a blank line into the column.
     const body = renderBody(m);
-    expect(renderHealth(m)).toBe("");
+    expect(renderHealth(m, strings("ko"))).toBe("");
     expect(body).not.toContain("결정과 이슈");
     expect(body).not.toContain("후속 확인 후보");
     expect(body).not.toContain("Stage별 전체 기록");
@@ -646,8 +655,10 @@ describe("harness-agnostic", () => {
       expect(m.timing.stages.length).toBe(baseline.timing.stages.length);
       // The contract-dependent parts degrade LOUDLY, not silently.
       expect(m.matrix?.contractAware).toBe(false);
-      expect(m.warnings.length).toBe(1);
-      expect(m.warnings[0]).toContain("stage 카탈로그");
+      expect(codes(m)).toEqual(["catalog-not-found"]);
+      // And the code still becomes the same sentence on screen — the render path is
+      // what the restructure could have broken silently.
+      expect(renderBody(m)).toContain("stage 카탈로그 미검출");
       expect(m.provenance["stage-graph"].stale).toBe(true);
       // And the page says so rather than showing a confident matrix.
       expect(renderBody(m)).toContain("계약 판정 불가");
@@ -724,6 +735,16 @@ describe("cli", () => {
     expect(() => parseArgs(["--root", FIXTURE, "--bogus"])).toThrow(UsageError);
   });
 
+  test("--lang sets the DEFAULT language and rejects anything outside ko|en", () => {
+    // Default, not the language: a reader's ?lang= / cookie / Accept-Language wins.
+    expect(parseArgs(["--root", FIXTURE]).locale).toBe("ko");
+    expect(parseArgs(["--root", FIXTURE, "--lang", "en"]).locale).toBe("en");
+    // Regional tags are not locales here — the split is Korean / non-Korean.
+    expect(() => parseArgs(["--root", FIXTURE, "--lang", "en-GB"])).toThrow(UsageError);
+    expect(() => parseArgs(["--root", FIXTURE, "--lang", "ja"])).toThrow(UsageError);
+    expect(() => parseArgs(["--root", FIXTURE, "--lang"])).toThrow(UsageError);
+  });
+
   test("--harness is optional, accepted when real, rejected when absent", () => {
     expect(parseArgs(["--root", FIXTURE]).harnessDir).toBeUndefined();
     expect(parseArgs(["--root", FIXTURE, "--harness", ".kiro"]).harnessDir).toBe(".kiro");
@@ -792,7 +813,10 @@ describe("folder picker", () => {
 
   test("an unreadable path falls back to home and reports the error", () => {
     const b = browse("/definitely/not/a/real/path");
-    expect(b.error).toBeDefined();
+    // The scan layer names the FAILURE (dir + OS message); the sentence around it is
+    // render's (`explorer.browseFailed`), which is why this is not a `.error` string.
+    expect(b.browseFailure).toMatchObject({ dir: "/definitely/not/a/real/path" });
+    expect(b.browseFailure?.message.length).toBeGreaterThan(0);
     expect(b.dir).toBe(os.homedir()); // still renders something usable
   });
 
@@ -863,7 +887,7 @@ describe("folder picker", () => {
     const html = renderPicker(browse(FIXTURE), false, undefined, undefined, {
       roots: [
         {
-          label: 'bad"><root',
+          label: { key: "raw", name: 'bad"><root' },
           path: '/tmp/a&b"',
           kind: "volume",
           active: true,
@@ -1082,30 +1106,30 @@ describe("stage artifacts", () => {
   test("the open jail rejects traversal, absolute paths, and bad extensions", () => {
     const { root, record } = stageTree();
     try {
-      expect(openArtifact(record, "../../../../etc/passwd").ok).toBe(false);
-      expect(openArtifact(record, "/etc/passwd")).toMatchObject({ ok: false, status: 403 });
-      expect(openArtifact(record, "ideation/intent-capture/notes.txt")).toMatchObject({
+      expect(openArtifact(record, "../../../../etc/passwd", KO).ok).toBe(false);
+      expect(openArtifact(record, "/etc/passwd", KO)).toMatchObject({ ok: false, status: 403 });
+      expect(openArtifact(record, "ideation/intent-capture/notes.txt", KO)).toMatchObject({
         ok: false,
         status: 403,
       });
-      expect(openArtifact(record, "ideation/intent-capture/state.last")).toMatchObject({
+      expect(openArtifact(record, "ideation/intent-capture/state.last", KO)).toMatchObject({
         ok: false,
         status: 403,
       });
-      expect(openArtifact(record, "ideation/intent-capture/absent.md")).toMatchObject({
+      expect(openArtifact(record, "ideation/intent-capture/absent.md", KO)).toMatchObject({
         ok: false,
         status: 404,
       });
-      expect(openArtifact(record, "ideation/intent-capture/subdir")).toMatchObject({
+      expect(openArtifact(record, "ideation/intent-capture/subdir", KO)).toMatchObject({
         ok: false,
         status: 403,
       });
-      expect(openArtifact(record, "")).toMatchObject({ ok: false, status: 400 });
-      expect(openArtifact(record, "a\0b.md")).toMatchObject({ ok: false, status: 400 });
+      expect(openArtifact(record, "", KO)).toMatchObject({ ok: false, status: 400 });
+      expect(openArtifact(record, "a\0b.md", KO)).toMatchObject({ ok: false, status: 400 });
       // A sibling dir sharing the record's prefix must not pass as inside it.
       fs.mkdirSync(path.join(root, "record-evil"));
       fs.writeFileSync(path.join(root, "record-evil", "x.md"), "z");
-      expect(openArtifact(record, "../record-evil/x.md")).toMatchObject({
+      expect(openArtifact(record, "../record-evil/x.md", KO)).toMatchObject({
         ok: false,
         status: 403,
       });
@@ -1121,10 +1145,102 @@ describe("stage artifacts", () => {
       fs.writeFileSync(outside, "secret");
       const link = path.join(record, "ideation", "intent-capture", "link.md");
       fs.symlinkSync(outside, link);
-      expect(openArtifact(record, "ideation/intent-capture/link.md")).toMatchObject({
+      expect(openArtifact(record, "ideation/intent-capture/link.md", KO)).toMatchObject({
         ok: false,
         status: 403,
       });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // `/view` reads through the SAME jail as `/open` (resolveArtifact), so these assert the
+  // wiring rather than re-deriving the path rules: a reader that skipped the jail would
+  // pass every case below.
+  test("the view reader is jailed exactly as the opener is", () => {
+    const { root, record } = stageTree();
+    try {
+      expect(readArtifactSource(record, "../../../../etc/passwd").ok).toBe(false);
+      expect(readArtifactSource(record, "/etc/passwd")).toMatchObject({ ok: false, status: 403 });
+      expect(readArtifactSource(record, "ideation/intent-capture/notes.txt")).toMatchObject({
+        ok: false,
+        status: 403,
+      });
+      expect(readArtifactSource(record, "ideation/intent-capture/absent.md")).toMatchObject({
+        ok: false,
+        status: 404,
+      });
+      expect(readArtifactSource(record, "")).toMatchObject({ ok: false, status: 400 });
+      expect(readArtifactSource(record, "a\0b.md")).toMatchObject({ ok: false, status: 400 });
+      const outside = path.join(root, "outside.md");
+      fs.writeFileSync(outside, "secret");
+      fs.symlinkSync(outside, path.join(record, "ideation", "intent-capture", "link.md"));
+      expect(readArtifactSource(record, "ideation/intent-capture/link.md")).toMatchObject({
+        ok: false,
+        status: 403,
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the view reader returns source text, and does NOT refuse html", () => {
+    const { root, record } = stageTree();
+    try {
+      const dir = path.join(record, "ideation", "intent-capture");
+      fs.writeFileSync(path.join(dir, "a-mockup.html"), "<script>alert(1)</script>");
+      const md = readArtifactSource(record, "ideation/intent-capture/stakeholder-map.md");
+      expect(md).toMatchObject({ ok: true });
+      if (md.ok) {
+        expect(md.source.text).toBe("y");
+        expect(md.source.truncated).toBe(false);
+        expect(md.source.sizeBytes).toBe(1);
+      }
+      // Escaping happens in the renderer, so the READER hands back the file verbatim —
+      // refusing html here was answering a threat `esc()` had already removed.
+      const htmlSrc = readArtifactSource(record, "ideation/intent-capture/a-mockup.html");
+      expect(htmlSrc).toMatchObject({ ok: true });
+      if (htmlSrc.ok) expect(htmlSrc.source.text).toContain("<script>");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a file over the cap is truncated at a line boundary and says so", () => {
+    const { root, record } = stageTree();
+    try {
+      const dir = path.join(record, "ideation", "intent-capture");
+      const line = `${"z".repeat(99)}\n`; // 100 bytes each
+      const big = line.repeat(Math.ceil(MAX_VIEW_BYTES / 100) + 50);
+      fs.writeFileSync(path.join(dir, "big.md"), big);
+      const got = readArtifactSource(record, "ideation/intent-capture/big.md");
+      expect(got).toMatchObject({ ok: true });
+      if (!got.ok) return;
+      expect(got.source.truncated).toBe(true);
+      expect(got.source.sizeBytes).toBe(big.length);
+      expect(got.source.shownBytes).toBe(MAX_VIEW_BYTES);
+      // Cut back to the last newline: the final visible line is whole, so the page does
+      // not end on a byte-sliced character that reads as corruption in the file.
+      expect(got.source.text.endsWith("z")).toBe(true);
+      expect(got.source.text.length).toBeLessThan(MAX_VIEW_BYTES);
+      expect(got.source.text.split("\n").every((l) => l.length === 0 || l.length === 99)).toBe(
+        true,
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("an empty artifact reads as empty text, not as a failure", () => {
+    const { root, record } = stageTree();
+    try {
+      fs.writeFileSync(path.join(record, "ideation", "intent-capture", "empty.md"), "");
+      const got = readArtifactSource(record, "ideation/intent-capture/empty.md");
+      expect(got).toMatchObject({ ok: true });
+      if (got.ok) {
+        expect(got.source.text).toBe("");
+        expect(got.source.truncated).toBe(false);
+      }
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -1223,11 +1339,15 @@ describe("usage panel selection", () => {
       // `.claude` wins the probe, so the token panel is what renders...
       expect(m.usage.kind).toBe("claude");
       // ...and that is stated, naming both dirs and the flag that overrides it.
-      const warning = m.warnings.find((w) => w.includes("공존"));
+      const warning = m.warnings.find((w) => w.code === "harness-coexist");
       expect(warning).toBeDefined();
-      expect(warning).toContain(".claude");
-      expect(warning).toContain(".kiro");
-      expect(warning).toContain("--usage kiro");
+      // The dirs and the chosen panel are FACTS now; the sentence that names the
+      // overriding flag is warnings.ts's business and is asserted there.
+      expect(warning).toMatchObject({ chosen: "claude" });
+      expect(warning?.code === "harness-coexist" && warning.harnesses).toEqual([
+        ".claude",
+        ".kiro",
+      ]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -1237,7 +1357,7 @@ describe("usage panel selection", () => {
     const dir = treeWith(".kiro", ".claude");
     try {
       const m = assemble(dir, undefined, { window: "30d", mode: "claude" });
-      expect(m.warnings.some((w) => w.includes("공존"))).toBe(false);
+      expect(codes(m)).not.toContain("harness-coexist");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -1271,7 +1391,10 @@ describe("usage panel selection", () => {
       if (m.usage.kind !== "claude") throw new Error("expected the token panel");
       expect(m.usage.tokens.status).toBe("none");
       expect(m.usage.tokens.dir).toBeNull();
-      expect(m.usage.tokens.notes.join(" ")).toContain(projectSlug(dir));
+      // The note is a code plus its facts now, so the path is a FIELD rather than a
+      // substring of a Korean sentence — see the TokenNote doc in token-model.ts.
+      const note = m.usage.tokens.notes.find((n) => n.code === "no-transcripts");
+      expect(note?.code === "no-transcripts" && note.triedPath).toContain(projectSlug(dir));
       // The rest of the model is untouched by an empty usage panel.
       expect(m.state.overallPct).toBe(80);
       expect(m.totalEvents).toBeGreaterThan(0);
@@ -1302,7 +1425,7 @@ describe("usage kind survives a broken catalogue", () => {
       expect(m.identity.harnessDir).toBeUndefined(); // the catalogue really did fail
       expect(m.usage.kind).toBe("claude");
       // ...and the catalogue failure is still reported on its own terms.
-      expect(m.warnings.some((w) => w.includes("stage-graph.json"))).toBe(true);
+      expect(codes(m).some((c) => c.startsWith("catalog-"))).toBe(true);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

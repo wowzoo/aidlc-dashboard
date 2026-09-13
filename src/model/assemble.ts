@@ -12,12 +12,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type TokenViewModel, assembleTokens } from "../credit/claude/token-model";
 import { type TranscriptMemo, readTranscripts } from "../credit/claude/transcript-reader";
+import type { PollHalt } from "../credit/pipeline/polling-scheduler";
 import type { TrendWindow } from "../credit/trend/trend";
 import {
   type CreditReadStore,
   type CreditViewModel,
   assembleCredit,
 } from "../credit/view/credit-model";
+import { strings } from "../render/i18n";
+import { DEFAULT_LOCALE } from "../render/locale";
 import { type StageArtifact, listStageArtifacts } from "../scan/artifacts";
 import { type AuditLedger, readAuditLedger } from "../scan/audit";
 import { readDeferrals } from "../scan/deferrals";
@@ -39,6 +42,7 @@ import type {
   RunIdentity,
   UsageMode,
   UsageView,
+  Warning,
 } from "./types";
 
 /** Newest events kept for the stream panel. The full ledger stays server-side. */
@@ -56,6 +60,9 @@ export interface UsageContext {
   store?: CreditReadStore;
   window: TrendWindow;
   collecting?: boolean;
+  /** Why automatic collection stopped, when it has. Read-only runtime state, threaded
+   *  like `collecting` rather than stored — the model must not own process state. */
+  pollHalt?: PollHalt | null;
   /** Which panel to show. Default `auto` (resolved from the harness dir). */
   mode?: UsageMode;
   /** Claude transcript memo, held by the host for the process lifetime. */
@@ -76,12 +83,19 @@ function resolveUsageKind(mode: UsageMode, harnessDir: string | undefined): "kir
   return harnessDir === ".claude" ? "claude" : "kiro";
 }
 
+/** Message out of an unknown throw — the shape both usage-assembly catches want. */
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** The empty token view used when Claude assembly fails. */
 function emptyTokens(window: TrendWindow): TokenViewModel {
   return {
     status: "none",
     totals: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, thinking: 0 },
     grandTotal: 0,
+    cachedPromptRatio: null,
+    sessionTime: null,
     byModel: [],
     messages: 0,
     sidechainMessages: 0,
@@ -104,20 +118,24 @@ function emptyCredit(window: TrendWindow, collecting = false): CreditViewModel {
     freshness: { stale: false, lastSuccessAt: null },
     trend: { window, points: [], summary: { latest: null, min: null, max: null, count: 0 } },
     warning: null,
+    pollHalt: null,
   };
 }
 
 /** Thrown only when there is no run to show at all. */
 export class NoRunError extends Error {
+  /**
+   * `message` is built with the DEFAULT catalogue, because `assemble` has no locale — see
+   * `render/locale.ts` for why it must not take one. `kind` and `root` are the facts, so
+   * the server re-renders the sentence in the reader's language from those instead of
+   * showing this string (`errorPage`); `message` is what reaches the terminal.
+   */
   constructor(
     readonly kind: "none" | "ambiguous",
-    root: string,
+    readonly root: string,
   ) {
-    super(
-      kind === "ambiguous"
-        ? `intent 가 여럿인데 active-intent 커서 없음: ${root}`
-        : `AI-DLC 워크플로 미검출: ${root}`,
-    );
+    const t = strings(DEFAULT_LOCALE).cli;
+    super(kind === "ambiguous" ? t.intentAmbiguous(root) : t.noWorkflow(root));
     this.name = "NoRunError";
   }
 }
@@ -254,7 +272,7 @@ export function assemble(
   if (resolved.kind !== "ok") throw new NoRunError(resolved.kind, root);
 
   const now = isoNow();
-  const warnings: string[] = [];
+  const warnings: Warning[] = [];
 
   const statePath = path.join(root, resolved.rel);
   const recordDir = path.dirname(statePath);
@@ -276,10 +294,7 @@ export function assemble(
   }
   if (!catalog) {
     warnings.push(
-      harnessDir
-        ? `${harnessDir}/tools/data/stage-graph.json 읽기 실패 — 산출물 계약 판정과 stage 귀속이 근사값으로 하락`
-        : "stage 카탈로그 미검출 (<root>/<harness>/tools/data/stage-graph.json, .kiro·.claude·.aidlc 등 탐색) — " +
-            "산출물 계약 판정과 stage 귀속이 근사값으로 하락. harness 트리가 다른 곳에 있으면 --harness 로 지정할 것",
+      harnessDir ? { code: "catalog-read-failed", harnessDir } : { code: "catalog-not-found" },
     );
   }
   const isStage = catalog ? (s: string) => catalog?.bySlug.has(s) : undefined;
@@ -296,7 +311,7 @@ export function assemble(
   const state = parseState(stateText, catalog ? (s) => catalog?.bySlug.get(s)?.name : undefined);
 
   const ledger = readAuditLedger(recordDir, isStage);
-  if (ledger.events.length === 0) warnings.push("감사 기록 비어 있음 — hook 미발화 가능성");
+  if (ledger.events.length === 0) warnings.push({ code: "audit-empty" });
 
   const sensors = readSensorReport(recordDir, ledger);
   const questions = readQuestions(recordDir);
@@ -362,10 +377,16 @@ export function assemble(
     harnessVersion !== undefined &&
     state.stateVersion !== undefined &&
     harnessVersion !== state.stateVersion;
-  if (versionMismatch) {
-    warnings.push(
-      `state.md 은 State Version ${state.stateVersion}, harness 는 ${harnessVersion} 을 지원합니다 (${catalog?.harnessDir}/tools/aidlc-lib.ts) — 엔진은 이 조합에서 next·report·doctor 를 모두 거부합니다. 다른 세대의 계약으로 판정할 수 없어 산출물 계약 판정을 내렸습니다`,
-    );
+  // The three extra conditions are implied by `versionMismatch` — `harnessVersion` is
+  // read off the catalogue, so a mismatch cannot be detected without one. They are
+  // spelled out so the narrowing is real and the fields need no casts.
+  if (versionMismatch && catalog && state.stateVersion !== undefined && harnessVersion) {
+    warnings.push({
+      code: "state-version-mismatch",
+      stateVersion: state.stateVersion,
+      harnessVersion,
+      harnessDir: catalog.harnessDir,
+    });
   }
   // Missing / empty / non-numeric is `unparseable` to the engine and also refused. It is
   // reported, but it does NOT block: the version field being absent says nothing about
@@ -382,9 +403,7 @@ export function assemble(
       ? "verified"
       : "unknown";
   if (!stateVersionReadable) {
-    warnings.push(
-      `state.md 의 State Version 을 읽을 수 없습니다 (${state.stateVersion === undefined ? "필드 없음" : `값: ${state.stateVersion}`}) — 엔진은 누락·빈 값·비수치를 모두 거부합니다(aidlc-lib.ts classifyStateVersion). 산출물 계약은 그대로 보여주지만 엔진과 동일한 완료 판정이라고 주장하지 않습니다`,
-    );
+    warnings.push({ code: "state-version-unreadable", stateVersion: state.stateVersion });
   }
 
   // TEAM / UNIT-MAJOR: the state's `## Unit Progress` table is the engine-owned authority
@@ -400,18 +419,15 @@ export function assemble(
   const unitMajorMode = state.constructionIteration?.toLowerCase() === "unit-major";
   const teamMode = team && unitMajorMode;
   if (team && !unitMajorMode) {
-    warnings.push(
-      `Unit Ownership 은 team 인데 Construction Iteration 이 unit-major 가 아닙니다 (${state.constructionIteration ?? "없음"}) — 엔진 계약은 이 둘을 함께 요구하고, 그때만 Unit Progress 표가 존재합니다. 설정을 확인할 것`,
-    );
+    warnings.push({
+      code: "team-without-unit-major",
+      constructionIteration: state.constructionIteration,
+    });
   }
   if (state.unitProgress?.malformed) {
-    warnings.push(
-      "state.md 의 `## Unit Progress` 표를 엔진이 정한 모양으로 읽지 못했습니다 (표가 줄 맨 앞에서 시작하지 않거나, 첫 열이 `unit` 이 아니거나, 구분선 폭이 헤더와 다름 — 엔진도 같은 조건에서 거부합니다). owner·유닛 게이트를 표시하지 않습니다",
-    );
+    warnings.push({ code: "unit-progress-malformed" });
   } else if (teamMode && !state.unitProgress) {
-    warnings.push(
-      "team / unit-major 실행인데 state.md 에 `## Unit Progress` 절이 없습니다 — owner·유닛 게이트의 권위 있는 원천이 없어 아래 매트릭스는 디스크와 감사 기록으로 재구성한 값입니다",
-    );
+    warnings.push({ code: "unit-progress-missing" });
   }
 
   const stateSlugs = state.phases.flatMap((p) => p.stages.map((st) => st.slug));
@@ -424,13 +440,12 @@ export function assemble(
       : [];
   const rosterMismatch = unknownToCatalog.length > 0 || missingFromState.length > 0;
   if (rosterMismatch) {
-    const ver = state.stateVersion
-      ? `(State Version: ${state.stateVersion})`
-      : "(State Version 없음)";
-    const engineNote = "엔진도 이 조합을 거부합니다: aidlc-lib.ts classifyStateVersion";
-    warnings.push(
-      `state.md 과 stage 카탈로그의 stage 목록이 어긋납니다 ${ver}${unknownToCatalog.length > 0 ? ` · 카탈로그가 모르는 stage: ${unknownToCatalog.join(", ")}` : ""}${missingFromState.length > 0 ? ` · state 에 행이 없는 stage: ${missingFromState.join(", ")} (엔진은 SKIP 도 한 행씩 씁니다)` : ""}. 산출물 계약 판정을 신뢰할 수 없어 근사값으로 내렸습니다 (${engineNote})`,
-    );
+    warnings.push({
+      code: "roster-mismatch",
+      stateVersion: state.stateVersion,
+      unknownToCatalog,
+      missingFromState,
+    });
   }
 
   const construction = state.phases.find((p) => p.key === "construction");
@@ -496,7 +511,7 @@ export function assemble(
 
   // Quantify the graph's drift so the badge can say what is actually missing,
   // rather than only that it is old.
-  let graphDriftNote: string | undefined;
+  let sensorDrift: { fired: number; missing: number } | undefined;
   const graphFired = ((): number | undefined => {
     try {
       const doc = JSON.parse(fs.readFileSync(graphPath, "utf-8"));
@@ -511,7 +526,7 @@ export function assemble(
     }
   })();
   if (graphFired !== undefined && sensors.totalFired > graphFired) {
-    graphDriftNote = `감사 기록의 sensor 발화 ${sensors.totalFired}건 중 ${sensors.totalFired - graphFired}건이 이 스냅샷에 부재`;
+    sensorDrift = { fired: sensors.totalFired, missing: sensors.totalFired - graphFired };
   }
 
   const provenance = buildProvenance({
@@ -523,7 +538,7 @@ export function assemble(
     graphLastEventTs: graphLastEvent(graphPath),
     hooksLastActivity: health.lastActivity,
     catalogPath: catalog?.sourcePath,
-    graphDriftNote,
+    sensorDrift,
   });
 
   // resolved.rel is `aidlc/spaces/<space>/intents/<record>/aidlc-state.md`.
@@ -553,9 +568,7 @@ export function assemble(
   // silently show the credit panel for a Claude run.
   const usageKind = resolveUsageKind(mode, catalog?.harnessDir ?? discoveredHarness);
   if (mode === "auto" && harnesses.length > 1) {
-    warnings.push(
-      `harness 디렉터리 ${harnesses.join("·")} 가 공존 — 사용량 패널을 ${usageKind === "claude" ? "Claude Code 토큰" : "Kiro 크레딧"}으로 자동 선택했습니다. 다른 쪽을 보려면 --usage ${usageKind === "claude" ? "kiro" : "claude"} 를 지정하세요.`,
-    );
+    warnings.push({ code: "harness-coexist", harnesses, chosen: usageKind });
   }
 
   let usage: UsageView;
@@ -568,21 +581,23 @@ export function assemble(
       });
       usage = { kind: "claude", tokens: assembleTokens(agg, window) };
     } catch (err) {
-      warnings.push(
-        `토큰 사용량 조립 실패 — 사용량 패널만 하락: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      warnings.push({ code: "token-usage-failed", detail: errText(err) });
       usage = { kind: "claude", tokens: emptyTokens(window) };
     }
   } else if (usageCtx?.store) {
     try {
       usage = {
         kind: "kiro",
-        credit: assembleCredit(usageCtx.store, new Date(now), window, usageCtx.collecting),
+        credit: assembleCredit(
+          usageCtx.store,
+          new Date(now),
+          window,
+          usageCtx.collecting,
+          usageCtx.pollHalt ?? null,
+        ),
       };
     } catch (err) {
-      warnings.push(
-        `크레딧 조립 실패 — 크레딧 패널만 하락: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      warnings.push({ code: "credit-assembly-failed", detail: errText(err) });
       usage = { kind: "kiro", credit: emptyCredit(window, usageCtx.collecting) };
     }
   } else {

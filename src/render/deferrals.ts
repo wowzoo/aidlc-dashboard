@@ -35,6 +35,7 @@
 import type { DashboardModel } from "../model/types";
 import type { DeferralItem, OwnerStatus } from "../scan/deferrals";
 import { dur, esc, pill, section, shortTs } from "./common";
+import type { Strings } from "./i18n";
 
 interface StatusFace {
   label: string;
@@ -42,38 +43,20 @@ interface StatusFace {
   tip: string;
 }
 
-const FACE: Record<OwnerStatus, StatusFace> = {
-  passed: {
-    label: "지난 단계",
-    tone: "bad",
-    tip: "이 결정을 맡기로 한 단계가 이미 끝났습니다. 답이 기록된 흔적은 없습니다 — 엔진이 닫힘 표시를 쓰지 않으므로 '버려졌다'가 아니라 '보이지 않는다'는 뜻입니다",
-  },
-  current: {
-    label: "현재 단계",
-    tone: "warn",
-    tip: "지금 진행 중인 단계가 이 결정을 물어야 합니다 — 이번 차례에 청구되는 몫",
-  },
-  ahead: {
-    label: "예정 단계",
-    tone: "mute",
-    tip: "아직 시작하지 않은 단계로 배정됐습니다 — 그 단계에 가면 다시 물어옵니다",
-  },
-  outOfScope: {
-    label: "범위 밖 단계",
-    tone: "warn",
-    tip: "실재하는 단계지만 이번 실행 범위(state.md)에 없습니다 — 아무도 물어보지 않습니다",
-  },
-  nextCycle: {
-    label: "다음 차수",
-    tone: "mute",
-    tip: "이번 차수 밖으로 명시적으로 밀어낸 항목",
-  },
-  unassigned: {
-    label: "배정 없음",
-    tone: "bad",
-    tip: "배정 칸에서 단계를 읽어낼 수 없습니다 — 물어볼 자리가 정해지지 않았으므로 다음 단계에서 사라질 수 있습니다",
-  },
+/** Tone is presentation and stays here; the words come from the catalogue. */
+const TONE: Record<OwnerStatus, StatusFace["tone"]> = {
+  passed: "bad",
+  current: "warn",
+  ahead: "mute",
+  outOfScope: "warn",
+  nextCycle: "mute",
+  unassigned: "bad",
 };
+
+function face(status: OwnerStatus, s: Strings): StatusFace {
+  const f = s.deferrals.faces[status];
+  return { label: f.label, tone: TONE[status], tip: f.tip };
+}
 
 /** KPI order: the two that need action, then the two that are merely scheduled. */
 const KPI_ORDER: OwnerStatus[] = ["passed", "current", "ahead", "unassigned"];
@@ -83,21 +66,24 @@ function assignmentText(cell: string): string {
   return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
 }
 
-function itemRow(it: DeferralItem): string {
-  const face = FACE[it.ownerStatus];
+function itemRow(it: DeferralItem, s: Strings): string {
+  const f = face(it.ownerStatus, s);
   const origin = it.unit ? `${it.unit} / ${it.stage}` : it.stage;
   const target = it.ownerStage ?? "—";
   const fanIn =
     it.sources.length > 1 ? ` <span class="dfr-fan">+${it.sources.length - 1}</span>` : "";
   return `<li class="dfr-item">
-  <div class="dfr-meta">${pill(face.label, face.tone, face.tip)}
+  <div class="dfr-meta">${pill(f.label, f.tone, f.tip)}
     <span class="dfr-route"><span class="dfr-from">${esc(origin)}</span> → <span class="dfr-to">${esc(
       target,
     )}</span></span>${fanIn}
-    <span class="dfr-age" title="이 항목이 처음 기록된 뒤 지난 시간">${esc(dur(it.ageSec))}</span>
+    <span class="dfr-age" title="${esc(s.deferrals.ageTip)}">${esc(dur(it.ageSec))}</span>
+    <a class="dfr-source" href="/view?rel=${encodeURIComponent(it.rel)}" title="${esc(
+      s.deferrals.viewTip(it.rel),
+    )}">${esc(s.deferrals.sourceLink)}</a>
     <a class="dfr-source" href="/open?rel=${encodeURIComponent(it.rel)}" title="${esc(
-      it.rel,
-    )} 열기">원문</a>
+      s.deferrals.openTip(it.rel),
+    )}">${esc(s.deferrals.editorLink)}</a>
   </div>
   <div class="dfr-text">${esc(it.item.length > 300 ? `${it.item.slice(0, 300)}…` : it.item)}</div>
   ${
@@ -105,20 +91,23 @@ function itemRow(it: DeferralItem): string {
       ? // The cell is markdown and its slugs arrive backticked; the backticks are
         // redundant inside <code>, so they come off here rather than in the scanner —
         // the model keeps the cell verbatim because it also carries registry ids.
-        `<div class="dfr-assign">배정 <code>${esc(assignmentText(it.assignment))}</code></div>`
+        `<div class="dfr-assign">${esc(s.deferrals.assignLabel)} <code>${esc(
+          assignmentText(it.assignment),
+        )}</code></div>`
       : ""
   }
 </li>`;
 }
 
-function itemList(items: DeferralItem[], visible: number, key: string): string {
-  if (items.length === 0) return `<p class="note">해당 없음.</p>`;
+function itemList(items: DeferralItem[], visible: number, key: string, s: Strings): string {
+  if (items.length === 0) return `<p class="note">${esc(s.deferrals.noneApplicable)}</p>`;
   const shown = items.slice(0, visible);
   const rest = items.slice(visible);
-  return `<ul class="dfr-list">${shown.map(itemRow).join("")}</ul>${
+  const rowOf = (it: DeferralItem) => itemRow(it, s);
+  return `<ul class="dfr-list">${shown.map(rowOf).join("")}</ul>${
     rest.length > 0
-      ? `<details class="dfr-more"><summary>${esc(key)} 나머지 ${rest.length}건</summary>
-  <ul class="dfr-list">${rest.map(itemRow).join("")}</ul></details>`
+      ? `<details class="dfr-more"><summary>${esc(s.deferrals.more(key, rest.length))}</summary>
+  <ul class="dfr-list">${rest.map(rowOf).join("")}</ul></details>`
       : ""
   }`;
 }
@@ -133,49 +122,51 @@ function itemList(items: DeferralItem[], visible: number, key: string): string {
  * the ledger row above it verbatim and spent a raw enum name to do it. A `<details>`
  * that costs a click and returns nothing new is worse than no `<details>`.
  */
-function ownerTable(m: DashboardModel): string {
+function ownerTable(m: DashboardModel, s: Strings): string {
   const all = m.deferrals.byOwner;
   const stages = all.filter((o) => o.stage !== undefined).length;
   if (stages === 0) return "";
   const rows = all
     .map((o) => {
-      const face = FACE[o.status];
-      // A bucket row carries no stage; its Korean label lives here, not in the model.
-      return `<tr><th class="g-name">${esc(o.stage ?? face.label)}</th>
-  <td>${pill(face.label, face.tone, face.tip)}</td>
+      const f = face(o.status, s);
+      // A bucket row carries no stage; its label lives in the catalogue, not the model.
+      return `<tr><th class="g-name">${esc(o.stage ?? f.label)}</th>
+  <td>${pill(f.label, f.tone, f.tip)}</td>
   <td class="g-n">${o.count}</td></tr>`;
     })
     .join("");
-  return `<details class="dfr-owners"><summary>배정된 자리별 집계 · stage ${stages}곳</summary>
+  const t = s.deferrals;
+  return `<details class="dfr-owners"><summary>${esc(t.ownerRollup(stages))}</summary>
   <table class="tbl">
-    <thead><tr><th>배정된 자리</th><th>상태</th><th>건수</th></tr></thead>
+    <thead><tr><th>${esc(t.colOwner)}</th><th>${esc(t.colStatus)}</th><th>${esc(
+      t.colCount,
+    )}</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </details>`;
 }
 
-function assumptionsBlock(m: DashboardModel): string {
+function assumptionsBlock(m: DashboardModel, s: Strings): string {
+  const t = s.deferrals;
   const list = m.deferrals.assumptions;
   if (list.length === 0) return "";
   const rows = list
     .map(
       (a) => `<li class="dfr-item">
-  <div class="dfr-meta">${pill("전제", "mute", "확인되지 않은 채로 다음 단계에 넘어간 전제 — 배정된 자리가 없습니다")}
+  <div class="dfr-meta">${pill(t.assumptionPill, "mute", t.assumptionPillTip)}
     <span class="dfr-route"><span class="dfr-from">${esc(
       a.unit ? `${a.unit} / ${a.stage}` : a.stage,
     )}</span></span>
     <a class="dfr-source" href="/open?rel=${encodeURIComponent(a.rel)}" title="${esc(
-      a.rel,
-    )} 열기">원문</a>
+      t.openTip(a.rel),
+    )}">${esc(t.sourceLink)}</a>
   </div>
   <div class="dfr-text">${esc(a.text.length > 260 ? `${a.text.slice(0, 260)}…` : a.text)}</div>
 </li>`,
     )
     .join("");
-  return `<details class="dfr-assum"><summary>확인되지 않은 전제 ${list.length}건 — 배정 없음</summary>
-  <p class="note">엔진의 stage 규약은 전제를 <code>[assumption]</code>으로 표시하고, 사용자가 그 단계의 질문지에서
-  확인해 줄 때까지 하류 산출물에서도 전제로 남기라고 정합니다. 표가 아니라 산문이라 배정된 자리가 없어
-  이 대시보드도 어디서 청구될지 말할 수 없습니다 — 산문에서 단계 이름을 추측하지 않습니다.</p>
+  return `<details class="dfr-assum"><summary>${esc(t.assumptionSummary(list.length))}</summary>
+  <p class="note">${t.assumptionNote}</p>
   <ul class="dfr-list">${rows}</ul>
 </details>`;
 }
@@ -200,7 +191,8 @@ function assumptionsBlock(m: DashboardModel): string {
  *     orchestrator's own note, not a contract with a later stage — which is exactly
  *     why these are kept apart from the artifact items instead of summed with them.
  */
-function diaryOpenBlock(m: DashboardModel): string {
+function diaryOpenBlock(m: DashboardModel, s: Strings): string {
+  const t = s.deferrals;
   const all = m.diaries.records.filter((r) => r.axis === "openQuestions");
   const open = all.filter((r) => r.questionStatus !== "resolved");
   if (open.length === 0) return "";
@@ -215,30 +207,24 @@ function diaryOpenBlock(m: DashboardModel): string {
     .map(
       (r) => `<li class="dfr-item">
   <div class="dfr-meta">${pill(
-    r.questionStatus === "followUp" ? "후속 확인" : "일지 미결",
+    r.questionStatus === "followUp" ? t.diaryFollowUpPill : t.diaryNotePill,
     r.questionStatus === "followUp" ? "warn" : "mute",
-    r.questionStatus === "followUp"
-      ? "문장 자체가 후속 확인·결정을 요구합니다"
-      : "stage 가 미결 소절에 적었지만 문장에 후속 신호는 없습니다 — 소절 자체가 미결 선언이라 그대로 셉니다",
+    r.questionStatus === "followUp" ? t.diaryFollowUpTip : t.diaryNoteTip,
   )}
     <span class="dfr-route"><span class="dfr-from">${esc(
       r.unit ? `${r.unit} / ${r.stage}` : r.stage,
     )}</span></span>
     ${r.ts ? `<span class="dfr-age">${esc(shortTs(r.ts))}</span>` : ""}
     <a class="dfr-source" href="/open?rel=${encodeURIComponent(r.rel)}" title="${esc(
-      r.rel,
-    )} 열기">원문</a>
+      t.openTip(r.rel),
+    )}">${esc(t.sourceLink)}</a>
   </div>
   <div class="dfr-text">${esc(r.text.length > 260 ? `${r.text.slice(0, 260)}…` : r.text)}</div>
 </li>`,
     )
     .join("");
-  return `<details class="dfr-assum"><summary>stage 일지의 미결 ${open.length}건 — 배정 없음</summary>
-  <p class="note">산출물이 아니라 <code>memory.md</code>의 <code>## Open questions</code>에서 읽었습니다 —
-  엔진이 모든 stage 일지에 두라고 정한 두 번째 미결 대장입니다. 오케스트레이터가 스스로 적은 메모라
-  하류 단계와의 계약이 아니고 배정 칸도 없어서, 위 산출물 미결과 <b>합산하지 않습니다</b>.${
-    resolved > 0 ? ` 해소 표시가 붙은 ${resolved}건은 제외했습니다.` : ""
-  }</p>
+  return `<details class="dfr-assum"><summary>${esc(t.diarySummary(open.length))}</summary>
+  <p class="note">${t.diaryNote(resolved)}</p>
   <ul class="dfr-list">${rows}</ul>
 </details>`;
 }
@@ -263,7 +249,9 @@ function ledgerRows(
   d: DashboardModel["deferrals"],
   diaryOpen: number,
   diaryFollowUp: number,
+  s: Strings,
 ): string {
+  const t = s.deferrals;
   const chip = (label: string, n: number, tone: string, tip: string) =>
     `<span class="dfr-chip t-${n > 0 ? tone : "zero"}" title="${esc(tip)}">${esc(
       label,
@@ -279,11 +267,12 @@ function ledgerRows(
           : d.counts.current > 0
             ? "warn"
             : "mute",
-      label: "산출물 미결",
-      source: "<code>## Assumptions &amp; Open Questions</code>의 미결 항목",
-      chips: KPI_ORDER.map((s) => chip(FACE[s].label, d.counts[s], FACE[s].tone, FACE[s].tip)).join(
-        "",
-      ),
+      label: t.ledgerItems,
+      source: t.ledgerItemsSource,
+      chips: KPI_ORDER.map((st) => {
+        const f = face(st, s);
+        return chip(f.label, d.counts[st], f.tone, f.tip);
+      }).join(""),
     }),
   ];
   if (d.assumptions.length > 0) {
@@ -291,14 +280,9 @@ function ledgerRows(
       row({
         n: d.assumptions.length,
         tone: "mute",
-        label: "확인되지 않은 전제",
-        source: "같은 절의 <code>[assumption]</code> 항목",
-        chips: chip(
-          "배정 없음",
-          d.assumptions.length,
-          "mute",
-          "산문이라 배정 칸이 없습니다 — 사용자가 그 단계 질문지에서 확인해 줄 때까지 전제로 남습니다",
-        ),
+        label: t.ledgerAssumptions,
+        source: t.ledgerAssumptionsSource,
+        chips: chip(t.faces.unassigned.label, d.assumptions.length, "mute", t.chipUnassignedTip),
       }),
     );
   }
@@ -307,22 +291,16 @@ function ledgerRows(
       row({
         n: diaryOpen,
         tone: diaryFollowUp > 0 ? "warn" : "mute",
-        label: "stage 일지 미결",
-        source: "각 stage <code>memory.md</code>의 <code>## Open questions</code>",
+        label: t.ledgerDiary,
+        source: t.ledgerDiarySource,
         chips:
-          chip("후속 확인", diaryFollowUp, "warn", "문장 자체가 후속 확인·결정을 요구하는 항목") +
-          chip(
-            "그 외",
-            diaryOpen - diaryFollowUp,
-            "mute",
-            "미결 소절에 적혀 있으나 문장에 후속 신호는 없는 항목 — 소절 자체가 미결 선언이라 그대로 셉니다",
-          ),
+          chip(t.chipFollowUp, diaryFollowUp, "warn", t.chipFollowUpTip) +
+          chip(t.chipOther, diaryOpen - diaryFollowUp, "mute", t.chipOtherTip),
       }),
     );
   }
   return `<ul class="dfr-ledgers">${rows.join("")}</ul>
-<p class="note">세 대장은 <b>서로 다른 읽기</b>입니다 — 배정 칸이 있는 것은 첫 줄뿐이고,
-아래 둘은 물어볼 자리가 정해져 있지 않습니다. <b>합산하지 않습니다.</b></p>`;
+<p class="note">${t.ledgersNote}</p>`;
 }
 
 function row(r: {
@@ -341,12 +319,12 @@ function row(r: {
 </li>`;
 }
 
-function body(m: DashboardModel): string {
+function body(m: DashboardModel, s: Strings): string {
+  const t = s.deferrals;
   const d = m.deferrals;
-  const diary = diaryOpenBlock(m);
+  const diary = diaryOpenBlock(m, s);
   if (d.sections === 0) {
-    return `<p class="note">산출물에 <code>## Assumptions &amp; Open Questions</code> 절이 없습니다 — 이 실행은
-    미결 대장을 남기지 않았거나 아직 산출물을 쓰지 않았습니다. (읽은 산출물 ${d.artifacts}개)</p>${diary}`;
+    return `<p class="note">${t.noSections(d.artifacts)}</p>${diary}`;
   }
   if (d.items.length === 0 && d.assumptions.length === 0) {
     // `emptySections` counts only an explicit `None.`; `sections` counts the heading
@@ -355,33 +333,25 @@ function body(m: DashboardModel): string {
     // exactly the false all-clear that reading only the table shape used to produce.
     const unread = d.sections - d.emptySections;
     if (unread > 0) {
-      return `<p class="note warn">산출물 ${d.sections}곳에 <code>## Assumptions &amp; Open Questions</code>
-      절이 있고, 그중 <b>${unread}곳은 이 리더가 아는 모양이 아닙니다</b> — 표(<code>| 항목 | 배정 |</code>)도,
-      <code>[assumption]</code> 태그도, <code>**OQ1**</code> 형태의 대장 id 도 없습니다.
-      <b>미결이 없다는 뜻이 아니라 읽지 못했다는 뜻입니다.</b>
-      명시적으로 <code>None.</code>을 선언한 절은 ${d.emptySections}곳입니다.</p>${diary}`;
+      return `<p class="note warn">${t.unreadSections(
+        d.sections,
+        unread,
+        d.emptySections,
+      )}</p>${diary}`;
     }
-    return `<p class="note">${pill(
-      "미결 없음",
-      "ok",
-      "미결 대장 절은 있고 그 안이 비어 있음 — 명시적으로 '없음'을 선언한 상태",
-    )} 산출물 ${d.sections}곳의 미결 대장이 모두 <code>None.</code>입니다.</p>${diary}`;
+    return `<p class="note">${pill(t.noOpenPill, "ok", t.noOpenPillTip)}${t.allNone(
+      d.sections,
+    )}</p>${diary}`;
   }
 
   const diaryOpen = m.diaries.records.filter(
     (r) => r.axis === "openQuestions" && r.questionStatus !== "resolved",
   );
   const diaryFollowUp = diaryOpen.filter((r) => r.questionStatus === "followUp").length;
-  const kpis = ledgerRows(d, diaryOpen.length, diaryFollowUp);
+  const kpis = ledgerRows(d, diaryOpen.length, diaryFollowUp, s);
 
   const exits = d.counts.nextCycle + d.counts.outOfScope;
-  const lead = `<p class="note">미결 <b>${d.items.length}건</b> · 산출물 ${d.sections}곳에
-  <code>## Assumptions &amp; Open Questions</code> 대장이 있습니다 (원시 ${d.rows}행 → 중복 정리 후 ${
-    d.items.length
-  }건)${exits > 0 ? ` · 이번 차수 밖으로 명시적으로 밀어낸 것 ${exits}건은 위 숫자에 없습니다` : ""}.
-  엔진 규약은 <b>하류 단계가 미결을 필요로 하면 후속 질문으로 다시 묻는다</b>고 정합니다 — 여기 있는 항목은
-  없어진 것이 아니라 <b>다시 물어올 것</b>입니다. 항목이 닫혔다는 표시는 엔진이 쓰지 않으므로
-  <b>‘지난 단계’는 버려졌다는 뜻이 아니라 답이 보이지 않는다는 뜻</b>입니다.</p>`;
+  const lead = `<p class="note">${t.lead(d.items.length, d.sections, d.rows, exits)}</p>`;
 
   const byStatus = (s: OwnerStatus) => d.items.filter((i) => i.ownerStatus === s);
   const passed = byStatus("passed");
@@ -391,39 +361,36 @@ function body(m: DashboardModel): string {
   );
   const ahead = byStatus("ahead");
 
-  const warn = d.catalogMissing
-    ? `<p class="note warn">stage 카탈로그가 없어 배정 칸의 단계 이름을 이 실행의 state.md 로만 판정했습니다 —
-    범위 밖 단계가 <b>배정 없음</b>으로 내려가 있을 수 있습니다.</p>`
-    : "";
+  const warn = d.catalogMissing ? `<p class="note warn">${t.catalogMissingNote}</p>` : "";
 
   return `${kpis}${lead}${warn}
 <div class="dfr-focus">
-  <h3>지난 단계로 배정됨 · ${passed.length}건</h3>
-  ${itemList(passed, 6, "지난 단계")}
+  <h3>${esc(t.headingPassed(passed.length))}</h3>
+  ${itemList(passed, 6, t.faces.passed.label, s)}
 </div>
 <div class="dfr-focus">
-  <h3>현재 단계가 물어야 할 것 · ${current.length}건</h3>
-  ${itemList(current, 5, "현재 단계")}
+  <h3>${esc(t.headingCurrent(current.length))}</h3>
+  ${itemList(current, 5, t.faces.current.label, s)}
 </div>
 ${
   ahead.length > 0
-    ? `<details class="dfr-ahead"><summary>예정 단계로 배정됨 ${ahead.length}건 — 그 단계에 가면 물어옵니다</summary>
-  <ul class="dfr-list">${ahead.map(itemRow).join("")}</ul>
+    ? `<details class="dfr-ahead"><summary>${esc(t.summaryAhead(ahead.length))}</summary>
+  <ul class="dfr-list">${ahead.map((it) => itemRow(it, s)).join("")}</ul>
 </details>`
     : ""
 }
 ${
   rest.length > 0
-    ? `<details class="dfr-rest"><summary>배정 없음·차수 밖 ${rest.length}건</summary>
-  <ul class="dfr-list">${rest.map(itemRow).join("")}</ul>
+    ? `<details class="dfr-rest"><summary>${esc(t.summaryRest(rest.length))}</summary>
+  <ul class="dfr-list">${rest.map((it) => itemRow(it, s)).join("")}</ul>
 </details>`
     : ""
 }
-${assumptionsBlock(m)}
+${assumptionsBlock(m, s)}
 ${diary}
-${ownerTable(m)}`;
+${ownerTable(m, s)}`;
 }
 
-export function renderDeferrals(m: DashboardModel): string {
-  return section("미뤄둔 결정", body(m), "deferrals");
+export function renderDeferrals(m: DashboardModel, s: Strings): string {
+  return section(s.deferrals.section, body(m, s), "deferrals");
 }

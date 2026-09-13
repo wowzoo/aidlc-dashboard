@@ -8,13 +8,17 @@
  * 컨텍스트의 host `esc()`와 구분, 신규 이스케이프 함수 발명 아님).
  */
 
+import type { Strings } from "../../render/i18n";
 import type { TrendSeries, TrendWindow } from "../trend/trend";
 
-const WINDOW_LABEL: Record<TrendWindow, string> = {
-  "7d": "최근 7일",
-  "30d": "최근 30일",
-  all: "전체 기간",
-};
+/** 창 이름은 카탈로그(`render/i18n`) 소관. */
+function windowLabelOf(w: TrendWindow, s: Strings): string {
+  return w === "7d"
+    ? s.usage.windowLong7d
+    : w === "30d"
+      ? s.usage.windowLong30d
+      : s.usage.windowLongAll;
+}
 
 /** XML/SVG 텍스트 이스케이프(속성·본문 안전). SVG 컨텍스트 전용. */
 export function escapeXml(s: string): string {
@@ -42,17 +46,17 @@ export interface ChartOptions {
 }
 
 /** 추이 라인 차트를 SVG 문자열로 렌더한다. 결측(value=null)은 선을 끊는다. */
-export function renderLineChart(series: TrendSeries, opts: ChartOptions = {}): string {
+export function renderLineChart(series: TrendSeries, s: Strings, opts: ChartOptions = {}): string {
   const width = opts.width ?? 720;
   const height = opts.height ?? 260;
   const pad = { top: 16, right: 16, bottom: 28, left: 56 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 
-  const windowLabel = WINDOW_LABEL[series.window];
+  const windowLabel = windowLabelOf(series.window, s);
   const valued = series.points.filter((p) => p.value !== null);
 
-  const ariaLabel = opts.ariaLabel ?? buildAriaLabel(series, windowLabel);
+  const ariaLabel = opts.ariaLabel ?? buildAriaLabel(series, windowLabel, s);
 
   if (valued.length === 0) {
     // 값 있는 지점이 없으면 축만 그리고 안내.
@@ -60,7 +64,7 @@ export function renderLineChart(series: TrendSeries, opts: ChartOptions = {}): s
       width,
       height,
       ariaLabel,
-      `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" fill="var(--mute)" font-size="13">표시할 데이터가 없습니다</text>`,
+      `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" fill="var(--mute)" font-size="13">${escapeXml(s.usage.chartNoData)}</text>`,
     );
   }
 
@@ -121,12 +125,12 @@ export function renderLineChart(series: TrendSeries, opts: ChartOptions = {}): s
 }
 
 /** 접근성 텍스트 요약(그래프 대체 텍스트). */
-export function buildAriaLabel(series: TrendSeries, windowLabel: string): string {
+export function buildAriaLabel(series: TrendSeries, windowLabel: string, s: Strings): string {
   const { summary } = series;
   if (summary.count === 0) {
-    return `${windowLabel} 누적 사용량 추이: 표시할 데이터 없음`;
+    return s.usage.chartEmpty(windowLabel);
   }
-  return `${windowLabel} 누적 사용량 추이, 최소 ${fmt(summary.min)}, 최대 ${fmt(summary.max)}, 최신 ${fmt(summary.latest)}`;
+  return s.usage.chartSummary(windowLabel, fmt(summary.min), fmt(summary.max), fmt(summary.latest));
 }
 
 function wrapSvg(width: number, height: number, ariaLabel: string, inner: string): string {
@@ -137,7 +141,7 @@ function wrapSvg(width: number, height: number, ariaLabel: string, inner: string
 }
 
 /** 사용률 원형(도넛) 게이지를 SVG 문자열로 렌더한다. 수치를 병기한다(색 비의존, BR2.1). */
-export function renderGauge(ratio: number | null, size = 160): string {
+export function renderGauge(ratio: number | null, s: Strings, size = 160): string {
   const stroke = 14;
   const r = (size - stroke) / 2;
   const cx = size / 2;
@@ -145,12 +149,12 @@ export function renderGauge(ratio: number | null, size = 160): string {
   const circumference = 2 * Math.PI * r;
 
   if (ratio === null) {
-    return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="사용률 계산 불가"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${stroke}" /><text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="var(--mute)" font-size="14">계산 불가</text></svg>`;
+    return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${escapeXml(s.usage.gaugeUnavailable)}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${stroke}" /><text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="var(--mute)" font-size="14">${escapeXml(s.usage.gaugeUnavailableShort)}</text></svg>`;
   }
 
   const clamped = Math.max(0, Math.min(1, ratio));
   const dash = circumference * clamped;
   const percentText = `${(clamped * 100).toFixed(1)}%`;
 
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="사용률 ${escapeXml(percentText)}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${stroke}" /><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--accent)" stroke-width="${stroke}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})" /><text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="var(--fg)" font-size="26" font-weight="700">${escapeXml(percentText)}</text></svg>`;
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${escapeXml(s.usage.gaugeLabel(percentText))}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${stroke}" /><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--accent)" stroke-width="${stroke}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})" /><text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="var(--fg)" font-size="26" font-weight="700">${escapeXml(percentText)}</text></svg>`;
 }

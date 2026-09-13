@@ -104,8 +104,15 @@ export function buildTrend(
   const allPoints = filtered.map(toPoint);
   const points = downsample(allPoints, maxPoints);
 
+  // SUMMARY IS OVER THE WINDOW, NOT OVER THE DRAWN POINTS. It used to read `points`,
+  // which is the downsampled set, so past 500 snapshots `count` froze at 500 while its
+  // own doc says "창 내 값 있는 지점 수" — and min/max lost whatever the stride skipped.
+  // Reachable in ordinary use: 5분 폴링이면 500점은 약 42시간이고, 7일 창은 2016점이다.
+  // 실측(1001건 입력): count 500, 그리고 502번째에 둔 최대값 999999 가 1000 으로 누락.
+  // The text summary sits beside the chart for a reader who cannot see it, so it must
+  // describe the DATA; a pixel-accurate summary of a lossy line answers nobody.
   const values: number[] = [];
-  for (const p of points) {
+  for (const p of allPoints) {
     if (p.value !== null) values.push(p.value);
   }
 

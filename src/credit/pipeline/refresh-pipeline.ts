@@ -18,7 +18,7 @@
  */
 
 import { type CollectResult, type CollectorDeps, collectUsage } from "../collector/usage-collector";
-import { parseUsage } from "../parser/usage-parser";
+import { type ParseResult, parseUsage } from "../parser/usage-parser";
 import type { CaptureSource, CreditSnapshot } from "../types";
 
 /** 파이프라인이 소비하는 저장소 최소 표면(u1 SnapshotStore가 구조적으로 충족). */
@@ -41,7 +41,19 @@ export interface RefreshResult {
 /** 파이프라인 의존성(테스트 주입 가능). */
 export interface PipelineDeps {
   store: PipelineStore;
-  /** 수집 함수(기본 collectUsage). 테스트에서 주입해 실제 CLI 미호출. */
+  /**
+   * **지표 획득 한 방(기본값)** — ACP 로 `/usage` 를 실행해 구조화 데이터를 바로 `ParseResult`
+   * 로 낸다. 옛 경로와 달리 텍스트 파싱 단계가 없다: ACP 응답이 이미 구조화돼 있어 라벨 매칭이
+   * 할 일이 없고, 그 라벨 매칭이 상류 변경에 조용히 무너졌던 지점이다(acp-collector 머리주석).
+   */
+  acquire?: () => Promise<ParseResult>;
+  /**
+   * 옛 텍스트 경로(`kiro-cli chat --no-interactive /usage` → `parseUsage`).
+   *
+   * `acquire` 가 주어지면 쓰이지 않는다. 남겨 둔 이유는 ACP 확장이 문서상 실험적이어서
+   * 되돌릴 길을 없애지 않기 위함이고, 그 되돌림은 `bootCredit` 한 줄이다. 다만 이 경로는
+   * **모델을 호출한다**(=크레딧을 쓴다). 기본으로 되돌리지 말 것.
+   */
   collect?: (deps?: CollectorDeps) => Promise<CollectResult>;
   /** 수집기 하위 옵션(타임아웃/spawn 등). */
   collectorDeps?: CollectorDeps;
@@ -51,6 +63,7 @@ export interface PipelineDeps {
 
 export class RefreshPipeline {
   private readonly store: PipelineStore;
+  private readonly acquire: (() => Promise<ParseResult>) | undefined;
   private readonly collect: (deps?: CollectorDeps) => Promise<CollectResult>;
   private readonly collectorDeps: CollectorDeps | undefined;
   private readonly now: () => Date;
@@ -58,6 +71,7 @@ export class RefreshPipeline {
 
   constructor(deps: PipelineDeps) {
     this.store = deps.store;
+    this.acquire = deps.acquire;
     this.collect = deps.collect ?? collectUsage;
     this.collectorDeps = deps.collectorDeps;
     this.now = deps.now ?? (() => new Date());
@@ -100,6 +114,15 @@ export class RefreshPipeline {
     sequence: number,
     source: CaptureSource,
   ): Promise<CreditSnapshot> {
+    if (this.acquire !== undefined) {
+      // ACP 경로: 수집과 매핑이 한 단계다. 실패도 `ParseResult` 로 오므로 아래 텍스트 경로와
+      // 같은 스냅샷 규율(성공은 data만, 실패는 raw+reason)을 그대로 쓴다.
+      const acquired = await this.acquire();
+      return acquired.ok
+        ? { capturedAt, sequence, source, ok: true, data: acquired.data }
+        : { capturedAt, sequence, source, ok: false, raw: acquired.raw, reason: acquired.reason };
+    }
+
     const collected = await this.collect(this.collectorDeps);
     if (!collected.ok) {
       // 수집 실패: 진단 detail을 원문으로 보존.

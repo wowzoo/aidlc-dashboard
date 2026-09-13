@@ -76,6 +76,48 @@ export interface DailyPoint {
 }
 
 /** 트랜스크립트 집계 결과. 실패는 예외가 아니라 카운터로 드러난다. */
+/**
+ * `type:"cost-state"` 레코드에서 **이 패널이 쓰는 필드만**. Claude Code 가 세션마다
+ * 체크포인트로 써 두는 누적 합계다.
+ *
+ * **`totalCostUSD` 와 `totalLinesAdded/Removed` 를 일부러 싣지 않는다.** 주석이 아니라 타입에서
+ * 뺀 이유가 있다 — 비용은 실측이 아니라 **로컬 가격표 곱셈**이고, 그 판정은 측정으로 닫혔다:
+ * 레코드 114건에서 표준 비율(cacheRead 0.1x, cacheCreate 1.25x, output 5x)로 역산한 input 단가가
+ * Opus 전 건 **$5.000/MTok, 편차 0.0%**, Haiku 95건 **$1.000/MTok, 편차 0.0%**. 청구액이 114개
+ * 세션에서 정가에 편차 없이 떨어지는 일은 없다. 레코드 자신의 `hasUnknownModelCost` 플래그가
+ * 결정적이다 — 로컬 표가 모델을 못 찾을 수 있어야 존재하는 필드다. 게다가 구독 사용자에게 그
+ * 금액은 오간 돈이 아니다. 줄수는 **세션 단위**라 stage·unit 에 귀속되지 않으므로, 매트릭스가
+ * 답하는 질문에 답하지 못한다(20/114 레코드는 줄수 합이 0이기도 하다).
+ */
+export interface SessionCost {
+  sessionId: string;
+  /** epoch ms. 레코드는 ISO 문자열이 아니라 숫자로 싣는다. */
+  startTimeMs: number;
+  /** 세션 벽시계(누적). API·도구 시간을 포함한 전체다. */
+  totalMs: number;
+  apiMs: number;
+  toolMs: number;
+}
+
+/** 창 안에 온전히 든 세션들의 시간 합. 감사 원장과 독립된 교차 검증용 수치다. */
+export interface SessionTimeAggregate {
+  /** 합계에 들어간 세션 수. */
+  sessions: number;
+  /**
+   * 창 경계를 걸쳐 **제외한** 세션 수.
+   *
+   * 레코드는 세션 누적 총합인데 세션은 며칠씩 이어진다(실측: 24시간 넘는 세션 27건, 최장
+   * 144.6h). 그래서 `startTime` 으로 자르면 144시간짜리 작업이 한 시점에 몰리고, 걸치는 세션을
+   * 넣으면 창 밖 시간이 창 안 수치에 섞인다. 온전히 든 세션만 더하고 제외한 수를 밝히는 쪽을
+   * 택했다 — 실측으로 7d 창에서 12건이 여기 걸린다. 상한이 완전성으로 읽히면 안 된다는
+   * 규율과 같은 처리다.
+   */
+  straddling: number;
+  totalMs: number;
+  apiMs: number;
+  toolMs: number;
+}
+
 export interface TranscriptAggregate {
   /** 읽은 트랜스크립트 디렉터리(절대 경로). 못 찾으면 null. */
   dir: string | null;
@@ -101,6 +143,13 @@ export interface TranscriptAggregate {
   malformedLines: number;
   /** 열지 못한 파일 수(권한·삭제 경합 등). */
   unreadableFiles: number;
+  /**
+   * 세션 시간 집계. `cost-state` 레코드를 하나도 못 봤으면 null 이다.
+   *
+   * null 이 정상 케이스라는 점이 중요하다 — 실측으로 프로젝트 디렉터리 61곳 중 **31곳만**
+   * 이 레코드를 갖고 있다(옛 세션에는 필드가 없다). 그래서 패널은 없으면 아무것도 그리지 않는다.
+   */
+  sessionTime: SessionTimeAggregate | null;
 }
 
 /** 파일 하나의 집계(메모 단위). 창 필터는 병합 시점에 적용한다. */
@@ -113,6 +162,9 @@ interface FileAggregate {
   sidechainByDay: Map<string, number>;
   /** 날짜 → 그 날짜의 최소·최대 타임스탬프(ISO). */
   boundsByDay: Map<string, { first: string; last: string }>;
+  /** 이 파일이 담은 `cost-state` 체크포인트. 실측 파일당 1~3건이라 배열로 둔다. 창 필터와
+   *  sessionId 중복 제거는 **병합 시점**에 한다 — 한 세션이 파일 여러 개에 걸칠 수 있다. */
+  costStates: SessionCost[];
   malformedLines: number;
 }
 
@@ -399,17 +451,27 @@ function parseFile(file: string): FileAggregate | undefined {
     sessionsByDay: new Map(),
     sidechainByDay: new Map(),
     boundsByDay: new Map(),
+    costStates: [],
     malformedLines: 0,
   };
 
   const ok = readLines(file, (line) => {
-    // 값싼 사전 필터 — usage가 없는 줄(user 메시지·요약 등)은 JSON.parse까지 가지 않는다.
-    if (line.length === 0 || !line.includes('"usage"')) return;
+    // 값싼 사전 필터 — 둘 중 아무 표지도 없는 줄(user 메시지·요약 등)은 JSON.parse까지 가지 않는다.
+    // `"modelUsage"` 에는 `"usage"` 가 없으므로(앞 문자가 `l`) cost-state 는 옛 필터에 걸리지
+    // 않았다. 즉 이 레코드는 지금까지 토큰 합계에 섞인 적이 없다.
+    if (line.length === 0) return;
+    const mightBeCost = line.includes('"cost-state"');
+    if (!mightBeCost && !line.includes('"usage"')) return;
 
     let rec: {
+      type?: unknown;
       timestamp?: unknown;
       sessionId?: unknown;
       isSidechain?: unknown;
+      startTime?: unknown;
+      totalDuration?: unknown;
+      totalAPIDuration?: unknown;
+      totalToolDuration?: unknown;
       message?: { model?: unknown; usage?: Record<string, unknown> };
     };
     try {
@@ -419,6 +481,19 @@ function parseFile(file: string): FileAggregate | undefined {
       return;
     }
 
+    // 표지는 사전 필터일 뿐이고 판정은 `type` 이 한다. 대화 본문이 이 문자열을 인용할 수 있으므로
+    // (이 기능을 논의한 세션의 트랜스크립트가 정확히 그렇다) 문자열만 믿으면 가짜 세션이 생긴다.
+    if (rec.type === "cost-state") {
+      if (typeof rec.sessionId !== "string" || typeof rec.startTime !== "number") return;
+      agg.costStates.push({
+        sessionId: rec.sessionId,
+        startTimeMs: rec.startTime,
+        totalMs: num(rec.totalDuration),
+        apiMs: num(rec.totalAPIDuration),
+        toolMs: num(rec.totalToolDuration),
+      });
+      return;
+    }
     const usage = rec.message?.usage;
     if (typeof usage !== "object" || usage === null) return;
     if (typeof rec.timestamp !== "string") return;
@@ -532,6 +607,7 @@ export function readTranscripts(
     filesCapped: 0,
     malformedLines: 0,
     unreadableFiles: 0,
+    sessionTime: null,
   };
 
   const dir = findTranscriptDir(root, home, deps.memo);
@@ -556,6 +632,10 @@ export function readTranscripts(
   const dayTotals = new Map<string, number>();
   const modelTotals = new Map<string, ModelBreakdown>();
   const sessions = new Set<string>();
+  // sessionId → 그 세션의 가장 늦은 체크포인트. 누적 총합은 자라기만 하므로 `totalMs` 가 가장 큰
+  // 레코드가 최신이다. 파일 순서에 기대지 않는 이유는 한 세션이 파일 여러 개에 걸칠 수 있고
+  // (재개), 그때 마지막 파일이 먼저 읽힐 수 있기 때문이다. 이걸 빼먹으면 세션이 이중 계산된다.
+  const costBySession = new Map<string, SessionCost>();
   let bytes = 0;
 
   for (const { file, size, mtimeMs } of stated) {
@@ -584,6 +664,11 @@ export function readTranscripts(
     merged.filesRead++;
     merged.malformedLines += agg.malformedLines;
 
+    for (const cs of agg.costStates) {
+      const prev = costBySession.get(cs.sessionId);
+      if (prev === undefined || cs.totalMs > prev.totalMs) costBySession.set(cs.sessionId, cs);
+    }
+
     for (const [day, byModel] of agg.days) {
       const bounds = agg.boundsByDay.get(day);
       // 파일 mtime보다 정밀한 2차 필터. 경계는 날짜 단위다 — 그 날의 마지막 메시지가 창
@@ -611,6 +696,31 @@ export function readTranscripts(
         if (merged.lastAt === null || bounds.last > merged.lastAt) merged.lastAt = bounds.last;
       }
     }
+  }
+
+  // 세션 시간: 창에 **온전히 든** 세션만 더하고, 걸친 세션은 세어 밝힌다(위 `straddling` 주석).
+  // 시작이 창보다 뒤이면 끝도 창 안이므로 포함 판정은 시작 시각만 보면 된다.
+  if (costBySession.size > 0) {
+    const st: SessionTimeAggregate = {
+      sessions: 0,
+      straddling: 0,
+      totalMs: 0,
+      apiMs: 0,
+      toolMs: 0,
+    };
+    for (const cs of costBySession.values()) {
+      if (cs.startTimeMs < cutoffMs) {
+        // 창 시작 전에 시작한 세션. 창 안까지 이어졌으면 "걸침"으로 밝히고, 완전히 창 밖이면
+        // 토큰과 마찬가지로 조용히 빠진다.
+        if (cs.startTimeMs + cs.totalMs >= cutoffMs) st.straddling++;
+        continue;
+      }
+      st.sessions++;
+      st.totalMs += cs.totalMs;
+      st.apiMs += cs.apiMs;
+      st.toolMs += cs.toolMs;
+    }
+    merged.sessionTime = st;
   }
 
   merged.sessions = sessions.size;

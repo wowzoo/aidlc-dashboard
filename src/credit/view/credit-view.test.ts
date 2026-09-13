@@ -4,6 +4,10 @@
 // 팀 규범(team.md ## Testing Posture)에 따라 상태별 렌더 + 적대적 입력 이스케이프 +
 // placeholder 누출 금지를 필수로 포함한다. 창 토글 radiogroup·resolveWindow 폴백·무JS 컨트롤도 커버.
 
+import { strings } from "../../render/i18n";
+
+/** 테스트는 한국어 출력을 단정한다 — 기존 기대 문자열이 그대로 유효하다. */
+const KO = strings("ko");
 import { describe, expect, test } from "bun:test";
 import type { TrendSeries } from "../trend/trend";
 import type { ParsedUsage } from "../types";
@@ -49,25 +53,26 @@ function model(status: CreditStatus, overrides: Partial<CreditViewModel> = {}): 
     },
     trend: status === "none" || status === "loading" ? emptyTrend() : filledTrend(),
     warning: null,
+    pollHalt: null,
   };
   return { ...base, ...overrides };
 }
 
 describe("renderCredit 상태별 렌더", () => {
   test("loading: 첫 수집 진행 상태를 알린다", () => {
-    const html = renderCredit(model("loading"), "30d");
+    const html = renderCredit(model("loading"), "30d", KO);
     expect(html).toContain("수집 중");
     expect(html).toContain('role="status"');
   });
 
   test("none: '데이터 없음' 자리표시, 게이지·경고 배너 없음", () => {
-    const html = renderCredit(model("none"), "30d");
+    const html = renderCredit(model("none"), "30d", KO);
     expect(html).toContain("아직 수집된 크레딧 데이터가 없습니다");
     expect(html).not.toContain("최신 데이터를 가져오지 못했습니다");
   });
 
   test("ok: 게이지(role=img)·플랜명·사용률 렌더, 경고 배너 없음", () => {
-    const html = renderCredit(model("ok"), "30d");
+    const html = renderCredit(model("ok"), "30d", KO);
     expect(html).toContain('role="img"');
     expect(html).toContain("Pro");
     expect(html).toContain("24.0%");
@@ -78,7 +83,7 @@ describe("renderCredit 상태별 렌더", () => {
     const partial = model("partial", {
       current: usage({ remainingAmount: null, usageRatio: null, partial: true }),
     });
-    const html = renderCredit(partial, "30d");
+    const html = renderCredit(partial, "30d", KO);
     expect(html).toContain("부분 데이터");
     expect(html).toContain("—");
   });
@@ -92,6 +97,7 @@ describe("renderCredit 상태별 렌더", () => {
         },
       }),
       "30d",
+      KO,
     );
     expect(html).toContain("오래된 데이터");
     expect(html).toContain("Pro");
@@ -101,7 +107,7 @@ describe("renderCredit 상태별 렌더", () => {
     const failure = model("failure", {
       warning: { raw: "raw usage dump", reason: "timeout" },
     });
-    const html = renderCredit(failure, "30d");
+    const html = renderCredit(failure, "30d", KO);
     expect(html).toContain("최신 데이터를 가져오지 못했습니다");
     expect(html).toContain("timeout");
     expect(html).toContain("Pro");
@@ -117,16 +123,50 @@ describe("renderCredit 상태별 렌더", () => {
         },
       }),
       "30d",
+      KO,
     );
     expect(html).toContain("최신 데이터를 가져오지 못했습니다");
     expect(html).toContain("10분 이상 경과");
+  });
+
+  test("폴링 감속은 실패 배너와 별개로, 왜 느려졌고 어떻게 낫는지 말한다", () => {
+    const html = renderCredit(
+      model("failure", {
+        pollHalt: {
+          failures: 5,
+          retryEveryMs: 1_800_000,
+          lastReason: "수집 실패: 타임아웃(15000ms 초과)",
+        },
+      }),
+      "30d",
+      KO,
+    );
+    // "마지막 시도가 실패했다"와 "그래서 더 시도하지 않는다"는 다른 사실이다.
+    expect(html).toContain("자동 수집 주기를 30분으로 늘렸습니다");
+    expect(html).toContain("5분마다 두드리지 않기 위해서");
+    expect(html).toContain("한 번이라도 성공하면 원래 주기로 돌아옵니다");
+    expect(html).toContain("마지막 실패 사유: 수집 실패: 타임아웃(15000ms 초과)");
+  });
+
+  test("감속하지 않았으면 그 고지를 그리지 않는다", () => {
+    expect(renderCredit(model("ok"), "30d", KO)).not.toContain("자동 수집 주기를");
+  });
+
+  test("영어 카탈로그도 감속 고지를 낸다", () => {
+    const html = renderCredit(
+      model("failure", { pollHalt: { failures: 5, retryEveryMs: 1_800_000 } }),
+      "30d",
+      strings("en"),
+    );
+    expect(html).toContain("After 5 consecutive failures");
+    expect(html).toContain("not polled every five minutes");
   });
 });
 
 describe("renderCredit 적대적 입력 이스케이프(NFR1.1)", () => {
   test("planName 의 <script>·따옴표·꺾쇠 이스케이프(원시 마크업 미주입)", () => {
     const evil = '<script>alert("x")</script>';
-    const html = renderCredit(model("ok", { current: usage({ planName: evil }) }), "30d");
+    const html = renderCredit(model("ok", { current: usage({ planName: evil }) }), "30d", KO);
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;");
   });
@@ -137,6 +177,7 @@ describe("renderCredit 적대적 입력 이스케이프(NFR1.1)", () => {
         warning: { raw: '<img src=x onerror="alert(1)">', reason: "<b>파싱실패</b>" },
       }),
       "30d",
+      KO,
     );
     expect(html).not.toContain("<img src=x");
     expect(html).not.toContain("<b>파싱실패</b>");
@@ -147,7 +188,7 @@ describe("renderCredit 적대적 입력 이스케이프(NFR1.1)", () => {
 
 describe("renderCredit placeholder 누출 금지(NFR1.2)", () => {
   test("none 렌더에 undefined/NaN/[object Object] 부재", () => {
-    const html = renderCredit(model("none"), "30d");
+    const html = renderCredit(model("none"), "30d", KO);
     expect(html).not.toContain("undefined");
     expect(html).not.toContain("NaN");
     expect(html).not.toContain("[object Object]");
@@ -165,7 +206,7 @@ describe("renderCredit placeholder 누출 금지(NFR1.2)", () => {
         partial: true,
       }),
     });
-    const html = renderCredit(partial, "30d");
+    const html = renderCredit(partial, "30d", KO);
     expect(html).not.toContain("undefined");
     expect(html).not.toContain("NaN");
     expect(html).not.toContain("[object Object]");
@@ -174,7 +215,7 @@ describe("renderCredit placeholder 누출 금지(NFR1.2)", () => {
 
 describe("renderCredit 창 토글·컨트롤·접근성", () => {
   test("창 토글: ?cw=7d|30d|all 링크 + 현재 창 aria-checked='true'", () => {
-    const html = renderCredit(model("ok"), "7d");
+    const html = renderCredit(model("ok"), "7d", KO);
     expect(html).toContain('role="radiogroup"');
     expect(html).toContain("?cw=7d");
     expect(html).toContain("?cw=30d");
@@ -185,13 +226,13 @@ describe("renderCredit 창 토글·컨트롤·접근성", () => {
   });
 
   test("크레딧 카드에는 중복 새로고침 컨트롤을 렌더하지 않는다", () => {
-    const html = renderCredit(model("ok"), "30d");
+    const html = renderCredit(model("ok"), "30d", KO);
     expect(html).not.toContain("새로고침");
     expect(html).not.toContain("/api/credit/refresh");
   });
 
   test("host 룩앤필: section(.card) 래퍼·host 토큰 사용", () => {
-    const html = renderCredit(model("ok"), "30d");
+    const html = renderCredit(model("ok"), "30d", KO);
     expect(html).toContain('class="card"');
     expect(html).toContain("var(--accent)");
   });

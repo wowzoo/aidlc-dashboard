@@ -146,4 +146,49 @@ describe("RefreshPipeline", () => {
     await pipeline.run("manual");
     expect(seen).toEqual(["auto", "manual"]);
   });
+
+  test("acquire 가 주어지면 텍스트 수집·파싱을 건너뛰고 그 결과를 스냅샷으로 쓴다", async () => {
+    // ACP 경로: 수집과 매핑이 한 단계이므로 collect/parseUsage 는 호출되지 않아야 한다.
+    let collectCalls = 0;
+    const store = memStore();
+    const pipeline = new RefreshPipeline({
+      store,
+      collect: async () => {
+        collectCalls++;
+        return { ok: true, raw: "쓰이면 안 되는 원문" };
+      },
+      acquire: async () => ({
+        ok: true,
+        data: {
+          planName: "KIRO POWER",
+          usedAmount: 7609.69,
+          remainingAmount: 2390.31,
+          planLimit: 10000,
+          usageRatio: 0.760969,
+          resetDate: "2026-10-01",
+          partial: false,
+        },
+      }),
+    });
+    pipeline.init();
+    const r = await pipeline.run("auto");
+    expect(collectCalls).toBe(0);
+    expect(r.snapshot.ok).toBe(true);
+    if (r.snapshot.ok) expect(r.snapshot.data.usedAmount).toBe(7609.69);
+  });
+
+  test("acquire 실패는 raw·reason 을 보존한 실패 스냅샷이 된다", async () => {
+    const store = memStore();
+    const pipeline = new RefreshPipeline({
+      store,
+      acquire: async () => ({ ok: false, raw: "{}", reason: "포맷 변경 가능성." }),
+    });
+    pipeline.init();
+    const r = await pipeline.run("manual");
+    expect(r.snapshot.ok).toBe(false);
+    if (!r.snapshot.ok) {
+      expect(r.snapshot.raw).toBe("{}");
+      expect(r.snapshot.reason).toContain("포맷 변경");
+    }
+  });
 });

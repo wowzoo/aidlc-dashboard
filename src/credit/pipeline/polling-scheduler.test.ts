@@ -23,6 +23,20 @@ function fakeResult(): RefreshResult {
   };
 }
 
+/** 성공 스냅샷 결과. `fakeResult()` 는 실패(ok:false)이므로 대비용으로 둔다. */
+function okResult(): RefreshResult {
+  return {
+    snapshot: {
+      capturedAt: "2026-08-01T00:00:00.000Z",
+      sequence: 1,
+      source: "auto",
+      ok: true,
+      data: {} as never,
+    },
+    persisted: true,
+  };
+}
+
 /** 다음 마이크로태스크/타이머 큐를 비우기 위한 짧은 지연. */
 function tickDelay(ms = 5): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -108,5 +122,108 @@ describe("PollingScheduler", () => {
     });
     await scheduler.tick();
     expect(received).not.toBeNull();
+  });
+
+  // 실패한 수집은 공짜가 아니다 — kiro-cli 기동 + 모델 호출을 부른다(모듈 주석의 실측).
+  // 그래서 상류가 깨진 상태에서 5분마다 영원히 재시도하지 않는다.
+  test("연속 실패가 임계치에 닿으면 멈추지 않고 감속한다 — 스스로 낫기 위해서다", async () => {
+    const halts: unknown[] = [];
+    const pipeline: Pollable = { run: async () => fakeResult() };
+    const scheduler = new PollingScheduler({
+      pipeline,
+      intervalMs: 60_000,
+      slowIntervalMs: 600_000,
+      maxConsecutiveFailures: 3,
+      onHalt: (h) => halts.push(h),
+    });
+    scheduler.start();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(scheduler.halt).toBeNull();
+    await scheduler.tick();
+    // ACP 실패는 모델을 부르지 않으므로 영구 정지는 값만 잃는다 — 타이머는 계속 돈다.
+    expect(scheduler.running).toBe(true);
+    expect(scheduler.halt).toEqual({
+      failures: 3,
+      retryEveryMs: 600_000,
+      lastReason: "x",
+    });
+    expect(halts).toHaveLength(1);
+    // 이미 감속한 뒤의 추가 실패가 콜백을 다시 부르지 않는다.
+    await scheduler.tick();
+    expect(halts).toHaveLength(1);
+    scheduler.stop();
+  });
+
+  test("감속 뒤 한 번 성공하면 감속이 풀린다", async () => {
+    let ok = false;
+    const pipeline: Pollable = { run: async () => (ok ? okResult() : fakeResult()) };
+    const scheduler = new PollingScheduler({
+      pipeline,
+      intervalMs: 60_000,
+      slowIntervalMs: 600_000,
+      maxConsecutiveFailures: 2,
+    });
+    scheduler.start();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(scheduler.halt?.retryEveryMs).toBe(600_000);
+    ok = true;
+    await scheduler.tick();
+    expect(scheduler.halt).toBeNull();
+    expect(scheduler.running).toBe(true);
+    scheduler.stop();
+  });
+
+  test("성공이 끼면 연속 카운터가 초기화된다 — 일시적 실패로는 멈추지 않는다", async () => {
+    let succeed = false;
+    const pipeline: Pollable = { run: async () => (succeed ? okResult() : fakeResult()) };
+    const scheduler = new PollingScheduler({ pipeline, maxConsecutiveFailures: 3 });
+    scheduler.start();
+    await scheduler.tick();
+    await scheduler.tick();
+    succeed = true;
+    await scheduler.tick();
+    succeed = false;
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(scheduler.running).toBe(true);
+    expect(scheduler.halt).toBeNull();
+  });
+
+  test("tick 이 예외로 끝나도 연속 실패로 센다 — 값을 못 가져온 건 같다", async () => {
+    const pipeline: Pollable = {
+      run: () => Promise.reject(new Error("boom")),
+    };
+    const scheduler = new PollingScheduler({ pipeline, maxConsecutiveFailures: 2 });
+    scheduler.start();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(scheduler.halt?.failures).toBe(2);
+    scheduler.stop();
+  });
+
+  test("저장 실패(persisted:false)는 성공으로 세지 않는다", async () => {
+    // 화면은 갱신되지 않으므로 수집이 성공했다고 말할 수 없다. 그러지 않으면 DB 가 쓰기
+    // 불능인 채로 감속이 풀리고 원래 주기로 계속 두드린다.
+    const pipeline: Pollable = {
+      run: async () => ({ ...okResult(), persisted: false, persistError: "disk full" }),
+    };
+    const scheduler = new PollingScheduler({ pipeline, maxConsecutiveFailures: 2 });
+    scheduler.start();
+    await scheduler.tick();
+    await scheduler.tick();
+    expect(scheduler.halt?.failures).toBe(2);
+    scheduler.stop();
+  });
+
+  test("maxConsecutiveFailures<=0 이면 멈추지 않는다", async () => {
+    const pipeline: Pollable = { run: async () => fakeResult() };
+    const scheduler = new PollingScheduler({ pipeline, maxConsecutiveFailures: 0 });
+    scheduler.start();
+    for (let i = 0; i < 20; i++) await scheduler.tick();
+    expect(scheduler.running).toBe(true);
+    expect(scheduler.halt).toBeNull();
+    scheduler.stop();
   });
 });

@@ -138,9 +138,18 @@ const files = publicFiles();
 const hits: Hit[] = [];
 let scanned = 0;
 const skipped: string[] = [];
+const exempt: string[] = [];
+/** Text files that went unread and were reported as hits — a bucket, so the count closes. */
+const unread: string[] = [];
 
 for (const file of files) {
-  if (EXEMPT.has(file)) continue;
+  if (EXEMPT.has(file)) {
+    // Counted, not dropped. An exempt file is as unchecked as a skipped one, and
+    // folding it into the denominator alone is what made `121/123` unreadable: the
+    // gap could equally have meant two files fell out of coverage.
+    exempt.push(file);
+    continue;
+  }
   const abs = path.join(ROOT, file);
   let body: string;
   try {
@@ -149,8 +158,29 @@ for (const file of files) {
       continue;
     }
     body = fs.readFileSync(abs, "utf-8");
-  } catch {
-    continue; // deleted between listing and read
+  } catch (err) {
+    // NOT necessarily the benign race the first version assumed — this also catches a
+    // permission error, and either way the file went UNREAD with no trace at all. So
+    // it is accounted for, and for a text file it FAILS the gate on the same reasoning
+    // as the NUL case below: an unchecked source file is a defect, not a skip.
+    if (!fs.existsSync(abs)) {
+      skipped.push(`${file} (목록 작성 후 사라짐)`);
+      continue;
+    }
+    const why = err instanceof Error ? err.message : String(err);
+    if (TEXT_EXT.test(file)) {
+      hits.push({
+        file,
+        line: 1,
+        why: "소스 파일을 읽지 못했다 — 이 파일은 검사되지 않는다",
+        redacted: "읽기 실패",
+        excerpt: why.slice(0, 110),
+      });
+      unread.push(file);
+      continue;
+    }
+    skipped.push(`${file} (읽기 실패: ${why})`);
+    continue;
   }
   if (body.includes("\u0000")) {
     // A NUL in a SOURCE file is not a legitimate skip, it is a defect: the file goes
@@ -166,6 +196,7 @@ for (const file of files) {
         redacted: "NUL",
         excerpt: "출력 가능한 문자로 교체할 것 (감사가 바이너리로 판정해 건너뛴다)",
       });
+      unread.push(file);
       continue;
     }
     skipped.push(`${file} (바이너리)`);
@@ -221,6 +252,22 @@ if (wantHistory) {
 
 // ---- report -----------------------------------------------------------------
 
+// Every listed file must land in exactly one bucket. This is the guard the output
+// itself could not be: a bare `검사 121/123` cannot say whether the gap was two
+// deliberate exemptions or two files that fell out of coverage, which is why the
+// number read as normal for several runs. If a future `continue` drops a file, the
+// sum stops closing and the gate fails instead of printing a plausible figure.
+const accounted = scanned + exempt.length + skipped.length + unread.length;
+if (accounted !== files.length) {
+  hits.push({
+    file: "scripts/audit-repo.ts",
+    line: 1,
+    why: `파일 집계 불일치 — 목록 ${files.length}개 중 ${accounted}개만 분류됐다`,
+    redacted: `${files.length - accounted}개`,
+    excerpt: "어느 버킷에도 들어가지 않은 파일은 검사되지 않은 파일이다",
+  });
+}
+
 const blind = customers.rootsFound.length === 0;
 if (blind) {
   console.warn(
@@ -245,10 +292,19 @@ if (hits.length > 0) {
 
 const scope = wantHistory ? "작업 트리 + 이력" : "작업 트리";
 console.log(`✓ 저장소 유출 감사 통과 (${scope})`);
+// The buckets are printed as a sum, not as a ratio: `검사 121 + 면제 2` accounts for
+// all 123, where `121/123` left the reader to guess what the other two were.
 console.log(
-  `  파일 ${scanned}/${files.length}개 검사 · 패턴 ${MACHINE.length}개(머신) + ${CREDENTIALS.length}개(자격증명) + ` +
+  `  파일 ${files.length}개 = 검사 ${scanned} + 면제 ${exempt.length} + 건너뜀 ${skipped.length}`,
+);
+console.log(
+  `  패턴 ${MACHINE.length}개(머신) + ${CREDENTIALS.length}개(자격증명) + ` +
     `${customerPatterns.length}개(고객사${blind ? ", 원천 없음" : ""})`,
 );
-// A skipped file is an unchecked file, so it is named rather than folded into a count.
+// Exempt and skipped files are both UNCHECKED, so both are named rather than folded
+// into a count — and the exempt ones say who has to read them, since no check does.
+if (exempt.length > 0) {
+  console.log(`  면제: ${[...exempt].sort().join(", ")} — 검사가 읽지 않으므로 사람이 봐야 한다`);
+}
 for (const s of skipped) console.log(`  건너뜀: ${s}`);
 if (!wantHistory) console.log("  이력은 검사하지 않았다 — 필요하면 `bun run audit -- --history`");
