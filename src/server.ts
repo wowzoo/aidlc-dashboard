@@ -17,29 +17,117 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { HOST, type Options, USAGE, UsageError, expandHome, parseArgs } from "./cli";
 import { createMemo } from "./credit/claude/transcript-reader";
-import { type Pollable, PollingScheduler } from "./credit/pipeline/polling-scheduler";
+import { type AcpSessionRef, collectUsageViaAcp } from "./credit/collector/acp-collector";
+import type { ParseResult } from "./credit/parser/usage-parser";
+import {
+  type PollHalt,
+  type Pollable,
+  PollingScheduler,
+} from "./credit/pipeline/polling-scheduler";
 import { type PipelineStore, RefreshPipeline } from "./credit/pipeline/refresh-pipeline";
 import { SnapshotStore } from "./credit/storage/snapshot-store";
 import { type CreditReadStore, assembleCredit } from "./credit/view/credit-model";
 import { resolveWindow } from "./credit/view/credit-view";
 import { NoRunError, type UsageContext, assemble } from "./model/assemble";
+import type { Locale } from "./model/types";
 import { esc } from "./render/common";
+import { type Strings, strings } from "./render/i18n";
+import { DEFAULT_LOCALE, localeCookie, localeFromQuery, resolveLocale } from "./render/locale";
 import { renderBody, renderPage } from "./render/page";
 import { renderPicker } from "./render/picker";
+import { renderViewPage } from "./render/view-page";
+import { refusalText, warningText } from "./render/warnings";
 import { browse, resolveWorkspace } from "./scan/browse";
 import { buildExplorer } from "./scan/explorer";
 import { openArtifact } from "./scan/open-file";
+import { resolveState } from "./scan/resolve";
+import { readWorkspaceSummary } from "./scan/summary";
+import { readArtifactSource } from "./scan/view-file";
 import { discoverWorkspaces } from "./scan/workspaces";
 import { VERSION } from "./version";
 
 /** Path the u3 credit view's no-JS refresh form POSTs to (must match verbatim). */
 const REFRESH_PATH = "/api/credit/refresh";
 
-function html(body: string, status = 200): Response {
-  return new Response(body, {
-    status,
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
-  });
+/**
+ * Routes that change something, so a cross-site caller must not reach them. Two are
+ * GETs on purpose — the browser cannot POST from an `<a>` — and both have side
+ * effects: `/select` moves `activeRoot`, `/open` launches an OS process.
+ */
+const STATE_CHANGING = new Set(["/api/refresh", REFRESH_PATH, "/select", "/open"]);
+
+/** Loopback, in the forms a Host or Origin header actually arrives in. */
+function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  if (h === "localhost" || h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
+
+/**
+ * True when the request came from a page on some OTHER origin.
+ *
+ * `Sec-Fetch-Site` is the answer when the browser sends it (every current one does):
+ * `same-origin` is our own page, `none` is the address bar. Anything else — including
+ * `same-site`, which a sibling port is — is somebody else's page. `Origin` is the
+ * fallback for an older browser.
+ *
+ * NEITHER header means NOT A BROWSER. curl and the test suite send no `Sec-Fetch-Site`
+ * and no `Origin`, they are not the threat this guards against, and they must keep
+ * working — CSRF is a browser-mediated attack by definition.
+ */
+function crossSiteRequest(req: Request): boolean {
+  const site = req.headers.get("sec-fetch-site");
+  if (site !== null) return site !== "same-origin" && site !== "none";
+  const origin = req.headers.get("origin");
+  if (origin === null) return false;
+  try {
+    return !isLoopbackHost(new URL(origin).hostname);
+  } catch {
+    return true; // unparseable Origin is not something to give the benefit of the doubt
+  }
+}
+
+/**
+ * `setCookie` is only ever the locale cookie, set when a reader passed `?lang=`.
+ * `extra` is per-route hardening — only `/view` uses it, and only to lock down a page
+ * built from file contents (see that case).
+ */
+function html(
+  body: string,
+  status = 200,
+  setCookie?: string,
+  extra?: Record<string, string>,
+): Response {
+  const headers: Record<string, string> = {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    ...extra,
+  };
+  if (setCookie !== undefined) headers["set-cookie"] = setCookie;
+  return new Response(body, { status, headers });
+}
+
+/**
+ * The record dir of the active intent, without assembling the whole model.
+ *
+ * `/open` and `/view` need exactly one field — the jail root — and reaching it through
+ * `assemble` was expensive in a way that did not show: on a `.claude` tree `assemble`
+ * reads the transcripts whether or not a `UsageContext` was passed, and the bare call
+ * `/open` used carried no memo, so every artifact click paid a COLD transcript read
+ * (measured worst case in transcript-reader.ts's header: 268ms for a 30-day window).
+ * `resolveState` is a handful of `readFileSync`/`existsSync` calls and answers the same
+ * question — it is the same function `assemble` itself starts from.
+ *
+ * Carries the resolve KIND on failure rather than `undefined`: `none` and `ambiguous` are
+ * different sentences (`NoRunError` keeps them apart for exactly that reason), and the
+ * caller has no way to recover the distinction once it is flattened.
+ */
+type RecordDirResult = { ok: true; recordDir: string } | { ok: false; kind: "none" | "ambiguous" };
+
+function activeRecordDir(root: string): RecordDirResult {
+  const resolved = resolveState(root);
+  if (resolved.kind !== "ok") return { ok: false, kind: resolved.kind };
+  return { ok: true, recordDir: path.dirname(path.join(root, resolved.rel)) };
 }
 
 function json(value: unknown, status = 200): Response {
@@ -57,18 +145,18 @@ function redirect(location: string): Response {
 }
 
 /** An error page that still says which workspace was being read. */
-function errorPage(root: string, message: string): string {
-  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
-<title>AI-DLC dashboard</title>
+function errorPage(root: string, message: string, locale: Locale = DEFAULT_LOCALE): string {
+  const t = strings(locale).errorPage;
+  return `<!DOCTYPE html><html lang="${locale}"><head><meta charset="utf-8">
+<title>${esc(t.docTitle)}</title>
 <style>body{font:14px/1.6 ui-sans-serif,-apple-system,sans-serif;margin:40px auto;max-width:640px;
 padding:0 18px;color:#1b1f2a}code{background:#eef0f4;padding:1px 5px;border-radius:4px}
 h1{font-size:17px}a{color:#2f6fd0}</style></head>
-<body><h1>워크플로 표시 불가</h1>
+<body><h1>${esc(t.heading)}</h1>
 <p>${esc(message)}</p>
-<p>읽으려던 경로: <code>${esc(root)}</code></p>
-<p>확인할 것: <code>&lt;root&gt;/aidlc/active-space</code> 와
-<code>&lt;root&gt;/aidlc/spaces/&lt;space&gt;/intents/active-intent</code> 커서가 실재하는 record 를 가리키는지.</p>
-<p><a href="/pick">다른 폴더 선택</a></p>
+<p>${esc(t.triedPathLabel)}<code>${esc(root)}</code></p>
+<p>${t.checkThis}</p>
+<p><a href="/pick">${esc(t.pickAnother)}</a></p>
 </body></html>`;
 }
 
@@ -97,6 +185,17 @@ const transcriptMemo = createMemo();
 export interface CreditRuntime {
   store?: CreditReadStore;
   pipeline?: Pollable;
+  /**
+   * Why automatic collection stopped, or null while it is running. Read on every render
+   * so the panel can say "the timer is off, and here is what it last saw" rather than
+   * leaving a stale figure to look like a live one.
+   *
+   * Optional like the other fields here: a test injects the seams it needs.
+   */
+  pollHalt?: () => PollHalt | null;
+  /** Restart a halted timer. Called after a MANUAL refresh succeeds — the path back to
+   *  automatic collection when upstream recovers, with no process restart. */
+  resumePolling?: () => void;
   isCollecting?: () => boolean;
   markCollectionDone?: () => void;
 }
@@ -108,11 +207,44 @@ export async function handle(
 ): Promise<Response> {
   const url = new URL(req.url);
 
+  // ---- browser-mediated request guards -------------------------------------
+  //
+  // The loopback BIND stops a remote socket. It does not stop a page already open in
+  // the user's own browser from reaching this server, and that leaves two separate
+  // holes — measured, all three exploits below succeeded before these checks:
+  //
+  //   HOST — DNS rebinding. A domain the attacker controls that resolves to 127.0.0.1
+  //     is SAME-ORIGIN as far as the browser is concerned, so their script can read
+  //     the response. `/api/model` is the whole assembled model: workspace paths,
+  //     artifact names, question text. Answering only to a loopback Host closes it,
+  //     and it costs nothing because there is no legitimate non-loopback name for a
+  //     server bound to 127.0.0.1.
+  //   ORIGIN — CSRF. A cross-site form POST needs no preflight, so any page could fire
+  //     `/api/credit/refresh` and make this process spawn `kiro-cli`; a bare `<img>`
+  //     could hit GET `/select` (moves activeRoot under the user's feet) or GET
+  //     `/open` (launches an editor). Read-only with respect to the workspace is not
+  //     the same as harmless.
+  //
+  // The Host check covers every route; the Origin check only the state-changing ones,
+  // because a cross-site GET of a page it cannot read is not worth refusing.
+  if (!isLoopbackHost(url.hostname)) {
+    return new Response("bad host", { status: 403 });
+  }
+  if (STATE_CHANGING.has(url.pathname) && crossSiteRequest(req)) {
+    return new Response("cross-site request refused", { status: 403 });
+  }
+
   if (url.pathname === "/api/refresh") {
     if (req.method !== "POST") return new Response("read-only", { status: 405 });
     if (!credit.pipeline) return json({ error: "credit runtime unavailable" }, 503);
     try {
-      return json(await credit.pipeline.run("manual"));
+      const result = await credit.pipeline.run("manual");
+      // A manual success is the path back: automatic collection slows itself after N
+      // consecutive failures (see polling-scheduler), and this clears that immediately.
+      // `persisted` is part of "success" — the page reads STORED snapshots, so a collection
+      // that could not be written has not refreshed anything and must not clear the backoff.
+      if (result.snapshot.ok && result.persisted) credit.resumePolling?.();
+      return json(result);
     } catch (err) {
       return json(
         {
@@ -134,13 +266,16 @@ export async function handle(
     if (req.method === "POST" && url.pathname === REFRESH_PATH) {
       if (credit.pipeline) {
         try {
-          await credit.pipeline.run("manual");
+          const result = await credit.pipeline.run("manual");
+          if (result.snapshot.ok && result.persisted) credit.resumePolling?.();
         } catch (err) {
           // Collection failures are already captured as failure snapshots by u2;
           // a throw here would only be an unexpected defect. Isolate it — the
           // refresh must never 500 the page.
           console.warn(
-            `[aidlc-dashboard] 수동 새로고침 실패(격리됨): ${err instanceof Error ? err.message : String(err)}`,
+            `[aidlc-dashboard] ${strings(opts.locale).cli.manualRefreshFailed(
+              err instanceof Error ? err.message : String(err),
+            )}`,
           );
         } finally {
           credit.markCollectionDone?.();
@@ -153,6 +288,22 @@ export async function handle(
   }
 
   const showHidden = url.searchParams.get("hidden") === "1";
+
+  // Resolved OUTSIDE the try so the catch's error page can be marked up in the
+  // reader's language too. Per request, never stored on the server — `activeRoot` is
+  // the one mutable thing in this process and a language is not workspace state
+  // (`render/locale.ts`). An explicit `?lang=` also gets a cookie so it survives the
+  // next click without every link having to carry the param, which is what `?cw=`
+  // has to do.
+  const langParam = url.searchParams.get("lang");
+  const locale = resolveLocale({
+    query: langParam,
+    cookie: req.headers.get("cookie"),
+    acceptLanguage: req.headers.get("accept-language"),
+    fallback: opts.locale,
+  });
+  const stickyLocale = localeFromQuery(langParam) !== undefined ? localeCookie(locale) : undefined;
+  const s: Strings = strings(locale);
 
   try {
     // Usage context for the rendering routes: the Kiro store (when wired) plus the
@@ -168,6 +319,7 @@ export async function handle(
       store: credit.store,
       window: resolveWindow(url.searchParams.get("cw")),
       collecting: credit.isCollecting?.() ?? false,
+      pollHalt: credit.pollHalt?.() ?? null,
       mode: opts.usageMode,
       memo: transcriptMemo,
     };
@@ -189,7 +341,10 @@ export async function handle(
             activeRoot,
             discoverWorkspaces(),
             buildExplorer(listing.dir, { activeRoot }),
+            locale,
           ),
+          200,
+          stickyLocale,
         );
       }
 
@@ -205,13 +360,15 @@ export async function handle(
           const listing = browse(dir, showHidden);
           return html(
             renderPicker(
-              { ...listing, error: `${dir} 에 aidlc/ 폴더 없음 — 워크스페이스가 아님.` },
+              { ...listing, error: s.errorPage.notAWorkspace(dir) },
               showHidden,
               activeRoot,
               discoverWorkspaces(),
               buildExplorer(listing.dir, { activeRoot }),
+              locale,
             ),
             400,
+            stickyLocale,
           );
         }
         activeRoot = picked;
@@ -230,16 +387,23 @@ export async function handle(
               undefined,
               discoverWorkspaces(),
               buildExplorer(listing.dir),
+              locale,
             ),
+            200,
+            stickyLocale,
           );
         }
-        return html(renderPage(assemble(activeRoot, opts.harnessDir, usageCtx), opts.pollMs));
+        return html(
+          renderPage(assemble(activeRoot, opts.harnessDir, usageCtx), opts.pollMs, locale),
+          200,
+          stickyLocale,
+        );
       }
 
       case "/api/body": {
-        if (!activeRoot) return html('<p class="note">워크스페이스 미선택.</p>');
+        if (!activeRoot) return html(`<p class="note">${esc(s.errorPage.noWorkspaceSelected)}</p>`);
         // Just the refreshable region — what the browser poll swaps in.
-        return html(renderBody(assemble(activeRoot, opts.harnessDir, usageCtx)));
+        return html(renderBody(assemble(activeRoot, opts.harnessDir, usageCtx), locale));
       }
 
       case "/api/current": {
@@ -249,6 +413,7 @@ export async function handle(
           new Date(),
           "30d",
           credit.isCollecting?.() ?? false,
+          credit.pollHalt?.() ?? null,
         );
         const state =
           model.status === "loading"
@@ -262,6 +427,9 @@ export async function handle(
           current: model.current,
           warning: model.warning,
           freshness: model.freshness,
+          // The page says "collection slowed"; a JSON consumer that cannot see that field would
+          // read these figures as still being refreshed on the normal cadence.
+          pollHalt: model.pollHalt,
         });
       }
 
@@ -283,12 +451,67 @@ export async function handle(
       case "/open": {
         if (!activeRoot) return json({ error: "no workspace selected" }, 409);
         const rel = url.searchParams.get("rel");
-        if (!rel) return json({ error: "rel 파라미터 없음" }, 400);
-        const model = assemble(activeRoot, opts.harnessDir);
-        const res = openArtifact(model.identity.recordDir, rel);
-        if (!res.ok) return json({ error: res.reason, rel }, res.status);
+        if (!rel) return json({ error: s.cli.needValue("rel") }, 400);
+        const record = activeRecordDir(activeRoot);
+        if (!record.ok) throw new NoRunError(record.kind, activeRoot);
+        const res = openArtifact(record.recordDir, rel, s);
+        if (!res.ok)
+          return json(
+            { error: refusalText(res.refusal, s), code: res.refusal.code, rel },
+            res.status,
+          );
         // 204: the click opened an editor, so the page must NOT navigate away.
         return new Response(null, { status: 204 });
+      }
+
+      // ---- one workspace's headline numbers, for the picker's cards ----------
+      // The picker renders labelled empty slots and the page fills them in, one fetch
+      // per card, so discovery still paints immediately (see render/picker.ts).
+      //
+      // `dir` is a CLIENT STRING and is treated as one: it becomes a path only through
+      // `resolveWorkspace`, the same validator `/select` uses, so this can only ever read
+      // something that really is an AI-DLC workspace. It never touches `activeRoot` —
+      // reading a workspace and selecting one are different acts.
+      //
+      // On cost: this is deliberately NOT `assemble` (see scan/summary.ts for the measured
+      // 5–16x), which also means it is cheaper than `/api/body`, an unguarded GET that has
+      // always run a full assemble. So this adds no new exposure class, and the check that
+      // matters — loopback `Host` — covers it like every route.
+      case "/api/summary": {
+        const raw = url.searchParams.get("dir");
+        if (!raw) return json({ error: s.cli.needValue("dir") }, 400);
+        const picked = resolveWorkspace(expandHome(raw));
+        if (!picked) return json({ error: "not a workspace" }, 400);
+        return json(readWorkspaceSummary(picked));
+      }
+
+      // ---- show an artifact's source in the dashboard ------------------------
+      // Read-only and side-effect free, which is why it is NOT in STATE_CHANGING:
+      // unlike `/open` it launches nothing. `rel` goes through the same jail
+      // (`resolveArtifact`), so the two readers cannot diverge on what is in bounds.
+      case "/view": {
+        if (!activeRoot) {
+          const noRoot = s.errorPage;
+          return html(errorPage(noRoot.noSelection, noRoot.noWorkspaceSelected, locale), 409);
+        }
+        const rel = url.searchParams.get("rel");
+        if (!rel) return html(errorPage(activeRoot, s.cli.needValue("rel"), locale), 400);
+        const record = activeRecordDir(activeRoot);
+        if (!record.ok) throw new NoRunError(record.kind, activeRoot);
+        const result = readArtifactSource(record.recordDir, rel);
+        return html(
+          renderViewPage(result, rel, locale),
+          result.ok ? 200 : result.status,
+          stickyLocale,
+          // The page shows a file this dashboard treats as hostile input. It is escaped,
+          // so nothing here executes — this is the second line: with `default-src 'none'`
+          // an escaping bug has no origin left to act in, and `nosniff` stops the browser
+          // second-guessing the content type of an artifact whose name we do not control.
+          {
+            "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+            "x-content-type-options": "nosniff",
+          },
+        );
       }
 
       case "/healthz":
@@ -298,13 +521,17 @@ export async function handle(
         return new Response("not found", { status: 404 });
     }
   } catch (err) {
-    const root = activeRoot ?? "(선택 없음)";
+    const root = activeRoot ?? s.errorPage.noSelection;
     if (err instanceof NoRunError) {
-      return html(errorPage(root, err.message), 404);
+      // Re-said in the reader's language from the FACTS the error carries, not from its
+      // own `message` — that one was built with the default catalogue for the terminal.
+      const said =
+        err.kind === "ambiguous" ? s.cli.intentAmbiguous(err.root) : s.cli.noWorkflow(err.root);
+      return html(errorPage(root, said, locale), 404);
     }
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`[aidlc-dashboard] ${url.pathname} 실패:`, err);
-    return html(errorPage(root, `읽기 중 오류: ${message}`), 500);
+    console.error(`[aidlc-dashboard] ${s.cli.routeFailed(url.pathname)}`, err);
+    return html(errorPage(root, s.errorPage.readFailed(message), locale), 500);
   }
 }
 
@@ -337,11 +564,16 @@ interface PipelineForBoot extends Pollable {
 interface SchedulerForBoot {
   start(runImmediately: boolean): void;
   stop(): void;
+  /** Optional so an existing test stub stays valid; the real scheduler has both. */
+  readonly halt?: PollHalt | null;
+  resume?(): void;
 }
 
 /** Injectable factories — real constructors by default, stubs in tests. */
 export interface CreditBootDeps {
   intervalMs?: number;
+  /** Language for the isolated-boot-failure line. Defaults to `ko` for a bare test call. */
+  locale?: Locale;
   createStore?: () => StoreForBoot;
   createPipeline?: (store: StoreForBoot) => PipelineForBoot;
   createScheduler?: (
@@ -359,6 +591,7 @@ export interface CreditBootDeps {
  * can drive the init-failure path without a real SQLite handle.
  */
 export function bootCredit(deps: CreditBootDeps = {}): CreditSubsystem {
+  const locale = deps.locale ?? DEFAULT_LOCALE;
   let collecting = true;
   const markCollectionDone = () => {
     collecting = false;
@@ -378,7 +611,29 @@ export function bootCredit(deps: CreditBootDeps = {}): CreditSubsystem {
       })
     )();
     store.init();
-    const pipeline = (deps.createPipeline ?? ((s) => new RefreshPipeline({ store: s })))(store);
+    // ACP 세션은 프로세스 수명 동안 하나만 만든다(acp-collector 머리주석의 세션 파일 실측).
+    //
+    // 획득은 SERIALISED 되어야 한다. 파이프라인은 자동·수동 동시 실행을 허용하는데(BR3.2 의
+    // pre-await sequence 가 그걸 전제한다), `AcpSessionRef` 는 잠금 없는 가변 객체다. 첫 두
+    // 호출이 겹치면 둘 다 `session/new` 를 실행해 "재시작당 세션 1개" 라는 근거가 깨지고, 그
+    // 뒤로는 서로 다른 ACP 프로세스 둘이 같은 세션을 동시에 load 한다. 꼬리물기 promise 하나로
+    // 충분하다 — 수집은 5분에 한 번이고 2초 걸린다.
+    const acpSession: AcpSessionRef = {};
+    let acpChain: Promise<unknown> = Promise.resolve();
+    const acquireSerially = (): Promise<ParseResult> => {
+      const next = acpChain.then(() => collectUsageViaAcp({ session: acpSession }));
+      // 앞 호출의 실패가 뒤 호출을 막지 않도록 체인은 실패를 삼킨다.
+      acpChain = next.catch(() => undefined);
+      return next;
+    };
+    const pipeline = (
+      deps.createPipeline ??
+      ((s) =>
+        new RefreshPipeline({
+          store: s,
+          acquire: acquireSerially,
+        }))
+    )(store);
     pipeline.init();
     const scheduler = (
       deps.createScheduler ??
@@ -395,6 +650,8 @@ export function bootCredit(deps: CreditBootDeps = {}): CreditSubsystem {
       store,
       pipeline,
       scheduler,
+      pollHalt: () => scheduler.halt ?? null,
+      resumePolling: () => scheduler.resume?.(),
       closeStore: () => store.close?.(),
       degraded: false,
       isCollecting,
@@ -402,10 +659,18 @@ export function bootCredit(deps: CreditBootDeps = {}): CreditSubsystem {
     };
   } catch (err) {
     console.error(
-      `[aidlc-dashboard] 크레딧 서브시스템 부팅 실패(대시보드는 계속 기동): ${err instanceof Error ? err.message : String(err)}`,
+      `[aidlc-dashboard] ${strings(locale).cli.creditBootFailed(
+        err instanceof Error ? err.message : String(err),
+      )}`,
     );
     markCollectionDone();
-    return { degraded: true, isCollecting, markCollectionDone };
+    return {
+      degraded: true,
+      isCollecting,
+      markCollectionDone,
+      pollHalt: () => null,
+      resumePolling: () => {},
+    };
   }
 }
 
@@ -434,6 +699,7 @@ if (import.meta.main) {
     throw err;
   }
 
+  const cliStrings = strings(opts.locale).cli;
   activeRoot = opts.root;
 
   // With a --root, fail loudly at startup rather than on first request. Without
@@ -443,20 +709,23 @@ if (import.meta.main) {
       const m = assemble(activeRoot, opts.harnessDir);
       console.log(
         `[aidlc-dashboard] ${m.identity.slug ?? m.identity.record} · ${m.state.lifecyclePhase} ${m.state.overallPct}% · ` +
-          `blockers ${m.blockers.length} · audit ${m.totalEvents}건 · harness ${m.identity.harnessDir ?? "미검출"}`,
+          `blockers ${m.blockers.length} · ${cliStrings.startupSummary(
+            m.totalEvents,
+            opts.locale,
+          )} · harness ${m.identity.harnessDir ?? cliStrings.harnessNotFound}`,
       );
-      for (const w of m.warnings) console.warn(`[warn] ${w}`);
+      for (const w of m.warnings) console.warn(`[warn] ${w.code} — ${warningText(w)}`);
     } catch (err) {
       console.error(`[aidlc-dashboard] ${err instanceof Error ? err.message : String(err)}`);
       process.exit(1);
     }
   } else {
-    console.log("[aidlc-dashboard] --root 없음 — 브라우저에서 폴더 선택");
+    console.log(`[aidlc-dashboard] ${cliStrings.noRootPicker}`);
   }
 
   // Boot credit AFTER the workspace check so a --root typo still fails fast, and
   // isolate it so a credit boot failure never blocks the server (NFR1.5).
-  const credit = bootCredit({ intervalMs: opts.intervalMs });
+  const credit = bootCredit({ intervalMs: opts.intervalMs, locale: opts.locale });
 
   // Clean up the polling timer and close the store on termination (BR2.2). The
   // timer is unref'd, so the process can exit on its own; stopping is explicit
@@ -479,13 +748,14 @@ if (import.meta.main) {
     // would otherwise leave through Bun's built-in 500, which is English and says
     // nothing about which workspace was being read.
     error(err) {
-      console.error("[aidlc-dashboard] 처리되지 않은 오류:", err);
+      console.error(`[aidlc-dashboard] ${strings(opts.locale).cli.unhandled}`, err);
       const message = err instanceof Error ? err.message : String(err);
-      return html(errorPage(activeRoot ?? "(선택 없음)", `읽기 중 오류: ${message}`), 500);
+      const t = strings(opts.locale).errorPage;
+      return html(errorPage(activeRoot ?? t.noSelection, t.readFailed(message), opts.locale), 500);
     },
   });
 
   console.log(
-    `[aidlc-dashboard] v${VERSION} · http://${HOST}:${server.port}  (poll ${opts.pollMs}ms, collect ${opts.intervalMs}ms, workspace read-only${credit.degraded ? ", credit degraded" : ""})`,
+    `[aidlc-dashboard] v${VERSION} · http://${HOST}:${server.port}  (poll ${opts.pollMs}ms, collect ${opts.intervalMs}ms, lang ${opts.locale}, workspace read-only${credit.degraded ? ", credit degraded" : ""})`,
   );
 }

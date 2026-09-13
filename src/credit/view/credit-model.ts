@@ -9,6 +9,7 @@
  * u2(수집)를 직접 호출하지 않는다(단방향 계층).
  */
 
+import type { PollHalt } from "../pipeline/polling-scheduler";
 import { type TrendSeries, type TrendWindow, buildTrend } from "../trend/trend";
 import type { CreditSnapshot, ParsedUsage } from "../types";
 
@@ -41,6 +42,13 @@ export interface CreditViewModel {
   trend: TrendSeries;
   /** 최신 스냅샷이 실패일 때 그 원문·사유. 아니면 null. */
   warning: { raw: string; reason: string } | null;
+  /**
+   * 자동 폴링이 연속 실패로 멈췄으면 그 근거, 아니면 null.
+   *
+   * `warning` 과 다른 사실이다 — `warning` 은 "마지막 시도가 실패했다"이고 이쪽은 "그래서 더
+   * 시도하지 않는다"다. 둘을 합치면 독자가 화면의 숫자를 여전히 갱신 중인 값으로 읽는다.
+   */
+  pollHalt: PollHalt | null;
 }
 
 /**
@@ -59,6 +67,7 @@ export function assembleCredit(
   now: Date = new Date(),
   window: TrendWindow = "30d",
   collecting = false,
+  pollHalt: PollHalt | null = null,
 ): CreditViewModel {
   const all = store.readAll();
   const trend = buildTrend(all, window, now);
@@ -91,6 +100,7 @@ export function assembleCredit(
     freshness: { stale, lastSuccessAt },
     trend,
     warning,
+    pollHalt,
   };
 }
 

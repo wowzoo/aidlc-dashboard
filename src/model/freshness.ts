@@ -15,7 +15,7 @@
 // its audit is NOT stale, it is simply idle.
 
 import * as fs from "node:fs";
-import type { Provenance, SourceKind } from "./types";
+import type { Provenance, SourceKind, StaleReason } from "./types";
 
 /** Seconds a source may lag the audit before we call it stale. */
 const LAG_TOLERANCE_SEC = 300;
@@ -40,11 +40,6 @@ function ageSec(asOf: string | undefined, now: string): number | undefined {
   return Math.max(0, (n - a) / 1000);
 }
 
-function hours(sec: number): string {
-  if (sec < 3600) return `${Math.round(sec / 60)}m`;
-  return `${(sec / 3600).toFixed(1)}h`;
-}
-
 export interface FreshnessInput {
   /** Assembly clock (ISO). */
   now: string;
@@ -66,8 +61,8 @@ export interface FreshnessInput {
   hooksLastActivity?: string;
   /** Absolute path of the stage catalogue, when one was found. */
   catalogPath?: string;
-  /** Extra sentence appended to the graph's stale reason (e.g. sensor drift). */
-  graphDriftNote?: string;
+  /** Sensor drift between the audit and the graph, appended to the stale reason. */
+  sensorDrift?: { fired: number; missing: number };
 }
 
 /**
@@ -81,7 +76,7 @@ export function buildProvenance(input: FreshnessInput): Record<SourceKind, Prove
     source: SourceKind,
     asOf: string | undefined,
     stale = false,
-    staleReason?: string,
+    staleReason?: StaleReason,
   ): Provenance => ({
     source,
     asOf,
@@ -93,16 +88,16 @@ export function buildProvenance(input: FreshnessInput): Record<SourceKind, Prove
   // runtime-graph: stale when it knows less than the audit does.
   const graphAsOf = input.graphLastEventTs ?? mtimeIso(input.graphPath);
   let graphStale = false;
-  let graphReason: string | undefined;
+  let graphReason: StaleReason | undefined;
   if (graphAsOf && auditLastTs) {
     const lag = (Date.parse(auditLastTs) - Date.parse(graphAsOf)) / 1000;
     if (Number.isFinite(lag) && lag > LAG_TOLERANCE_SEC) {
       graphStale = true;
-      graphReason = `감사 기록보다 ${hours(lag)} 뒤처짐 — 이 스냅샷은 stage 전이 시점에만 재컴파일됨${input.graphDriftNote ? `. ${input.graphDriftNote}` : ""}`;
+      graphReason = { code: "graph-behind", lagSec: lag, sensorDrift: input.sensorDrift };
     }
   } else if (!graphAsOf) {
     graphStale = true;
-    graphReason = "runtime-graph.json 읽기 실패 — units-generation 미진입 또는 미동기화";
+    graphReason = { code: "graph-unreadable" };
   }
 
   // state.md is NOT flagged stale for merely lagging the audit.
@@ -123,7 +118,7 @@ export function buildProvenance(input: FreshnessInput): Record<SourceKind, Prove
     "hooks-health": mk("hooks-health", input.hooksLastActivity),
     "stage-graph": input.catalogPath
       ? mk("stage-graph", mtimeIso(input.catalogPath))
-      : mk("stage-graph", undefined, true, "stage-graph.json 없음 — 산출물 계약 판정 생략"),
+      : mk("stage-graph", undefined, true, { code: "stage-graph-missing" }),
   };
 }
 

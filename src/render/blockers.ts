@@ -6,45 +6,44 @@
 
 import type { Blocker, DashboardModel } from "../model/types";
 import { dur, esc, pill, section, shortTs } from "./common";
+import type { Strings } from "./i18n";
 
-function blockerCard(b: Blocker): string {
+function blockerCard(b: Blocker, s: Strings): string {
   const where = b.unit ? `${b.unit} · ${b.stage}` : b.stage;
   const tone = b.isCurrentStage ? "bad" : "warn";
-  const label = b.isCurrentStage ? "현재 stage" : "이전 stage (파킹된 질문)";
+  const label = b.isCurrentStage ? s.blockers.currentStage : s.blockers.staleStage;
   // A gate confirmation is a different ask: the remedy is picking one of the
   // engine's fixed options (`Looks correct` / `Request changes`, `A. Accept
   // assumptions` / `B. …`) or writing the "what should change" feedback, not
   // answering a question. Naming it saves the reader opening the file to find out.
   const gate =
     b.kind === "confirmation"
-      ? pill(
-          "게이트 확인",
-          tone,
-          "질문이 아니라 승인 관문의 확인 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
-        )
+      ? pill(s.blockers.confirmation, tone, s.blockers.confirmationTip)
       : "";
   return `<div class="blocker ${tone}">
   <div class="blocker-head">${pill(label, tone)}${gate}<span class="blocker-where">${esc(where)}</span>
-    <span class="blocker-age">${esc(dur(b.waitingSec))} 대기</span></div>
+    <span class="blocker-age">${esc(s.blockers.waiting(dur(b.waitingSec)))}</span></div>
   <div class="blocker-q">${esc(b.heading)}</div>
-  <div class="blocker-path">${esc(b.rel)} · ${esc(shortTs(b.since))}</div>
+  <div class="blocker-path"><a href="/view?rel=${encodeURIComponent(b.rel)}" title="${esc(
+    s.blockers.viewTip(b.rel),
+  )}">${esc(b.rel)}</a> · ${esc(shortTs(b.since))}</div>
 </div>`;
 }
 
-function blockerBody(m: DashboardModel): string {
+function blockerBody(m: DashboardModel, s: Strings): string {
   if (m.blockers.length === 0) {
-    return `<p class="note">미답변 질문 없음. ${pill("정상", "ok")}</p>`;
+    return `<p class="note">${esc(s.blockers.none)} ${pill(s.blockers.ok, "ok")}</p>`;
   }
   const current = m.blockers.filter((b) => b.isCurrentStage);
   const stale = m.blockers.filter((b) => !b.isCurrentStage);
   const head =
     current.length > 0
-      ? `<p class="lead">현재 stage 가 답변 ${current.length}건 대기 중 — 이 답 없이는 워크플로 정지.</p>`
-      : `<p class="lead">현재 stage 는 정상. 다만 이전 stage 에 미답변 질문 ${stale.length}건 잔존.</p>`;
-  return head + [...current, ...stale].map(blockerCard).join("\n");
+      ? `<p class="lead">${esc(s.blockers.currentWaiting(current.length))}</p>`
+      : `<p class="lead">${esc(s.blockers.staleOnly(stale.length))}</p>`;
+  return head + [...current, ...stale].map((b) => blockerCard(b, s)).join("\n");
 }
 
 /** The blocker card alone — placed first on the page, above everything. */
-export function renderBlockerCard(m: DashboardModel): string {
-  return section("🚧 병목", blockerBody(m), "blockers");
+export function renderBlockerCard(m: DashboardModel, s: Strings): string {
+  return section(s.blockers.title, blockerBody(m, s), "blockers");
 }

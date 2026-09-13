@@ -9,8 +9,23 @@ import * as path from "node:path";
 
 export type ExplorerRootKind = "home" | "current" | "filesystem" | "volume" | "drive" | "cloud";
 
+/**
+ * A root chip's label, split so the SYNTHESISED part is copy and the read part is data.
+ *
+ * `홈`/`현재`/`볼륨 …` were built here, which is the display-string-in-the-scan-layer
+ * mistake this repo already records (`byOwner`'s `(unassigned)`). A volume's own name and
+ * a OneDrive folder's name come off the filesystem, so they stay verbatim under `raw`.
+ */
+export type ExplorerRootLabel =
+  | { key: "home" }
+  | { key: "current" }
+  | { key: "volume"; name: string }
+  | { key: "mount"; name: string }
+  | { key: "media"; name: string }
+  | { key: "raw"; name: string };
+
 export interface ExplorerRoot {
-  label: string;
+  label: ExplorerRootLabel;
   path: string;
   kind: ExplorerRootKind;
   active: boolean;
@@ -37,7 +52,7 @@ export interface ExplorerOptions {
 }
 
 interface RootCandidate {
-  label: string;
+  label: ExplorerRootLabel;
   path: string;
   kind: ExplorerRootKind;
 }
@@ -85,7 +100,7 @@ function addListedDirectories(
   candidates: RootCandidate[],
   parent: string,
   kind: ExplorerRootKind,
-  labelPrefix: string,
+  labelKey: "volume" | "mount" | "media",
   exists: (dir: string) => boolean,
   list: (dir: string) => string[],
   api: typeof path.posix | typeof path.win32,
@@ -94,7 +109,7 @@ function addListedDirectories(
   for (const name of list(parent).sort((a, b) => a.localeCompare(b))) {
     const dir = api.join(parent, name);
     if (!exists(dir)) continue;
-    candidates.push({ label: `${labelPrefix} ${name}`, path: dir, kind });
+    candidates.push({ label: { key: labelKey, name }, path: dir, kind });
     found.push(dir);
   }
   return found;
@@ -113,16 +128,18 @@ function rootCandidates(options: ExplorerOptions): {
     options.homeDir ??
     (platform === "win32" && env.USERPROFILE ? env.USERPROFILE : undefined) ??
     os.homedir();
-  const candidates: RootCandidate[] = [{ label: "홈", path: home, kind: "home" }];
+  const candidates: RootCandidate[] = [{ label: { key: "home" }, path: home, kind: "home" }];
 
   if (options.activeRoot) {
-    candidates.push({ label: "현재", path: options.activeRoot, kind: "current" });
+    candidates.push({ label: { key: "current" }, path: options.activeRoot, kind: "current" });
   }
 
   if (platform === "win32") {
     for (let code = "A".charCodeAt(0); code <= "Z".charCodeAt(0); code++) {
       const drive = `${String.fromCharCode(code)}:\\`;
-      if (exists(drive)) candidates.push({ label: drive, path: drive, kind: "drive" });
+      // A drive letter is read from the filesystem, not copy.
+      if (exists(drive))
+        candidates.push({ label: { key: "raw", name: drive }, path: drive, kind: "drive" });
     }
 
     for (const value of [
@@ -133,7 +150,7 @@ function rootCandidates(options: ExplorerOptions): {
     ]) {
       if (!value?.trim() || !exists(value)) continue;
       candidates.push({
-        label: api.basename(api.normalize(value)) || "OneDrive",
+        label: { key: "raw", name: api.basename(api.normalize(value)) || "OneDrive" },
         path: value,
         kind: "cloud",
       });
@@ -142,27 +159,27 @@ function rootCandidates(options: ExplorerOptions): {
       if (!name.toLowerCase().startsWith("onedrive")) continue;
       const oneDrive = api.join(home, name);
       if (exists(oneDrive)) {
-        candidates.push({ label: name, path: oneDrive, kind: "cloud" });
+        candidates.push({ label: { key: "raw", name }, path: oneDrive, kind: "cloud" });
       }
     }
   } else {
-    candidates.push({ label: "/", path: "/", kind: "filesystem" });
+    candidates.push({ label: { key: "raw", name: "/" }, path: "/", kind: "filesystem" });
 
     if (platform === "darwin") {
-      addListedDirectories(candidates, "/Volumes", "volume", "볼륨", exists, list, api);
+      addListedDirectories(candidates, "/Volumes", "volume", "volume", exists, list, api);
     } else if (platform === "linux") {
-      addListedDirectories(candidates, "/mnt", "volume", "마운트", exists, list, api);
+      addListedDirectories(candidates, "/mnt", "volume", "mount", exists, list, api);
       const mediaRoots = addListedDirectories(
         candidates,
         "/media",
         "volume",
-        "미디어",
+        "media",
         exists,
         list,
         api,
       );
       for (const mediaRoot of mediaRoots) {
-        addListedDirectories(candidates, mediaRoot, "volume", "미디어", exists, list, api);
+        addListedDirectories(candidates, mediaRoot, "volume", "media", exists, list, api);
       }
     }
   }

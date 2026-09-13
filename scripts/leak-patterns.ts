@@ -1,12 +1,14 @@
 // What must never appear in anything this repository publishes.
 //
 // ⚠️ THIS FILE IS EXEMPT FROM THE AUDIT THAT USES IT. A denylist of the things you
-// are hiding is itself the secret, so `audit-repo.ts` skips this path by name — which
-// means this is the ONE file no automated check reads. A human has to. Never put a
-// real customer name, hostname or token in here as a literal: names come from outside
-// the repository at runtime (see `customerNames()`), and everything below is either a
-// shape (`AKIA…`), or derived at runtime from the machine (see `operatorNames()` and
-// `customerNames()` — both read the environment, neither hardcodes a name).
+// are hiding is itself the secret, so `audit-repo.ts` skips this path by name — and
+// skips itself too, since it names the exemption. Those two are the files no automated
+// check reads; a human has to, and the audit prints both names on every run so the
+// obligation is visible. Never put a real customer name, hostname, repo owner or token
+// in here as a literal — not even in a comment explaining a pattern, which is a
+// mistake this file has already had to correct once. Everything below is either a
+// shape (`AKIA…`) or derived at runtime from the machine (`operatorNames()`,
+// `siblingRemoteOwners()`, `customerNames()` — none hardcodes a name).
 //
 // WHY THIS EXISTS SEPARATELY FROM THE ARCHIVE AUDIT. `package.ts` inspects the staged
 // zip, which by design excludes `*.test.ts` and `fixtures/`. That is correct for the
@@ -41,6 +43,13 @@ export const MACHINE: readonly LeakPattern[] = [
     pattern: /\/Users\/(?!me\/)[a-z0-9._-]+\/(Development|Desktop|Documents)\//i,
     why: "다른 사람의 홈 경로",
   },
+  ...siblingRemoteOwners().map((n) => ({
+    pattern: new RegExp(
+      `(^|[^a-z0-9가-힣])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`,
+      "i",
+    ),
+    why: "비공개 형제 저장소 소유자",
+  })),
   ...operatorNames().map((n) => ({
     // Same boundary as the customer patterns: a hyphen COUNTS as a boundary, because
     // the shape that actually leaks is the hyphenated slug
@@ -85,6 +94,48 @@ function operatorNames(): string[] {
     add(key === "user.email" ? v.split("@")[0] : v);
   }
   return [...out].sort();
+}
+
+/**
+ * GitHub owners of every remote EXCEPT `origin` — the private siblings this public
+ * repository must not name. Derived, never written here, for the same reason the
+ * operator name is: a literal would publish the string the audit looks for.
+ *
+ * `origin` is the published remote, so its owner is public by definition and is
+ * excluded (it is also already covered by `operatorNames()` when the two coincide).
+ * Any OTHER remote is a sibling — a private archive, a fork, a mirror — and naming it
+ * in a public file discloses a repository the reader was not meant to know exists.
+ *
+ * This gap was found by a note file, not by the audit: an untracked `MIGRATION.md` at
+ * the root recorded the private archive remote as its origin and the audit passed it,
+ * while the history finding in `CLAUDE.md` treats a private-sibling repo name as
+ * sensitive. The file is ignored now; this is the pattern that would have caught it.
+ * (The owner is deliberately not quoted here — writing it would be the leak.)
+ *
+ * Blind on a fresh clone with only `origin`, exactly like the customer list — the
+ * count printed by `audit-repo.ts` is what says so.
+ */
+function siblingRemoteOwners(): string[] {
+  const r = spawnSync("git", ["remote", "-v"], {
+    cwd: path.join(import.meta.dir, ".."),
+    encoding: "utf-8",
+  });
+  if (r.status !== 0) return [];
+  // Both SSH (`git@host:owner/repo.git`) and HTTPS (`https://host/owner/repo`).
+  const ownerOf = (url: string): string | undefined =>
+    /[:/]([a-z0-9][a-z0-9._-]*)\/[^/]+?(?:\.git)?$/i.exec(url)?.[1]?.toLowerCase();
+  const published = new Set<string>();
+  const siblings = new Set<string>();
+  for (const line of r.stdout.split("\n")) {
+    const [name, url] = line.trim().split(/\s+/);
+    if (!name || !url) continue;
+    const owner = ownerOf(url);
+    // 4 chars is the same floor operatorNames() uses — keeps a stub owner out.
+    if (owner === undefined || owner.length < 4) continue;
+    (name === "origin" ? published : siblings).add(owner);
+  }
+  for (const o of published) siblings.delete(o);
+  return [...siblings].sort();
 }
 
 /**

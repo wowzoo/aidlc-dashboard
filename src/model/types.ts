@@ -45,9 +45,20 @@ export interface Provenance {
   ageSec?: number;
   /** True when this source is known to lag another that corroborates it. */
   stale: boolean;
-  /** Why, in one human sentence. Only set when stale. */
-  staleReason?: string;
+  /**
+   * Why, as a CODE AND ITS FACTS. Only set when stale.
+   *
+   * A sentence here would be prose in the model, the same defect `Warning` records — and
+   * it reaches `/api/model`, so a consumer had to substring-match a Korean paragraph to
+   * learn that the graph was merely lagging. `render/i18n` says it; this names it.
+   */
+  staleReason?: StaleReason;
 }
+
+export type StaleReason =
+  | { code: "graph-behind"; lagSec: number; sensorDrift?: { fired: number; missing: number } }
+  | { code: "graph-unreadable" }
+  | { code: "stage-graph-missing" };
 
 /** Identity of the run being shown. */
 export interface RunIdentity {
@@ -123,6 +134,70 @@ export interface GateSummary {
 export type UsageMode = "auto" | "kiro" | "claude";
 
 /**
+ * Reading language of the rendered page. Two values, because the audience splits
+ * Korean / non-Korean and English serves the second as a lingua franca — this is
+ * not a list of regional locales, and `ko-KR` vs `ko` is not a distinction anyone
+ * reading this dashboard is making.
+ *
+ * It lives HERE, beside `UsageMode`, only because that is where this repo keeps the
+ * closed unions the CLI parses. It is NOT part of `DashboardModel` and `assemble`
+ * never sees it — see the header of `render/locale.ts` for why.
+ */
+export type Locale = "ko" | "en";
+
+/**
+ * A non-fatal reading problem, as a CODE AND ITS FACTS — never as a sentence.
+ *
+ * WHY THIS IS NOT A STRING. It was, and that put eleven Korean paragraphs inside
+ * `assemble`, which is the same rule this repo already broke once and wrote down:
+ * `byOwner` stood a missing stage up as `` `(${status})` ``, a display string built in
+ * the scan layer, and it printed an English `(unassigned)` on a Korean screen. The fix
+ * there was "the scan layer names nothing it does not read from the tree"; these
+ * warnings were the 11 places still exempt from it.
+ *
+ * Three things follow, and only one of them is about translation:
+ *
+ *   - `/api/model` stops carrying prose. A consumer gets `code` + facts and can act on
+ *     it; before, it got a paragraph in one language and had to substring-match.
+ *   - The TESTS stop matching on copy. Fifteen assertions did
+ *     `warnings.some(w => w.includes("절이 없습니다"))`, so rewording a sentence broke
+ *     the suite while a wrong CODE passed silently. They assert codes now.
+ *   - And a second language becomes a table lookup rather than an edit to `assemble`.
+ *
+ * The union is closed and `render/warnings.ts` switches on it exhaustively, so adding a
+ * member without giving it copy is a typecheck failure rather than a blank line on
+ * screen.
+ */
+export type Warning =
+  | { code: "catalog-read-failed"; harnessDir: string }
+  | { code: "catalog-not-found" }
+  | { code: "audit-empty" }
+  /** All three are REQUIRED: the harness version is read off the catalogue, so a
+   *  mismatch can only be detected when the catalogue — and its dir — is in hand.
+   *  `harnessDir?` let the sentence print `(undefined/tools/aidlc-lib.ts)`, which the
+   *  copy test caught; the type says it cannot happen instead of a fallback hiding it. */
+  | {
+      code: "state-version-mismatch";
+      stateVersion: string;
+      harnessVersion: string;
+      harnessDir: string;
+    }
+  /** `stateVersion` absent = the field was missing; present = it was there and unusable. */
+  | { code: "state-version-unreadable"; stateVersion?: string }
+  | { code: "team-without-unit-major"; constructionIteration?: string }
+  | { code: "unit-progress-malformed" }
+  | { code: "unit-progress-missing" }
+  | {
+      code: "roster-mismatch";
+      stateVersion?: string;
+      unknownToCatalog: string[];
+      missingFromState: string[];
+    }
+  | { code: "harness-coexist"; harnesses: string[]; chosen: "kiro" | "claude" }
+  | { code: "token-usage-failed"; detail: string }
+  | { code: "credit-assembly-failed"; detail: string };
+
+/**
  * The usage panel, discriminated by provider. A union rather than two optional
  * fields: exactly one provider is shown, and the type should not be able to say
  * otherwise.
@@ -185,7 +260,7 @@ export interface DashboardModel {
   /** Freshness per source, keyed by source kind. */
   provenance: Record<SourceKind, Provenance>;
   /** Non-fatal problems hit while reading (missing catalogue, unreadable file). */
-  warnings: string[];
+  warnings: Warning[];
   /**
    * Files each stage produced, keyed by the same identity the overview renders:
    * `<phase>/<slug>` for ordinary stages, `construction/<unit>/<slug>` for the

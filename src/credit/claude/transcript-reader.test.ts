@@ -58,6 +58,43 @@ function userLine(ts: string): string {
   return JSON.stringify({ type: "user", timestamp: ts, message: { role: "user", content: "hi" } });
 }
 
+interface CostOpts {
+  session?: string;
+  startMs: number;
+  totalMs: number;
+  apiMs?: number;
+  toolMs?: number;
+}
+
+/** `type:"cost-state"` 체크포인트 한 줄. 실제 레코드의 필드를 그대로 싣는다 — 비용·줄수 필드도
+ *  포함해서, 리더가 그것들을 **읽지 않는다**는 사실이 테스트로 확인되게 한다. */
+function costLine(o: CostOpts): string {
+  return JSON.stringify({
+    type: "cost-state",
+    sessionId: o.session ?? "s1",
+    startTime: o.startMs,
+    totalDuration: o.totalMs,
+    totalAPIDuration: o.apiMs ?? 0,
+    totalAPIDurationWithoutRetries: o.apiMs ?? 0,
+    totalToolDuration: o.toolMs ?? 0,
+    totalCostUSD: 12.34,
+    totalLinesAdded: 999,
+    totalLinesRemoved: 111,
+    hasUnknownModelCost: false,
+    modelUsage: {
+      "claude-opus-5": {
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadInputTokens: 1,
+        cacheCreationInputTokens: 1,
+        thinkingTokens: 0,
+        costUSD: 12.34,
+        webSearchRequests: 0,
+      },
+    },
+  });
+}
+
 interface Tree {
   home: string;
   root: string;
@@ -323,6 +360,114 @@ describe("readTranscripts", () => {
     expect(agg.messages).toBe(2);
     expect(agg.malformedLines).toBe(0);
     expect(agg.totals.output).toBe(10); // 7 + 3 — 두 줄 모두 온전히 파싱됐다
+  });
+
+  test("cost-state 가 없으면 sessionTime 은 null 이다 — 프로젝트 절반이 그렇다", () => {
+    const t = tree();
+    t.write("a.jsonl", [line({ ts: "2026-08-25T10:00:00Z" })], NOW);
+    expect(readTranscripts(t.root, "30d", { home: t.home, now: NOW }).sessionTime).toBeNull();
+  });
+
+  test("cost-state 는 토큰 합계에 섞이지 않고, 비용·줄수는 읽지 않는다", () => {
+    const t = tree();
+    const start = NOW.getTime() - 3_600_000;
+    t.write(
+      "a.jsonl",
+      [line({ ts: "2026-08-26T10:00:00Z" }), costLine({ startMs: start, totalMs: 3_600_000 })],
+      NOW,
+    );
+    const agg = readTranscripts(t.root, "30d", { home: t.home, now: NOW });
+    // 토큰은 assistant 한 줄에서만 온다 — cost-state 의 modelUsage 가 더해지면 이 값이 달라진다.
+    expect(agg.messages).toBe(1);
+    expect(totalOf(agg.totals)).toBe(1160);
+    // 집계 어디에도 비용·줄수가 실리지 않는다(타입에 없으므로 구조적으로 불가능).
+    expect(JSON.stringify(agg)).not.toContain("12.34");
+    expect(JSON.stringify(agg)).not.toContain("999");
+  });
+
+  test("같은 세션의 체크포인트가 여러 개면 가장 늦은 것만 센다 — 이중 계산 방지", () => {
+    const t = tree();
+    const start = NOW.getTime() - 7_200_000;
+    t.write(
+      "a.jsonl",
+      [
+        costLine({ startMs: start, totalMs: 1_000_000, apiMs: 100_000 }),
+        costLine({ startMs: start, totalMs: 7_200_000, apiMs: 1_800_000 }),
+      ],
+      NOW,
+    );
+    const st = readTranscripts(t.root, "30d", { home: t.home, now: NOW }).sessionTime;
+    expect(st).toEqual({
+      sessions: 1,
+      straddling: 0,
+      totalMs: 7_200_000,
+      apiMs: 1_800_000,
+      toolMs: 0,
+    });
+  });
+
+  test("한 세션이 파일 둘에 걸쳐도 한 번만 센다 (파일 순서에 기대지 않는다)", () => {
+    const t = tree();
+    const start = NOW.getTime() - 7_200_000;
+    // 최신 파일부터 읽히므로 b 가 먼저 온다 — 그래도 큰 쪽이 이겨야 한다.
+    t.write("a.jsonl", [costLine({ startMs: start, totalMs: 7_200_000 })], NOW);
+    t.write(
+      "b.jsonl",
+      [costLine({ startMs: start, totalMs: 1_000_000 })],
+      new Date(NOW.getTime() + 1000),
+    );
+    const st = readTranscripts(t.root, "30d", { home: t.home, now: NOW }).sessionTime;
+    expect(st?.sessions).toBe(1);
+    expect(st?.totalMs).toBe(7_200_000);
+  });
+
+  test("창 경계를 걸친 세션은 합계에서 빠지고 별도로 센다", () => {
+    const t = tree();
+    const day = 86_400_000;
+    t.write(
+      "a.jsonl",
+      [
+        // 창 안에서 시작 — 포함.
+        costLine({ session: "inside", startMs: NOW.getTime() - 2 * day, totalMs: 3_600_000 }),
+        // 7d 밖에서 시작해 창 안까지 이어짐 — 걸침.
+        costLine({ session: "straddle", startMs: NOW.getTime() - 9 * day, totalMs: 4 * day }),
+        // 7d 밖에서 시작해 창 전에 끝남 — 조용히 빠짐.
+        costLine({ session: "outside", startMs: NOW.getTime() - 20 * day, totalMs: 3_600_000 }),
+      ],
+      NOW,
+    );
+    const st = readTranscripts(t.root, "7d", { home: t.home, now: NOW }).sessionTime;
+    expect(st).toEqual({
+      sessions: 1,
+      straddling: 1,
+      totalMs: 3_600_000,
+      apiMs: 0,
+      toolMs: 0,
+    });
+    // all 창에서는 셋 다 온전히 들어간다.
+    const all = readTranscripts(t.root, "all", { home: t.home, now: NOW }).sessionTime;
+    expect(all?.sessions).toBe(3);
+    expect(all?.straddling).toBe(0);
+  });
+
+  test("본문이 cost-state 를 인용해도 가짜 세션이 생기지 않는다 — 판정은 type 이 한다", () => {
+    const t = tree();
+    // 이 기능을 논의한 세션의 트랜스크립트가 정확히 이 모양이다: 사람이 그 문자열을 적는다.
+    const quoting = JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-08-26T10:00:00Z",
+      sessionId: "s1",
+      cwd: "/ws",
+      message: {
+        model: "claude-opus-5",
+        usage: { input_tokens: 1, output_tokens: 1 },
+        content: 'type:"cost-state" 를 읽어야 하나?',
+      },
+    });
+    t.write("a.jsonl", [quoting], NOW);
+    const agg = readTranscripts(t.root, "30d", { home: t.home, now: NOW });
+    expect(agg.sessionTime).toBeNull();
+    expect(agg.messages).toBe(1); // usage 경로로도 정상 처리된다
   });
 
   test("첫 레코드가 머리 크기를 넘어도 cwd 를 찾아낸다 (정규식 폴백)", () => {

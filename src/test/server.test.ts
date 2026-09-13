@@ -8,6 +8,7 @@
 // ephemeral loopback port) purely to prove the binding and routing over HTTP.
 
 import { describe, expect, test } from "bun:test";
+import * as os from "node:os";
 import * as path from "node:path";
 import { type Options, parseArgs } from "../cli";
 import type { Pollable } from "../credit/pipeline/polling-scheduler";
@@ -101,7 +102,7 @@ describe("assemble credit slot", () => {
     const m = assemble(FIXTURE, undefined, ctx);
     expect(creditOf(m).status).toBe("none");
     expect(creditOf(m).trend.window).toBe("7d"); // degrade preserves the asked window
-    expect(m.warnings.some((w) => w.includes("크레딧 조립 실패"))).toBe(true);
+    expect(m.warnings.some((w) => w.code === "credit-assembly-failed")).toBe(true);
     // Non-credit sections are unharmed.
     expect(m.state.overallPct).toBe(80);
   });
@@ -117,6 +118,131 @@ describe("assemble credit slot", () => {
 describe("handle routing", () => {
   const get = (p: string, credit?: CreditRuntime) =>
     handle(new Request(`http://127.0.0.1${p}`), OPTS, credit);
+
+  // The loopback bind stops a remote socket, not a page in the user's own browser.
+  // Both guards were added after all three of these succeeded against the handler.
+  describe("browser-mediated request guards", () => {
+    const refresh = (headers: Record<string, string>, pipeline?: Pollable) =>
+      handle(
+        new Request("http://127.0.0.1/api/credit/refresh", { method: "POST", headers }),
+        OPTS,
+        {
+          pipeline,
+        },
+      );
+
+    test("a non-loopback Host is refused on every route (DNS rebinding)", async () => {
+      // A domain resolving to 127.0.0.1 is same-origin to the browser, so without this
+      // an attacker's script could READ /api/model — paths, artifact names, questions.
+      for (const p of ["/", "/api/model", "/api/body", "/healthz"]) {
+        const res = await handle(
+          new Request(`http://evil.example.com${p}`, {
+            headers: { "sec-fetch-site": "same-origin" },
+          }),
+          OPTS,
+        );
+        expect(res.status).toBe(403);
+        expect(await res.text()).toBe("bad host");
+      }
+    });
+
+    test("a cross-site caller cannot reach a state-changing route", async () => {
+      const ran: CaptureSource[] = [];
+      const pipeline: Pollable = {
+        run: (s) => {
+          ran.push(s);
+          return Promise.resolve({ snapshot: freshOkSnapshot(), persisted: true } as RefreshResult);
+        },
+      };
+      // `same-site` counts as cross-site here: a sibling port is somebody else's page.
+      for (const site of ["cross-site", "same-site"]) {
+        const res = await refresh({ "sec-fetch-site": site }, pipeline);
+        expect(res.status).toBe(403);
+      }
+      const byOrigin = await refresh({ origin: "https://evil.example.com" }, pipeline);
+      expect(byOrigin.status).toBe(403);
+      // The point of the guard: the pipeline never ran, so no kiro-cli was spawned.
+      expect(ran).toEqual([]);
+    });
+
+    test("the side-effecting GETs are guarded too, not just the POSTs", async () => {
+      for (const p of ["/select?dir=/tmp", "/open?rel=x.md"]) {
+        const res = await handle(
+          new Request(`http://127.0.0.1${p}`, { headers: { "sec-fetch-site": "cross-site" } }),
+          OPTS,
+        );
+        expect(res.status).toBe(403);
+      }
+    });
+
+    test("same-origin, address bar, Origin-only and header-less callers all pass", async () => {
+      const ran: CaptureSource[] = [];
+      const pipeline: Pollable = {
+        run: (s) => {
+          ran.push(s);
+          return Promise.resolve({ snapshot: freshOkSnapshot(), persisted: true } as RefreshResult);
+        },
+      };
+      const allowed: Record<string, string>[] = [
+        { "sec-fetch-site": "same-origin", origin: "http://127.0.0.1:4321" }, // our page
+        { "sec-fetch-site": "none" }, // typed into the address bar
+        { origin: "http://localhost:4321" }, // browser too old for Sec-Fetch-Site
+        {}, // curl — not the threat model, must keep working
+      ];
+      for (const headers of allowed) {
+        expect((await refresh(headers, pipeline)).status).toBe(303);
+      }
+      expect(ran.length).toBe(allowed.length);
+    });
+  });
+
+  // The locale-wiring step: `?lang=`/cookie/Accept-Language reach `<html lang>` and an
+  // explicit `?lang=` sticks. The COPY is still Korean in both languages — that is why
+  // there is no toggle on screen yet.
+  describe("page language", () => {
+    const page = (query: string, headers: Record<string, string> = {}) =>
+      handle(new Request(`http://127.0.0.1/${query}`, { headers }), OPTS);
+
+    test("the --lang default reaches <html lang> when the reader asks for nothing", async () => {
+      expect(await (await page("")).text()).toContain('<html lang="ko"');
+      const en = await handle(new Request("http://127.0.0.1/"), { ...OPTS, locale: "en" });
+      expect(await en.text()).toContain('<html lang="en"');
+    });
+
+    test("?lang= wins and is persisted; the cookie then answers on its own", async () => {
+      const explicit = await page("?lang=en");
+      expect(await explicit.text()).toContain('<html lang="en"');
+      // Persisted, so the next click needs no param — unlike `?cw=`, which every
+      // link has to carry.
+      expect(explicit.headers.get("set-cookie")).toContain("aidlc_lang=en");
+
+      const viaCookie = await page("", { cookie: "aidlc_lang=en" });
+      expect(await viaCookie.text()).toContain('<html lang="en"');
+      // Nothing was asked this time, so nothing is re-set.
+      expect(viaCookie.headers.get("set-cookie")).toBeNull();
+    });
+
+    test("Accept-Language is consulted before the --lang default", async () => {
+      const res = await page("", { "accept-language": "en-GB,en;q=0.9" });
+      expect(await res.text()).toContain('<html lang="en"');
+    });
+
+    test("the error page is marked up in the reader's language too", async () => {
+      // A root with no resolvable record → NoRunError → the 404 error page.
+      const res = await handle(new Request("http://127.0.0.1/?lang=en"), {
+        ...OPTS,
+        root: import.meta.dir,
+      });
+      // Either the page rendered or the error page did; both must carry the lang.
+      expect(await res.text()).toContain('<html lang="en"');
+    });
+
+    test("the picker carries it as well, not just the dashboard", async () => {
+      const res = await handle(new Request("http://127.0.0.1/pick?lang=en"), OPTS);
+      expect(await res.text()).toContain('<html lang="en"');
+      expect(res.headers.get("set-cookie")).toContain("aidlc_lang=en");
+    });
+  });
 
   test("non-GET/HEAD (POST/PUT/DELETE) on a normal path → 405 read-only", async () => {
     for (const method of ["POST", "PUT", "DELETE"]) {
@@ -256,6 +382,64 @@ describe("handle routing", () => {
     await get(`/select?dir=${encodeURIComponent(FIXTURE)}`);
     const res = await get(`/open?rel=${encodeURIComponent("../../../../etc/passwd")}`);
     expect(res.status).toBe(403);
+  });
+
+  test("/api/summary answers for a validated workspace and leaves activeRoot alone", async () => {
+    await get(`/select?dir=${encodeURIComponent(FIXTURE)}`);
+    const res = await get(`/api/summary?dir=${encodeURIComponent(FIXTURE)}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      kind: "ok",
+      progress: { source: "state.md" },
+      blockers: { source: "disk" },
+    });
+    // Reading a workspace and SELECTING one are different acts. `/select` is the only
+    // writer of the process's one mutable variable, and this must not become a second.
+    expect(await (await get("/healthz")).json()).toMatchObject({ root: FIXTURE });
+  });
+
+  test("/api/summary refuses a path that is not a workspace", async () => {
+    await get(`/select?dir=${encodeURIComponent(FIXTURE)}`);
+    // A client string becomes a path only through resolveWorkspace, so an arbitrary dir
+    // cannot make this read something that is not an AI-DLC tree.
+    expect((await get(`/api/summary?dir=${encodeURIComponent(os.tmpdir())}`)).status).toBe(400);
+    expect((await get("/api/summary")).status).toBe(400);
+    // …and the refusal did not move the active root either.
+    expect(await (await get("/healthz")).json()).toMatchObject({ root: FIXTURE });
+  });
+
+  test("/view renders the artifact source, escaped, with the page locked down", async () => {
+    await get(`/select?dir=${encodeURIComponent(FIXTURE)}`);
+    const res = await get(`/view?rel=${encodeURIComponent("ideation/intent-capture/memory.md")}`);
+    expect(res.status).toBe(200);
+    // The page is built from file contents, so it ships with no origin to act in.
+    expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    const body = await res.text();
+    expect(body).toContain("<pre>");
+    expect(body).toContain("ideation/intent-capture/memory.md");
+    // The artifact's own markdown must arrive escaped, never as live markup.
+    expect(body).not.toContain("<h2>");
+  });
+
+  test("/view shares the /open jail (traversal rejected) and says why", async () => {
+    await get(`/select?dir=${encodeURIComponent(FIXTURE)}`);
+    const res = await get(`/view?rel=${encodeURIComponent("../../../../etc/passwd")}`);
+    expect(res.status).toBe(403);
+    // A refusal is a PAGE here, not JSON: the reader clicked a link and must land
+    // somewhere that says what happened.
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(await res.text()).toContain("원문을 보여줄 수 없습니다");
+  });
+
+  test("/view answers in the reader's language", async () => {
+    await get(`/select?dir=${encodeURIComponent(FIXTURE)}`);
+    const res = await handle(
+      new Request(`http://127.0.0.1/view?lang=en&rel=${encodeURIComponent("nope.md")}`),
+      OPTS,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.text()).toContain("Cannot show this source");
   });
 });
 
