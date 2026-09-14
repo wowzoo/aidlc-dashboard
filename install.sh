@@ -7,8 +7,8 @@
 # to happen in order and one of them is destructive if you get it wrong:
 #
 #   1. The asset filename carries the version (`aidlc-dashboard-1.7.0.zip`), so
-#      `releases/latest/download/<name>` cannot be formed without first asking the
-#      API which tag is latest. A hand-written URL goes stale every release.
+#      `releases/latest/download/<name>` cannot be formed without first resolving
+#      which tag is latest. A hand-written URL goes stale every release.
 #   2. `data/usage.db` is the operator's collected credit history and it lives
 #      INSIDE the install dir. A naive re-install (rm -rf + unzip) destroys it.
 #      This script installs beside the old copy and carries `data/` across.
@@ -43,11 +43,28 @@ command -v unzip >/dev/null 2>&1 || die "unzip 이 필요하다."
 # ---- which version ----------------------------------------------------------
 if [ "$VERSION" = "latest" ]; then
   say "▸ 최신 릴리스 확인..."
-  # `tag_name` is the only field wanted, so grep+sed beats requiring jq. The API
-  # is asked rather than guessed because the asset name embeds the version.
-  TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null |
-    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-  [ -n "${TAG:-}" ] || die "최신 릴리스를 확인할 수 없다. AIDLC_VERSION=1.7.0 처럼 지정해 볼 것."
+  # RESOLVED FROM THE REDIRECT, NOT THE API. `github.com/<repo>/releases/latest`
+  # redirects to `/releases/tag/<tag>`, so the final URL carries the tag. The API
+  # would work too, but `api.github.com` is rate-limited to 60 requests/hour PER IP
+  # for unauthenticated callers — and behind a shared corporate NAT that is spent
+  # quickly by other people, which would break the default path (the pinned-version
+  # path never touches it) for a reason the user cannot see or fix.
+  TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$REPO/releases/latest" 2>/dev/null |
+    sed -n 's#.*/releases/tag/\([^/]*\)$#\1#p')
+  if [ -z "${TAG:-}" ]; then
+    # Fall back to the API: the redirect shape could change, and the two fail for
+    # different reasons, so trying both is strictly better than trying one.
+    TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null |
+      sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  fi
+  if [ -z "${TAG:-}" ]; then
+    die "최신 릴리스를 확인할 수 없다 (네트워크 또는 GitHub API 한도).
+  버전을 지정하면 이 조회를 건너뛴다:
+    AIDLC_VERSION=1.7.0 sh install.sh
+  또는 파이프로:
+    curl -fsSL <install.sh URL> | AIDLC_VERSION=1.7.0 sh"
+  fi
 else
   TAG="v${VERSION#v}"
 fi

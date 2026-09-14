@@ -9,8 +9,8 @@
 # The same three things install.sh has to get right, for the same reasons:
 #
 #   1. The asset filename carries the version (`aidlc-dashboard-1.7.0.zip`), so
-#      `releases/latest/download/<name>` cannot be formed without first asking the
-#      API which tag is latest.
+#      `releases/latest/download/<name>` cannot be formed without first resolving
+#      which tag is latest.
 #   2. `data\usage.db` is the operator's collected credit history and it lives
 #      INSIDE the install dir. A naive re-install destroys it, so the new tree is
 #      assembled beside the old one and `data\` is carried across.
@@ -51,14 +51,46 @@ if ($env:AIDLC_VERSION) {
   $tag = 'v' + ($env:AIDLC_VERSION -replace '^v', '')
 } else {
   Say '▸ 최신 릴리스 확인...'
+  # RESOLVED FROM THE REDIRECT, NOT THE API — same reason as install.sh:
+  # `github.com/<repo>/releases/latest` redirects to `/releases/tag/<tag>`, while
+  # `api.github.com` is rate-limited to 60 requests/hour per IP for unauthenticated
+  # callers, which a shared corporate NAT spends on the user's behalf. Only the
+  # default path would break, and only for a reason the user cannot see.
+  #
+  # The final URL is read differently on the two PowerShell generations: 5.1 gives
+  # an HttpWebResponse (`ResponseUri`), 7 gives an HttpResponseMessage
+  # (`RequestMessage.RequestUri`). Both are tried rather than assuming one.
+  $tag = $null
   try {
-    # Invoke-RestMethod parses the JSON, so unlike install.sh there is no sed here.
-    $tag = (Invoke-RestMethod -UseBasicParsing `
-        -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name
+    $resp = Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$repo/releases/latest"
+    $final = $null
+    if ($resp.BaseResponse.PSObject.Properties['ResponseUri']) {
+      $final = [string]$resp.BaseResponse.ResponseUri
+    }
+    if (-not $final -and $resp.BaseResponse.PSObject.Properties['RequestMessage']) {
+      $final = [string]$resp.BaseResponse.RequestMessage.RequestUri
+    }
+    if ($final -match '/releases/tag/([^/]+)$') { $tag = $Matches[1] }
+    # Last resort within the same response: the tag also appears in the page body.
+    if (-not $tag -and $resp.Content -match '/releases/tag/([^"''<>\s]+)') { $tag = $Matches[1] }
   } catch {
-    Die "최신 릴리스를 확인할 수 없다. `$env:AIDLC_VERSION='1.7.0'` 처럼 지정해 볼 것. ($_)"
+    # Fall through to the API below — the two fail for different reasons.
   }
-  if (-not $tag) { Die '최신 릴리스에 tag_name 이 없다.' }
+  if (-not $tag) {
+    try {
+      $tag = (Invoke-RestMethod -UseBasicParsing `
+          -Uri "https://api.github.com/repos/$repo/releases/latest").tag_name
+    } catch {
+      # Reported by the shared message below, which names the way out.
+    }
+  }
+  if (-not $tag) {
+    Die @"
+최신 릴리스를 확인할 수 없다 (네트워크 또는 GitHub API 한도).
+  버전을 지정하면 이 조회를 건너뛴다:
+    `$env:AIDLC_VERSION='1.7.0'; irm <install.ps1 URL> | iex
+"@
+  }
 }
 $ver = $tag -replace '^v', ''
 $asset = "aidlc-dashboard-$ver.zip"
