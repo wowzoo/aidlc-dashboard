@@ -92,7 +92,7 @@ h2 { margin:0; font-size:13px; font-weight:650; }
 .workspace-action {
   grid-row:1/3; grid-column:2; align-self:center; color:var(--accent); font-size:11px; font-weight:650;
 }
-/* 카드별 요약 — 서버가 라벨 있는 빈 칸을 그리고 스크립트가 숫자만 채운다. */
+/* Per-card summary — the server draws labelled empty slots and the script fills in only the numbers. */
 .ws-summary {
   grid-column:1/-1; min-height:17px; display:flex; align-items:baseline; gap:12px;
   flex-wrap:wrap; margin-top:2px;
@@ -101,7 +101,7 @@ h2 { margin:0; font-size:13px; font-weight:650; }
 .ws-metric[hidden] { display:none; }
 .ws-metric b { color:var(--fg); font-size:13px; font-weight:650; }
 .ws-metric i { color:var(--mute); font-size:10.5px; font-style:normal; }
-/* 병목이 있으면 그 숫자만 경고색 — 0 은 평범한 사실이라 강조하지 않는다. */
+/* Only the blocker count turns the warning colour, and only when nonzero — 0 is an ordinary fact, not something to highlight. */
 .ws-m-blockers.has-blockers b { color:var(--bad); }
 .ws-stage {
   min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;

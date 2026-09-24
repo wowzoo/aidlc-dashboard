@@ -611,18 +611,20 @@ export function bootCredit(deps: CreditBootDeps = {}): CreditSubsystem {
       })
     )();
     store.init();
-    // ACP 세션은 프로세스 수명 동안 하나만 만든다(acp-collector 머리주석의 세션 파일 실측).
+    // One ACP session per process lifetime (see the session-file measurement in the
+    // acp-collector header comment).
     //
-    // 획득은 SERIALISED 되어야 한다. 파이프라인은 자동·수동 동시 실행을 허용하는데(BR3.2 의
-    // pre-await sequence 가 그걸 전제한다), `AcpSessionRef` 는 잠금 없는 가변 객체다. 첫 두
-    // 호출이 겹치면 둘 다 `session/new` 를 실행해 "재시작당 세션 1개" 라는 근거가 깨지고, 그
-    // 뒤로는 서로 다른 ACP 프로세스 둘이 같은 세션을 동시에 load 한다. 꼬리물기 promise 하나로
-    // 충분하다 — 수집은 5분에 한 번이고 2초 걸린다.
+    // Acquisition must be SERIALISED. The pipeline allows an automatic and a manual run to
+    // overlap (BR3.2's pre-await sequence assumes it), and `AcpSessionRef` is an unlocked
+    // mutable object. If the first two calls overlap, both run `session/new`, which breaks
+    // the "one session per restart" claim, and from then on two separate ACP processes load
+    // the same session at once. A single tail-chained promise is enough — a collection runs
+    // once every five minutes and takes about two seconds.
     const acpSession: AcpSessionRef = {};
     let acpChain: Promise<unknown> = Promise.resolve();
     const acquireSerially = (): Promise<ParseResult> => {
       const next = acpChain.then(() => collectUsageViaAcp({ session: acpSession }));
-      // 앞 호출의 실패가 뒤 호출을 막지 않도록 체인은 실패를 삼킨다.
+      // The chain swallows failures so that one call failing does not block the next.
       acpChain = next.catch(() => undefined);
       return next;
     };
