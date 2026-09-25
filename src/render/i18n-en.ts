@@ -530,6 +530,7 @@ const picker: PickerStrings = {
   docTitle: "Choose an AI-DLC workspace",
   heading: "Choose a workspace",
   currentMark: "current",
+  launchMark: "found where you launched",
   workspaceKind: "AI-DLC workspace",
   openAction: "Open&nbsp;›",
   tagWorkspace: "workspace",

@@ -15,6 +15,10 @@
 
 set -euo pipefail
 
+# Remember where the user ran this BEFORE moving: the picker searches that folder
+# first and lists its workspaces at the top. An explicit value is left alone.
+export AIDLC_DASHBOARD_LAUNCH_DIR="${AIDLC_DASHBOARD_LAUNCH_DIR:-$PWD}"
+
 # Run from the script's own directory so relative paths hold no matter where the
 # script was invoked from (e.g. `~/tools/aidlc-dashboard/start.sh` from $HOME).
 cd "$(dirname "${BASH_SOURCE[0]}")"

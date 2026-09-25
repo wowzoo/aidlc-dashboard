@@ -12,6 +12,8 @@ REM   start.cmd C:\path\to\workspace
 REM   start.cmd --port 5000
 
 setlocal
+REM Remember where the user ran this BEFORE moving: the picker searches it first.
+if not defined AIDLC_DASHBOARD_LAUNCH_DIR set "AIDLC_DASHBOARD_LAUNCH_DIR=%CD%"
 cd /d "%~dp0"
 
 REM Prefer PowerShell 7+ (pwsh) when present, else Windows PowerShell 5.1.

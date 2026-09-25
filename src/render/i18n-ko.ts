@@ -501,6 +501,7 @@ const picker: PickerStrings = {
   docTitle: "AI-DLC 워크스페이스 선택",
   heading: "워크스페이스 선택",
   currentMark: "현재",
+  launchMark: "실행한 폴더에서 찾음",
   workspaceKind: "AI-DLC 워크스페이스",
   openAction: "열기&nbsp;›",
   tagWorkspace: "워크스페이스",

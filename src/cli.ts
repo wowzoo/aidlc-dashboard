@@ -53,6 +53,12 @@ export interface Options {
    * see `render/locale.ts`. This is only what an unadorned first request gets.
    */
   locale: Locale;
+  /**
+   * The directory the command was launched from, when the launcher passed one. The
+   * picker searches it first and lists its workspaces at the top. A hint, not a
+   * root: it never becomes `activeRoot` on its own.
+   */
+  launchDir?: string;
 }
 
 export const DEFAULT_PORT = 4321;
@@ -64,6 +70,12 @@ export const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
 export const HOST = "127.0.0.1";
 export const ENV_PORT = "AIDLC_DASHBOARD_PORT";
 export const ENV_INTERVAL_MS = "AIDLC_DASHBOARD_INTERVAL_MS";
+/**
+ * Set by the launchers (`start.sh` / `start.ps1`) to the caller's working directory
+ * BEFORE they `cd` into the install dir — after that, `process.cwd()` is the install
+ * dir, not where the user typed the command.
+ */
+export const ENV_LAUNCH_DIR = "AIDLC_DASHBOARD_LAUNCH_DIR";
 
 export const USAGE = `aidlc-dashboard — AI-DLC v2 run dashboard + credit usage
 
@@ -212,8 +224,15 @@ export function parseArgs(
   }
 
   // No --root: start anyway and let the user pick in the browser.
+  // The launch dir is a ranking hint, so a bad value is dropped rather than refused —
+  // like the other env entries, it is often inherited rather than typed.
+  const launchRaw = env[ENV_LAUNCH_DIR]?.trim();
+  const launchDir =
+    launchRaw && path.isAbsolute(launchRaw) && isDirectory(launchRaw)
+      ? path.resolve(launchRaw)
+      : undefined;
   if (root === undefined) {
-    return { root: undefined, port, pollMs, intervalMs, harnessDir, usageMode, locale };
+    return { root: undefined, port, pollMs, intervalMs, harnessDir, usageMode, locale, launchDir };
   }
 
   const abs = expandHome(root);
@@ -228,5 +247,13 @@ export function parseArgs(
     throw new UsageError(t.cli.harnessMissing(path.join(abs, harnessDir)));
   }
 
-  return { root: abs, port, pollMs, intervalMs, harnessDir, usageMode, locale };
+  return { root: abs, port, pollMs, intervalMs, harnessDir, usageMode, locale, launchDir };
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }

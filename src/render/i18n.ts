@@ -448,6 +448,8 @@ export interface PickerStrings {
   readonly docTitle: string;
   readonly heading: string;
   readonly currentMark: string;
+  /** Marks a workspace found in (or under) the folder the command was launched from. */
+  readonly launchMark: string;
   readonly workspaceKind: string;
   readonly openAction: string;
   readonly tagWorkspace: string;

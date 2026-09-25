@@ -111,6 +111,7 @@ h2 { margin:0; font-size:13px; font-weight:650; }
 .current-mark {
   position:absolute; top:8px; right:10px; color:var(--ok); font-size:10px; text-transform:uppercase;
 }
+.launch-mark { color:var(--accent); font-size:10.5px; font-weight:600; }
 .empty {
   margin:0; padding:20px; border:1px dashed var(--line); color:var(--mute); text-align:center;
 }
@@ -252,6 +253,7 @@ function workspaceRow(workspace: WorkspaceMatch, s: Strings, current?: string): 
   <a href="/select?dir=${encodeURIComponent(workspace.path)}">
     <span class="workspace-name">${esc(workspace.name)}</span>
     <span class="workspace-kind">${esc(t.workspaceKind)}</span>
+    ${workspace.nearLaunch ? `<span class="launch-mark">${esc(t.launchMark)}</span>` : ""}
     <span class="workspace-path">${esc(workspace.path)}</span>
     <span class="workspace-action">${t.openAction}</span>
     <span class="ws-summary" data-summary-dir="${esc(workspace.path)}" aria-live="polite">

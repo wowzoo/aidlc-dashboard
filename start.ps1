@@ -31,6 +31,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Remember where the user ran this BEFORE moving: the picker searches it first.
+# start.cmd sets it already (it moves before calling us), so only fill it when absent.
+if (-not $env:AIDLC_DASHBOARD_LAUNCH_DIR) {
+  $env:AIDLC_DASHBOARD_LAUNCH_DIR = (Get-Location).ProviderPath
+}
+
 # Run from the script's own directory so relative paths hold no matter where the
 # script was invoked from.
 Set-Location -LiteralPath $PSScriptRoot

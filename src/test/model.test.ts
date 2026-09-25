@@ -724,6 +724,18 @@ describe("cli", () => {
     expect(() => parseArgs(["--interval", "0"], {})).toThrow(UsageError);
   });
 
+  test("reads the launch dir from the launcher's env and drops a bad one", () => {
+    const here = import.meta.dir;
+    expect(parseArgs([], { AIDLC_DASHBOARD_LAUNCH_DIR: here }).launchDir).toBe(here);
+    expect(parseArgs(["--root", FIXTURE], { AIDLC_DASHBOARD_LAUNCH_DIR: here }).launchDir).toBe(
+      here,
+    );
+    // A hint, so a bad value is dropped rather than refusing to start.
+    expect(parseArgs([], {}).launchDir).toBeUndefined();
+    expect(parseArgs([], { AIDLC_DASHBOARD_LAUNCH_DIR: "/nope/nope" }).launchDir).toBeUndefined();
+    expect(parseArgs([], { AIDLC_DASHBOARD_LAUNCH_DIR: "relative/dir" }).launchDir).toBeUndefined();
+  });
+
   test("rejects a bad path and a non-workspace when --root IS given", () => {
     expect(() => parseArgs(["--root", "/nope/nope"])).toThrow(UsageError);
     // A real dir that holds no aidlc/ tree.
@@ -876,6 +888,21 @@ describe("folder picker", () => {
     expect(html).toContain('class="directory-viewport"');
     expect(html).toContain("열기&nbsp;›");
     expect(html).not.toContain("<details");
+  });
+
+  test("marks a workspace found where the command was launched", () => {
+    const disc = (nearLaunch: boolean) => ({
+      workspaces: [{ name: "reference", path: FIXTURE, nearLaunch }],
+      searchedRoots: [path.dirname(FIXTURE)],
+      scannedDirectories: 1,
+      truncated: false,
+    });
+    expect(renderPicker(browse(FIXTURE), false, undefined, disc(true))).toContain(
+      '<span class="launch-mark">실행한 폴더에서 찾음</span>',
+    );
+    expect(renderPicker(browse(FIXTURE), false, undefined, disc(false))).not.toContain(
+      '<span class="launch-mark">',
+    );
   });
 
   test("does not prefill a non-workspace browse location as a workspace path", () => {
