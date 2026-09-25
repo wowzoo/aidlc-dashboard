@@ -36,6 +36,7 @@ export interface Strings {
   readonly locale: Locale;
   readonly warn: WarnStrings;
   readonly blockers: BlockerStrings;
+  readonly status: StatusStrings;
   readonly overview: OverviewStrings;
   readonly page: PageStrings;
   readonly health: HealthStrings;
@@ -72,21 +73,53 @@ export interface WarnStrings {
   creditAssemblyFailed(detail: string): string;
 }
 
+/** One unanswered ask, in the list that opens under the status strip's "awaiting you" chip. */
 export interface BlockerStrings {
-  readonly title: string;
   readonly currentStage: string;
   readonly staleStage: string;
   readonly confirmation: string;
   readonly confirmationTip: string;
   waiting(age: string): string;
-  readonly none: string;
-  readonly ok: string;
-  currentWaiting(count: number): string;
-  staleOnly(count: number): string;
   /** The path in a blocker row is a LINK now. It used to be plain text, so the one panel
    *  whose whole job is "something is waiting on you" named the file and left the reader
    *  to go find it. */
   viewTip(rel: string): string;
+}
+
+/**
+ * The status strip at the top of the page (render/status.ts). Each chip is a head
+ * and a sub line; the sub line always names where the reading came from, because
+ * the four chips have four different sources and freshnesses.
+ */
+export interface StatusStrings {
+  /** aria-label of the strip. */
+  readonly label: string;
+  readonly runComplete: string;
+  readonly runUnknown: string;
+  readonly runSource: string;
+  readonly running: string;
+  /** `age` is how long since the newest audit event, already formatted. */
+  runningSub(stage: string, age: string): string;
+  readonly runTip: string;
+  readonly stuckNoRecord: string;
+  readonly stuckClear: string;
+  stuckEarlier(stage: string): string;
+  stuckBlocked(count: number): string;
+  readonly stuckSource: string;
+  readonly stuckTip: string;
+  humanWaiting(count: number): string;
+  humanOldest(age: string): string;
+  humanGate(stage: string): string;
+  readonly humanGateSource: string;
+  readonly humanNone: string;
+  humanEarlier(count: number): string;
+  readonly humanSource: string;
+  readonly checksNone: string;
+  checksInFlight(pending: number): string;
+  checksFailed(failed: number): string;
+  checksPassed(passed: number): string;
+  readonly checksSource: string;
+  readonly checksFailedTip: string;
 }
 
 export interface OverviewStrings {

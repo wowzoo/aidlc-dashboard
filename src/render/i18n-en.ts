@@ -25,6 +25,7 @@ import type {
   OverviewStrings,
   PageStrings,
   PickerStrings,
+  StatusStrings,
   Strings,
   TimelineStrings,
   UsageStrings,
@@ -98,20 +99,47 @@ const warn: WarnStrings = {
 };
 
 const blockers: BlockerStrings = {
-  title: "🚧 Blockers",
   currentStage: "current stage",
   staleStage: "earlier stage (parked question)",
   confirmation: "gate confirmation",
   confirmationTip:
     "Not a question but an approval-gate confirmation — the run proceeds only once you pick one of the engine's options or state what should change",
   waiting: (age) => `waiting ${age}`,
-  none: "No unanswered questions.",
-  ok: "clear",
-  currentWaiting: (count) =>
-    `The current stage is waiting on ${count} answer${count === 1 ? "" : "s"} — the workflow is stopped until it is given.`,
-  staleOnly: (count) =>
-    `The current stage is clear, but ${count} unanswered question${count === 1 ? "" : "s"} remain in earlier stages.`,
   viewTip: (rel) => `Read ${rel} in the dashboard`,
+};
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+const status: StatusStrings = {
+  label: "Run status",
+  runComplete: "✓ Complete",
+  runUnknown: "? Run state unknown",
+  runSource: "state.md",
+  running: "▶ Running",
+  runningSub: (stage, age) => `${stage} · last record ${age} ago`,
+  runTip:
+    "The last record is the newest event in the audit log. If it keeps growing, the run is not writing anything",
+  stuckNoRecord: "No block recorded",
+  stuckClear: "✓ Not stuck",
+  stuckEarlier: (stage) => `last block was in ${stage} · this clone`,
+  stuckBlocked: (count) => `⚠ Blocked ${count}× with no progress`,
+  stuckSource: "stop hook · this clone",
+  stuckTip:
+    "The stop hook's block-count.json. It rises by one each time the run tries to stop without progress and returns to 0 when work advances. The limit at which the engine gives up is engine-side, so it is not judged here",
+  humanWaiting: (count) => `✋ ${plural(count, "answer")} awaiting you`,
+  humanOldest: (age) => `oldest ${age}`,
+  humanGate: (stage) => `Approval pending: ${stage}`,
+  humanGateSource: "gate open · audit log",
+  humanNone: "✓ Nothing awaiting you",
+  humanEarlier: (count) => `${count} unanswered in earlier stages`,
+  humanSource: "questions files",
+  checksNone: "No checks recorded this stage",
+  checksInFlight: (pending) => `⋯ ${plural(pending, "check")} running`,
+  checksFailed: (failed) => `✗ ${plural(failed, "check failure")} recorded`,
+  checksPassed: (passed) => `✓ ${plural(passed, "check")} passed`,
+  checksSource: "sensors · current stage · audit log",
+  checksFailedTip:
+    "Sensor failures recorded in the current stage. This roll-up cannot tell whether a later re-check passed",
 };
 
 const overview: OverviewStrings = {
@@ -716,6 +744,7 @@ export const EN: Strings = {
   locale: "en",
   warn,
   blockers,
+  status,
   overview,
   page,
   health,

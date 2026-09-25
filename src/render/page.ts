@@ -13,13 +13,13 @@ import { renderTokens } from "../credit/claude/token-view";
 import { renderCredit } from "../credit/view/credit-view";
 import type { DashboardModel, Locale } from "../model/types";
 import { VERSION } from "../version";
-import { renderBlockerCard } from "./blockers";
 import { esc } from "./common";
 import { renderDeferrals } from "./deferrals";
 import { renderHealth } from "./health";
 import { type Strings, strings } from "./i18n";
 import { DEFAULT_LOCALE } from "./locale";
 import { renderOverview } from "./overview";
+import { renderStatus } from "./status";
 import { renderTimeline } from "./timeline";
 import { warningTextIn } from "./warnings";
 
@@ -434,6 +434,32 @@ table.tbl td code { white-space:nowrap; }
 .warnbox { border:1px solid var(--warn); border-radius:var(--r-ctl); padding:8px 11px; margin-bottom:12px;
   font-size:var(--fs-2); color:var(--warn); grid-column:1/-1; }
 .warnbox ul { margin:4px 0 0; padding-left:17px; }
+/* Status strip: one full-width row, one chip per signal. The tone is carried by the
+   border and the head's colour AND by the leading glyph in the copy, so it does not
+   rely on colour alone. */
+.status-strip { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0;
+  list-style:none; }
+.st-chip { border:1px solid var(--line); border-radius:var(--r-box); background:var(--card); }
+.st-chip > a, .st-chip > span { display:flex; flex-direction:column; gap:1px; padding:6px 11px;
+  color:inherit; text-decoration:none; }
+.st-chip > a:hover .st-head { text-decoration:underline; }
+.st-head { font-size:var(--fs-3); font-weight:600; }
+.st-sub { font-size:var(--fs-1); color:var(--mute); }
+.st-chip.ok { border-color:var(--ok); } .st-chip.ok .st-head { color:var(--ok); }
+.st-chip.warn { border-color:var(--warn); } .st-chip.warn .st-head { color:var(--warn); }
+.st-chip.bad { border-color:var(--bad); } .st-chip.bad .st-head { color:var(--bad); }
+.st-chip.mute { border-style:dashed; } .st-chip.mute .st-head { color:var(--fg); }
+/* A chip with detail is a native <details>: the summary IS the chip, and the list
+   floats under it rather than taking a card slot of its own. */
+.st-chip.has-pop { position:relative; }
+.st-chip.has-pop summary { display:flex; flex-direction:column; gap:1px; padding:6px 11px; cursor:pointer;
+  list-style:none; }
+.st-chip.has-pop summary::-webkit-details-marker { display:none; }
+.st-chip.has-pop summary .st-head::after { content:" ▾"; font-weight:400; color:var(--mute); }
+.st-chip.has-pop details[open] summary .st-head::after { content:" ▴"; }
+.st-pop { position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:min(620px,92vw);
+  max-height:60vh; overflow:auto; padding:10px 10px 2px; background:var(--card); color:var(--fg);
+  border:1px solid var(--line); border-radius:var(--r-box); box-shadow:0 6px 24px rgba(0,0,0,.28); }
 
 /* Credit view (u3) — first card in the primary column. Uses host tokens only.
    The u3 view emits .card via section(); these style its inner blocks. */
@@ -661,11 +687,12 @@ export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): 
     let i = 0;
     return html.replace(/<details/g, () => `<details data-key="${prefix}-${i++}"`);
   };
-  // Blockers lead the primary column, then usage, then the decisions the run
-  // deferred. Overview cards lead the secondary column and provide context for
-  // timing. Which usage panel renders is resolved during assembly (model.usage), so the
-  // renderer just dispatches on the discriminant — the two panels share the card
-  // slot, the `?cw=` window contract and the `credit-*` CSS.
+  // Usage leads the primary column, then the decisions the run deferred. There is
+  // no blocker card: "what is waiting on you" is the status strip's chip, and the
+  // asks list opens under it. Overview cards lead the secondary column and provide
+  // context for timing. Which usage panel renders is resolved during assembly
+  // (model.usage), so the renderer just dispatches on the discriminant — the two
+  // panels share the card slot, the `?cw=` window contract and the `credit-*` CSS.
   const usage =
     m.usage.kind === "claude"
       ? renderTokens(m.usage.tokens, m.usage.tokens.trend.window, s)
@@ -673,14 +700,14 @@ export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): 
   // Filtered rather than interpolated: renderHealth's panels are both behind
   // SHOW_ flags, so it emits nothing today and a blank line would be left behind.
   const primary = [
-    keyed(renderBlockerCard(m, s), "b"),
     keyed(usage, "credit"),
     keyed(renderDeferrals(m, s), "d"),
     keyed(renderHealth(m, s), "h"),
   ]
     .filter((part) => part.trim().length > 0)
     .join("\n");
-  return `${warnings(m, s)}
+  return `${keyed(renderStatus(m, s), "s")}
+${warnings(m, s)}
 <div class="col primary-col">
 ${primary}
 </div>

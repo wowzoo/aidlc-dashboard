@@ -18,6 +18,7 @@ import type {
   OverviewStrings,
   PageStrings,
   PickerStrings,
+  StatusStrings,
   Strings,
   TimelineStrings,
   UsageStrings,
@@ -89,18 +90,45 @@ const warn: WarnStrings = {
 };
 
 const blockers: BlockerStrings = {
-  title: "🚧 병목",
   currentStage: "현재 stage",
   staleStage: "이전 stage (파킹된 질문)",
   confirmation: "게이트 확인",
   confirmationTip:
     "질문이 아니라 승인 관문의 확인 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
   waiting: (age) => `${age} 대기`,
-  none: "미답변 질문 없음.",
-  ok: "정상",
-  currentWaiting: (count) => `현재 stage 가 답변 ${count}건 대기 중 — 이 답 없이는 워크플로 정지.`,
-  staleOnly: (count) => `현재 stage 는 정상. 다만 이전 stage 에 미답변 질문 ${count}건 잔존.`,
   viewTip: (rel) => `${rel} 원문을 대시보드에서 보기`,
+};
+
+const status: StatusStrings = {
+  label: "run 상태",
+  runComplete: "✓ 완료",
+  runUnknown: "? run 상태 확인 불가",
+  runSource: "state.md",
+  running: "▶ 진행 중",
+  runningSub: (stage, age) => `${stage} · 마지막 기록 ${age} 전`,
+  runTip:
+    "마지막 기록은 감사 로그의 가장 최근 이벤트입니다. 이 값이 계속 커지면 run 이 아무것도 쓰지 않고 있다는 뜻입니다",
+  stuckNoRecord: "차단 기록 없음",
+  stuckClear: "✓ 막힘 없음",
+  stuckEarlier: (stage) => `마지막 차단은 ${stage} · 이 clone`,
+  stuckBlocked: (count) => `⚠ 진행 없이 ${count}회 연속 차단`,
+  stuckSource: "stop hook · 이 clone",
+  stuckTip:
+    "stop hook 의 block-count.json 입니다. 진행 없이 멈추려 할 때마다 1 씩 오르고 진행하면 0 으로 돌아갑니다. 엔진이 포기하는 한도는 엔진 쪽 설정이라 여기서 판정하지 않습니다",
+  humanWaiting: (count) => `✋ 내 답변 대기 ${count}건`,
+  humanOldest: (age) => `가장 오래된 것 ${age}`,
+  humanGate: (stage) => `승인 대기 ${stage}`,
+  humanGateSource: "게이트 열림 · 감사 로그",
+  humanNone: "✓ 답변 대기 없음",
+  humanEarlier: (count) => `이전 stage 미답변 ${count}건`,
+  humanSource: "questions 파일",
+  checksNone: "현재 stage 검사 기록 없음",
+  checksInFlight: (pending) => `⋯ 검사 진행 중 ${pending}건`,
+  checksFailed: (failed) => `✗ 검사 실패 ${failed}건 기록`,
+  checksPassed: (passed) => `✓ 검사 통과 ${passed}건`,
+  checksSource: "sensor · 현재 stage · 감사 로그",
+  checksFailedTip:
+    "현재 stage 에서 기록된 sensor 실패 수입니다. 이후 재검사가 통과했는지는 이 집계만으로는 알 수 없습니다",
 };
 
 const overview: OverviewStrings = {
@@ -684,6 +712,7 @@ export const KO: Strings = {
   locale: "ko",
   warn,
   blockers,
+  status,
   overview,
   page,
   health,

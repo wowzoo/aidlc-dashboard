@@ -1,14 +1,15 @@
-// Panel (b) — why the run is stopped.
+// The unanswered asks — which unit, which question, which file.
 //
-// This panel is first on the page for a reason: an AI-DLC run that looks hung is
-// almost always waiting on a human answer, and the answer's location (which unit,
-// which file) is exactly what is tedious to find by hand.
+// This used to be its own card, first on the page. It is not a card any more: the
+// status strip's "awaiting you" chip carries the count and the oldest wait, and this
+// list opens under that chip on demand. What it keeps is the one thing the chip cannot
+// carry and that is tedious to find by hand — the location of each answer, linked.
 
 import type { Blocker, DashboardModel } from "../model/types";
-import { dur, esc, pill, section, shortTs } from "./common";
+import { dur, esc, pill, shortTs } from "./common";
 import type { Strings } from "./i18n";
 
-function blockerCard(b: Blocker, s: Strings): string {
+function blockerItem(b: Blocker, s: Strings): string {
   const where = b.unit ? `${b.unit} · ${b.stage}` : b.stage;
   const tone = b.isCurrentStage ? "bad" : "warn";
   const label = b.isCurrentStage ? s.blockers.currentStage : s.blockers.staleStage;
@@ -30,20 +31,11 @@ function blockerCard(b: Blocker, s: Strings): string {
 </div>`;
 }
 
-function blockerBody(m: DashboardModel, s: Strings): string {
-  if (m.blockers.length === 0) {
-    return `<p class="note">${esc(s.blockers.none)} ${pill(s.blockers.ok, "ok")}</p>`;
-  }
-  const current = m.blockers.filter((b) => b.isCurrentStage);
-  const stale = m.blockers.filter((b) => !b.isCurrentStage);
-  const head =
-    current.length > 0
-      ? `<p class="lead">${esc(s.blockers.currentWaiting(current.length))}</p>`
-      : `<p class="lead">${esc(s.blockers.staleOnly(stale.length))}</p>`;
-  return head + [...current, ...stale].map((b) => blockerCard(b, s)).join("\n");
-}
-
-/** The blocker card alone — placed first on the page, above everything. */
-export function renderBlockerCard(m: DashboardModel, s: Strings): string {
-  return section(s.blockers.title, blockerBody(m, s), "blockers");
+/**
+ * Every unanswered ask, current stage first (the order `buildBlockers` already
+ * sorts into). Empty string when there are none — the caller decides whether a
+ * list exists at all.
+ */
+export function renderBlockerList(m: DashboardModel, s: Strings): string {
+  return m.blockers.map((b) => blockerItem(b, s)).join("\n");
 }
