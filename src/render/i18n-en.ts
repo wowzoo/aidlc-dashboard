@@ -613,9 +613,6 @@ const usage: UsageStrings = {
   chartSummary: (w, min, max, latest) =>
     `Cumulative usage trend, ${w}: min ${min}, max ${max}, latest ${latest}`,
   chartNoData: "No data to show",
-  gaugeUnavailable: "usage cannot be computed",
-  gaugeUnavailableShort: "n/a",
-  gaugeLabel: (pct) => `usage ${pct}`,
 
   tokenSection: "Token usage",
   tokenPartial: "partial count",

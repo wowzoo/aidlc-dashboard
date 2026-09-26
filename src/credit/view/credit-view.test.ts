@@ -71,9 +71,11 @@ describe("renderCredit 상태별 렌더", () => {
     expect(html).not.toContain("최신 데이터를 가져오지 못했습니다");
   });
 
-  test("ok: 게이지(role=img)·플랜명·사용률 렌더, 경고 배너 없음", () => {
+  test("ok: 플랜명·사용률 렌더, 게이지 없음, 경고 배너 없음", () => {
     const html = renderCredit(model("ok"), "30d", KO);
-    expect(html).toContain('role="img"');
+    // 비율은 표와 막대가 적는다 — 도넛 게이지(stroke-dasharray 링)는 그리지 않는다.
+    expect(html).not.toContain("stroke-dasharray");
+    expect(html).toContain('role="progressbar"');
     expect(html).toContain("Pro");
     expect(html).toContain("24.0%");
     expect(html).not.toContain("최신 데이터를 가져오지 못했습니다");

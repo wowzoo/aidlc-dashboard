@@ -47,9 +47,12 @@ export interface ChartOptions {
 
 /** 추이 라인 차트를 SVG 문자열로 렌더한다. 결측(value=null)은 선을 끊는다. */
 export function renderLineChart(series: TrendSeries, s: Strings, opts: ChartOptions = {}): string {
-  const width = opts.width ?? 720;
-  const height = opts.height ?? 260;
-  const pad = { top: 16, right: 16, bottom: 28, left: 56 };
+  // 기본 크기는 KPI 차트(render/kpi.ts)와 같다. 720 폭은 넓은 카드에서 가운데에 작게 떠
+  // 양옆이 비었고, viewBox 가 늘어나면서 11 단위 글자가 두 배 가까이 커져 같은 페이지의
+  // 다른 차트와 다른 물건처럼 보였다.
+  const width = opts.width ?? 1160;
+  const height = opts.height ?? 200;
+  const pad = { top: 12, right: 12, bottom: 24, left: 56 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
 
@@ -106,13 +109,17 @@ export function renderLineChart(series: TrendSeries, s: Strings, opts: ChartOpti
     )
     .join("");
 
-  // 지점 마커(정상=채움).
-  const markers = series.points
-    .map((p) => {
-      if (p.value === null) return "";
-      return `<circle cx="${xOf(p.ts).toFixed(1)}" cy="${yOf(p.value).toFixed(1)}" r="2.5" fill="var(--accent)" />`;
-    })
-    .join("");
+  // 지점 마커(정상=채움). 점이 촘촘하면(5분 폴링이면 하루 288개) 마커가 선을 덮어 덩어리로
+  // 보이므로, 선만으로 읽히지 않는 성긴 시계열에서만 찍는다.
+  const markers =
+    valued.length > 60
+      ? ""
+      : series.points
+          .map((p) => {
+            if (p.value === null) return "";
+            return `<circle cx="${xOf(p.ts).toFixed(1)}" cy="${yOf(p.value).toFixed(1)}" r="2" fill="var(--accent)" />`;
+          })
+          .join("");
 
   // y축 최소/최대 눈금 라벨.
   const axis =
@@ -138,23 +145,4 @@ function wrapSvg(width: number, height: number, ariaLabel: string, inner: string
     `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" role="img" ` +
     `aria-label="${escapeXml(ariaLabel)}" preserveAspectRatio="xMidYMid meet">${inner}</svg>`
   );
-}
-
-/** 사용률 원형(도넛) 게이지를 SVG 문자열로 렌더한다. 수치를 병기한다(색 비의존, BR2.1). */
-export function renderGauge(ratio: number | null, s: Strings, size = 160): string {
-  const stroke = 14;
-  const r = (size - stroke) / 2;
-  const cx = size / 2;
-  const cy = size / 2;
-  const circumference = 2 * Math.PI * r;
-
-  if (ratio === null) {
-    return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${escapeXml(s.usage.gaugeUnavailable)}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${stroke}" /><text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="var(--mute)" font-size="14">${escapeXml(s.usage.gaugeUnavailableShort)}</text></svg>`;
-  }
-
-  const clamped = Math.max(0, Math.min(1, ratio));
-  const dash = circumference * clamped;
-  const percentText = `${(clamped * 100).toFixed(1)}%`;
-
-  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${escapeXml(s.usage.gaugeLabel(percentText))}"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${stroke}" /><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--accent)" stroke-width="${stroke}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${cx} ${cy})" /><text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="var(--fg)" font-size="26" font-weight="700">${escapeXml(percentText)}</text></svg>`;
 }

@@ -18,7 +18,7 @@ import type { PollHalt } from "../pipeline/polling-scheduler";
 import type { TrendWindow } from "../trend/trend";
 import type { ParsedUsage } from "../types";
 import type { CreditStatus, CreditViewModel } from "./credit-model";
-import { buildAriaLabel, renderGauge, renderLineChart } from "./svg-chart";
+import { buildAriaLabel, renderLineChart } from "./svg-chart";
 
 /** 문구는 카탈로그(`render/i18n`) 소관 — 여기는 창 순서와 톤만 정한다. */
 function windowLabel(w: TrendWindow, s: Strings): string {
@@ -193,10 +193,9 @@ export function renderCredit(model: CreditViewModel, window: TrendWindow, s: Str
   }
 
   if (model.current !== null) {
-    parts.push(`<div class="credit-current">
-  <div class="credit-gauge">${renderGauge(model.current.usageRatio, s)}</div>
-  ${metricsTable(model.current, s)}
-</div>`);
+    // 도넛 게이지는 뺐다. 같은 사용률을 표·막대 아래 글·게이지가 세 번 말했고, 페이지 어디에도
+    // 없는 모양이라 이 패널만 다른 화면에서 온 것처럼 보였다. 비율은 표와 막대가 적는다.
+    parts.push(`<div class="credit-current">${metricsTable(model.current, s)}</div>`);
     parts.push(progressBlock(model.current.usageRatio, s));
     parts.push(
       `<p class="note">${esc(t.lastSuccess(shortTs(model.lastSuccessAt ?? undefined)))}</p>`,

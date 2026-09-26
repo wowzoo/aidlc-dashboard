@@ -649,9 +649,6 @@ export interface UsageStrings {
   chartEmpty(windowLabel: string): string;
   chartSummary(windowLabel: string, min: string, max: string, latest: string): string;
   readonly chartNoData: string;
-  readonly gaugeUnavailable: string;
-  readonly gaugeUnavailableShort: string;
-  gaugeLabel(pct: string): string;
 
   // Claude tokens
   readonly tokenSection: string;

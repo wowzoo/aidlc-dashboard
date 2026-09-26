@@ -584,9 +584,6 @@ const usage: UsageStrings = {
   chartSummary: (w, min, max, latest) =>
     `${w} 누적 사용량 추이, 최소 ${min}, 최대 ${max}, 최신 ${latest}`,
   chartNoData: "표시할 데이터가 없습니다",
-  gaugeUnavailable: "사용률 계산 불가",
-  gaugeUnavailableShort: "계산 불가",
-  gaugeLabel: (pct) => `사용률 ${pct}`,
 
   tokenSection: "토큰 사용량",
   tokenPartial: "부분 집계",

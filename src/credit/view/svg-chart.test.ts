@@ -9,7 +9,7 @@ import { strings } from "../../render/i18n";
 const KO = strings("ko");
 import { describe, expect, test } from "bun:test";
 import type { TrendSeries } from "../trend/trend";
-import { escapeXml, renderGauge, renderLineChart } from "./svg-chart";
+import { escapeXml, renderLineChart } from "./svg-chart";
 
 function series(points: TrendSeries["points"]): TrendSeries {
   const values = points.filter((p) => p.value !== null).map((p) => p.value as number);
@@ -24,33 +24,6 @@ function series(points: TrendSeries["points"]): TrendSeries {
     },
   };
 }
-
-describe("renderGauge", () => {
-  test("ratio → % 텍스트 병기, role/aria-label 포함", () => {
-    const svg = renderGauge(0.25, KO);
-    expect(svg).toContain('role="img"');
-    expect(svg).toContain("25.0%");
-    expect(svg).toContain("aria-label=");
-  });
-
-  test("ratio=null → '계산 불가'", () => {
-    const svg = renderGauge(null, KO);
-    expect(svg).toContain("계산 불가");
-    expect(svg).toContain('aria-label="사용률 계산 불가"');
-  });
-
-  test("host 토큰 사용(--accent/--line/--fg), 하드코딩 --color-* 부재", () => {
-    const svg = renderGauge(0.5, KO);
-    expect(svg).toContain("var(--accent)");
-    expect(svg).toContain("var(--line)");
-    expect(svg).not.toContain("--color-");
-  });
-
-  test("ratio 범위를 0~1 로 clamp", () => {
-    expect(renderGauge(1.5, KO)).toContain("100.0%");
-    expect(renderGauge(-0.3, KO)).toContain("0.0%");
-  });
-});
 
 describe("renderLineChart", () => {
   test("결측 지점에서 선 끊김(polyline 분할)", () => {

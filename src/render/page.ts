@@ -128,14 +128,17 @@ main { padding:16px 18px 60px; max-width:1500px; margin:0 auto; display:flex;
 .card h2 { font-size:var(--fs-3); margin:0 0 10px; font-weight:650; letter-spacing:.01em;
   display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
 .note { color:var(--mute); font-size:var(--fs-2); margin:7px 0 0; }
-.note.warn { color:var(--warn); }
+/* A caveat is flagged by a rule in the warning colour, not by painting the paragraph:
+   whole orange paragraphs read as a second, louder page. Still visible, and still
+   the same colour as every other warning signal. */
+.note.warn { color:var(--fg); border-left:2px solid var(--warn); padding-left:9px; }
 .lead { margin:0 0 10px; font-size:var(--fs-3); }
 .mute { color:var(--mute); }
 .bad { color:var(--bad); }
 
 .hero-top { display:flex; align-items:baseline; justify-content:space-between; }
-.hero-phase { font-size:var(--fs-5); font-weight:680; letter-spacing:.04em; }
-.hero-pct { font-size:var(--fs-6); font-weight:700; color:var(--accent2); }
+.hero-phase { font-size:var(--fs-5); font-weight:650; }
+.hero-pct { font-size:var(--fs-6); font-weight:700; font-variant-numeric:tabular-nums; }
 .hero-meta { color:var(--mute); font-size:var(--fs-2); margin-top:5px; }
 .hero-meta.small { font-size:var(--fs-1); }
 .hero-now { margin-top:7px; font-size:var(--fs-3); }
@@ -143,7 +146,10 @@ main { padding:16px 18px 60px; max-width:1500px; margin:0 auto; display:flex;
 .hero-count { color:var(--mute); font-size:var(--fs-2); margin-left:7px; }
 
 .bar { height:7px; background:var(--line); border-radius:var(--r-pill); overflow:hidden; margin:7px 0 2px; }
-.bar-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--accent2)); }
+/* Flat, like every other bar on the page. The gradient ran accent → accent2, and
+   accent2 is the colour this page reserves for conversation time and unsettled units,
+   so a progress bar was borrowing a signal it does not carry. */
+.bar-fill { height:100%; background:var(--accent); }
 .bar-overall { height:9px; }
 
 details.phase { border-top:1px solid var(--line); padding:7px 0 3px; }
@@ -159,7 +165,7 @@ ul.stages li { font-size:var(--fs-2); color:var(--mute); display:flex; gap:6px; 
 li.s-done { color:var(--ok); } li.s-active { color:var(--accent); font-weight:600; }
 li.s-awaiting { color:var(--warn); font-weight:600; } li.s-revising { color:var(--warn); }
 li.s-skipped { opacity:.45; text-decoration:line-through; }
-.skip { font-size:var(--fs-1); border:1px solid var(--line); border-radius:var(--r-ctl); padding:0 4px; }
+.skip { font-size:var(--fs-1); background:color-mix(in srgb, var(--mute) 14%, transparent); border-radius:var(--r-ctl); padding:0 5px; }
 
 /* Expandable stage rows. A stage with files gets a <details>; one without stays
    a plain <li> (.no-art) so an empty toggle never invites a dead click. The
@@ -172,8 +178,8 @@ details.art-box > summary::-webkit-details-marker { display:none; }
 details.art-box > summary::after { content:'▾'; font-size:var(--fs-1); opacity:.5; }
 details.art-box[open] > summary::after { content:'▴'; }
 li.no-art { padding-right:13px; }        /* keep text aligned with toggled rows */
-.art-count { font-size:var(--fs-1); color:var(--mute); border:1px solid var(--line);
-  border-radius:var(--r-ctl); padding:0 4px; margin-left:auto; }
+.art-count { font-size:var(--fs-1); color:var(--mute); background:color-mix(in srgb, var(--mute) 14%, transparent);
+  border-radius:var(--r-ctl); padding:0 5px; margin-left:auto; }
 ul.arts { list-style:none; margin:3px 0 6px; padding:0 0 0 17px;
   display:flex; flex-direction:column; gap:1px; }
 ul.arts li.art { display:block; }
@@ -182,8 +188,8 @@ a.art-link { display:flex; gap:5px; align-items:baseline; font-size:var(--fs-2);
 a.art-link:hover { background:var(--line); }
 .art-mark { width:13px; flex:none; font-size:var(--fs-1); }
 .art-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.art-unit { font-size:var(--fs-1); color:var(--mute); border:1px solid var(--line);
-  border-radius:var(--r-ctl); padding:0 3px; flex:none; max-width:132px; overflow:hidden;
+.art-unit { font-size:var(--fs-1); color:var(--mute); background:color-mix(in srgb, var(--mute) 14%, transparent);
+  border-radius:var(--r-ctl); padding:0 4px; flex:none; max-width:132px; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap; }
 .art-size { margin-left:auto; font-size:var(--fs-1); color:var(--mute); flex:none; }
 li.a-questions a.art-link, li.a-diary a.art-link { color:var(--mute); }
@@ -230,10 +236,11 @@ tr.mx-skip { opacity:.4; } tr.mx-skip td { font-size:var(--fs-1); color:var(--mu
 /* Still used by the rework strip (재작업 / 반려 / 승인 / 수정 회차 + two optional tiles).
    auto-fit rather than a fixed 5, because at six tiles a fixed count leaves the last
    one orphaned on a row of its own — the same defect the time buckets just shed. */
+/* Same tile as the KPI strip (.kpi): its own rounded box, a gap between tiles. It was a
+   ruled band split by vertical lines, a third tile shape on one page. */
 .time-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr));
-  border-block:1px solid var(--line); margin-bottom:10px; }
-.time-stats > div { min-width:0; padding:8px 10px; border-left:1px solid var(--line); }
-.time-stats > div:first-child { border-left:0; }
+  gap:10px; margin-bottom:10px; }
+.time-stats > div { min-width:0; padding:8px 12px; border:1px solid var(--line); border-radius:var(--r-box); }
 .time-stat-n { display:block; font-size:var(--fs-5); line-height:1.2; font-weight:680;
   font-variant-numeric:tabular-nums; white-space:nowrap; }
 .time-stat-l { display:block; color:var(--mute); font-size:var(--fs-1); margin-top:2px; }
@@ -339,14 +346,15 @@ tr.mx-skip { opacity:.4; } tr.mx-skip td { font-size:var(--fs-1); color:var(--mu
 .dfr-ledger-h { font-size:var(--fs-2); font-weight:600; }
 .dfr-ledger-src { color:var(--mute); font-weight:400; font-size:var(--fs-1); }
 .dfr-chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; }
-.dfr-chip { font-size:var(--fs-1); color:var(--mute); border:1px solid var(--line);
-  border-radius:var(--r-pill); padding:1px 8px; white-space:nowrap; cursor:help; }
+.dfr-chip { font-size:var(--fs-1); color:var(--mute); background:color-mix(in srgb, var(--mute) 12%, transparent);
+  border-radius:var(--r-ctl); padding:1px 8px; white-space:nowrap; cursor:help; }
 .dfr-chip b { font-variant-numeric:tabular-nums; }
 .dfr-ledger-n.t-bad, .dfr-chip.t-bad b { color:var(--bad); }
 .dfr-ledger-n.t-warn, .dfr-chip.t-warn b { color:var(--warn); }
 .dfr-ledger-n.t-ok, .dfr-chip.t-ok b { color:var(--ok); }
 .dfr-ledger-n.t-mute, .dfr-chip.t-mute b, .dfr-chip.t-zero b { color:var(--mute); }
-.dfr-chip.t-bad, .dfr-chip.t-warn { color:var(--fg); border-color:currentColor; }
+.dfr-chip.t-bad { color:var(--fg); background:color-mix(in srgb, var(--bad) 14%, transparent); }
+.dfr-chip.t-warn { color:var(--fg); background:color-mix(in srgb, var(--warn) 14%, transparent); }
 .dfr-focus > h3 { margin:11px 0 7px; font-size:var(--fs-2); font-weight:650; }
 .dfr-focus:first-of-type > h3 { margin-top:0; }
 .dfr-list { list-style:none; margin:0; padding:0; }
@@ -355,8 +363,8 @@ tr.mx-skip { opacity:.4; } tr.mx-skip td { font-size:var(--fs-1); color:var(--mu
 .dfr-meta { display:flex; align-items:center; gap:7px; min-width:0; font-size:var(--fs-1); flex-wrap:wrap; }
 .dfr-route { color:var(--mute); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
 .dfr-route .dfr-to { color:var(--fg); }
-.dfr-fan { color:var(--mute); border:1px solid var(--line); border-radius:var(--r-ctl); padding:0 4px;
-  flex:none; }
+.dfr-fan { color:var(--mute); background:color-mix(in srgb, var(--mute) 14%, transparent); border-radius:var(--r-ctl);
+  padding:0 5px; flex:none; }
 .dfr-age { color:var(--mute); margin-left:auto; white-space:nowrap; font-variant-numeric:tabular-nums;
   cursor:help; }
 .dfr-source { flex:none; font-size:var(--fs-1); text-decoration:none; }
@@ -367,14 +375,19 @@ tr.mx-skip { opacity:.4; } tr.mx-skip td { font-size:var(--fs-1); color:var(--mu
 .dfr-ahead, .dfr-rest, .dfr-assum, .dfr-owners { border-top:1px solid var(--line); margin-top:11px;
   padding-top:2px; }
 
-.pill { font-size:var(--fs-1); border-radius:var(--r-pill); padding:1px 7px; border:1px solid currentColor; white-space:nowrap; }
+/* ONE chip shape across the page: a tint of its own colour, no outline — the same
+   vocabulary as the cards' bar-backed rows. The outlined pill and the six other
+   bordered badges (.skip, .art-count, .art-unit, .dfr-chip, .dfr-fan, .tag-lead) were a
+   second visual language sitting inside the first. */
+.pill { font-size:var(--fs-1); font-weight:600; border-radius:var(--r-ctl); padding:1px 7px; border:0;
+  background:color-mix(in srgb, currentColor 13%, transparent); white-space:nowrap; }
 .pill.has-help { cursor:help; text-decoration:underline dotted; text-underline-offset:2px; }
 .pill.ok { color:var(--ok); } .pill.warn { color:var(--warn); }
 .pill.bad { color:var(--bad); } .pill.mute { color:var(--mute); }
 
 table.tbl { width:100%; border-collapse:collapse; font-size:var(--fs-2); margin-top:8px; }
 table.tbl th, table.tbl td { text-align:left; padding:3px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
-table.tbl thead th { color:var(--mute); font-weight:500; font-size:var(--fs-1); white-space:nowrap; }
+table.tbl thead th { color:var(--mute); font-weight:600; font-size:var(--fs-1); white-space:nowrap; }
 td.ts, .g-n { font-variant-numeric:tabular-nums; white-space:nowrap; }
 .g-n { text-align:right; }
 .g-n.idle { color:var(--warn); } .g-n.work { color:var(--ok); }
@@ -435,7 +448,8 @@ i.lg.unknown { background:var(--mute); }
 .why-head { display:flex; gap:9px; align-items:baseline; font-size:var(--fs-1); }
 .why-text { margin:3px 0 0; font-size:var(--fs-2); line-height:1.65;
   white-space:pre-wrap; overflow-wrap:anywhere; }
-.tag-lead { font-size:var(--fs-1); color:var(--accent); border:1px solid currentColor;
+.tag-lead { font-size:var(--fs-1); font-weight:600; color:var(--accent);
+  background:color-mix(in srgb, currentColor 13%, transparent);
   border-radius:var(--r-ctl); padding:0 5px; white-space:nowrap; cursor:help; }
 .gantt tbody td, .gantt tbody th { line-height:1.35; }
 ul.gaps, ul.oq { margin:6px 0 0; padding-left:17px; font-size:var(--fs-2); }
@@ -470,7 +484,8 @@ table.tbl td code { white-space:nowrap; }
 .kpi-v { font-size:1.6rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.2; }
 .kpi.missing .kpi-v { color:var(--mute); }
 .kpi-s { color:var(--mute); font-size:var(--fs-1); }
-.kpi-n { color:var(--warn); }
+/* The same caveat treatment as .note.warn: a rule in the warning colour, not coloured text. */
+.kpi-n { color:var(--fg); border-left:2px solid var(--warn); padding-left:6px; margin-top:3px; }
 .kpi-c { display:none; background:var(--card); border:1px solid var(--line); border-radius:var(--r-box);
   padding:11px 15px; }
 .kpi-c h3 { margin:0 0 6px; font-size:var(--fs-3); }
@@ -529,9 +544,22 @@ ${TAB_CSS}
 /* Drill-downs: the full panels, one closed <details> each. */
 .drills { display:flex; flex-direction:column; gap:8px; }
 .drills-h { margin:6px 0 0; font-size:var(--fs-3); font-weight:600; color:var(--mute); }
+/* A drill-down is ONE surface. The panels inside were written as cards of their own, so
+   mounting them unchanged put a card inside a card and repeated the title the summary
+   had just given. Inside a drill they lose their chrome and become sections split by a
+   rule; the first one's h2 is the summary's own title, so it is not shown twice. */
 details.drill { border:1px solid var(--line); border-radius:var(--r-box); background:var(--card); }
-details.drill > summary { margin:0; padding:10px 15px; font-size:var(--fs-3); font-weight:600; color:var(--fg); }
-.drill-body { display:grid; gap:14px; padding:0 12px 12px; }
+details.drill > summary { list-style:none; display:flex; align-items:center; gap:8px; margin:0;
+  padding:12px 15px; font-size:var(--fs-4); font-weight:650; color:var(--fg); }
+details.drill > summary::-webkit-details-marker { display:none; }
+details.drill > summary::before { content:'▸'; color:var(--mute); font-size:var(--fs-2); width:10px; }
+details.drill[open] > summary::before { content:'▾'; }
+details.drill[open] > summary { border-bottom:1px solid var(--line); }
+.drill-body { display:flex; flex-direction:column; padding:0 15px 13px; }
+.drill-body > section.card { border:0; border-radius:0; background:none; padding:13px 0 0; overflow:visible; }
+.drill-body > section.card + section.card { border-top:1px solid var(--line); margin-top:13px; }
+.drill-body > section.card:first-child > h2:first-child { display:none; }
+.drill-body > section.card > h2 { font-size:var(--fs-3); color:var(--mute); }
 
 /* Sources: every input's age on one line; a stale one is outlined and explains itself. */
 .sources { display:flex; flex-wrap:wrap; gap:6px 14px; color:var(--mute); font-size:var(--fs-1); }
@@ -542,9 +570,9 @@ details.drill > summary { margin:0; padding:10px 15px; font-size:var(--fs-3); fo
 /* Credit view (u3) — first card in the primary column. Uses host tokens only.
    The u3 view emits .card via section(); these style its inner blocks. */
 .credit-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-.credit-current { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
-.credit-gauge { flex:none; }
-.credit-current table.tbl { flex:1 1 260px; margin-top:0; }
+/* Label and value side by side, not stretched to the card's width: at full width the
+   value sat 500px from its label. */
+.credit-current table.tbl { max-width:520px; margin-top:0; }
 .credit-progress { margin-top:10px; }
 .credit-progress .note { margin-top:4px; }
 .credit-trend { margin-top:12px; }
