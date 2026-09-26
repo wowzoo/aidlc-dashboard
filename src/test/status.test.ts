@@ -1,5 +1,6 @@
-// The status strip (model/status.ts + render/status.ts). The fixture gives one real
-// reading of every signal; the variants are built by overriding one field of that
+// The status readings (model/status.ts) and their two renderings: the run line at the
+// top of the body and the Run Health card (render/status.ts). The fixture gives one
+// real reading of every signal; the variants are built by overriding one field of that
 // model, so each test changes exactly the thing it names.
 
 import { describe, expect, test } from "bun:test";
@@ -9,7 +10,7 @@ import { buildStatus } from "../model/status";
 import type { DashboardModel } from "../model/types";
 import { strings } from "../render/i18n";
 import { renderBody } from "../render/page";
-import { renderStatus } from "../render/status";
+import { renderRunHealth, renderRunLine } from "../render/status";
 
 const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
 const base = assemble(FIXTURE);
@@ -31,7 +32,7 @@ const withSensorRow = (
   },
 });
 
-describe("status strip — readings", () => {
+describe("status — readings", () => {
   test("the fixture: running, blocked once, one answer waiting, one check failure", () => {
     const st = buildStatus(base);
     expect(st.run).toEqual({
@@ -107,65 +108,127 @@ describe("status strip — readings", () => {
   });
 });
 
-describe("status strip — markup", () => {
-  test("leads the body, above the columns", () => {
-    const body = renderBody(base, "ko");
-    expect(body.trimStart().startsWith('<ul class="status-strip"')).toBe(true);
+describe("run line — markup", () => {
+  test("leads the body", () => {
+    expect(renderBody(base, "ko").trimStart().startsWith('<div class="runline"')).toBe(true);
   });
 
-  test("four chips while running — no combined verdict chip", () => {
-    const html = renderStatus(base, strings("ko"));
-    expect(html.match(/<li class="st-chip/g)?.length).toBe(4);
+  test("names the phase, the stage and the age of the last audit event", () => {
+    const html = renderRunLine(base, strings("ko"));
+    expect(html).toContain("▶ 진행 중");
+    expect(html).toContain("Code Generation");
+    expect(html).toContain("마지막 기록");
   });
 
-  test("a completed run renders one chip", () => {
-    const html = renderStatus(
-      { ...base, blockers: [], state: { ...base.state, complete: true } },
+  test("a completed run says so, with no running dot", () => {
+    const html = renderRunLine(
+      { ...base, state: { ...base.state, complete: true } },
       strings("ko"),
     );
-    expect(html.match(/<li class="st-chip/g)?.length).toBe(1);
-    expect(html).toContain("st-chip ok");
+    expect(html).toContain("rl-dot ok");
+    expect(html).not.toContain("rl-dot run");
+  });
+});
+
+describe("Run Health card — markup", () => {
+  const ko = strings("ko");
+  const tabsOf = (html: string) => html.match(/<label for="mc-health-\d+">/g)?.length ?? 0;
+  const checked = (html: string) => /id="mc-health-(\d+)" value="\d+" checked/.exec(html)?.[1];
+
+  test("three tabs while running — answers, stuck, failed checks — and no combined verdict", () => {
+    const html = renderRunHealth(base, ko);
+    expect(tabsOf(html)).toBe(3);
+    expect(html).toContain(">Run Health</h2>");
+    expect(html).toContain("내 답변");
+    expect(html).toContain("막힘");
+    expect(html).toContain("검사 실패");
   });
 
-  test("tones follow the readings, and missing sources are dashed rather than green", () => {
-    const html = renderStatus(base, strings("ko"));
-    expect(html).toContain("st-chip bad has-pop");
-    expect(html).toContain("진행 없이 1회 연속 차단");
-    const none = renderStatus(withGuard(undefined), strings("ko"));
-    expect(none).toContain("st-chip mute");
-    expect(none).not.toContain("✓ 막힘 없음");
+  test("tab counts carry the signal: coloured when actionable", () => {
+    const html = renderRunHealth(base, ko);
+    // One ask waiting, one block, one failure — all three actionable.
+    expect(html).toContain('<b class="mc-n warn">1</b>');
+    expect(html).toContain('<b class="mc-n bad">1</b>');
   });
 
-  test("the asks open under the awaiting chip, each linked to its file", () => {
-    const html = renderStatus(base, strings("ko"));
+  test("opens on the first tab that has a problem", () => {
+    expect(checked(renderRunHealth(base, ko))).toBe("0");
+    // No asks → the next problem is the block.
+    expect(checked(renderRunHealth({ ...base, blockers: [] }, ko))).toBe("1");
+    // No asks, no block → the failed check.
+    const noBlock = withGuard({ signature: "code-generation::40", count: 0 });
+    expect(checked(renderRunHealth({ ...noBlock, blockers: [] }, ko))).toBe("2");
+  });
+
+  test("a missing source is a muted dash and a dashed row, never green", () => {
+    const html = renderRunHealth(withGuard(undefined), ko);
+    expect(html).toContain('<b class="mc-n mute">–</b>');
+    expect(html).toContain('class="mr dashed"');
+    expect(html).toContain("차단 기록 없음");
+    expect(html).not.toContain("✓ 막힘 없음");
+  });
+
+  test("each ask links to its file", () => {
+    const html = renderRunHealth(base, ko);
     const b = base.blockers[0]!;
-    expect(html).toContain('<div class="st-pop">');
     expect(html).toContain(`href="/view?rel=${encodeURIComponent(b.rel)}"`);
     expect(html).toContain(b.heading);
   });
 
-  test("no asks, no popover — the chip is a plain reading", () => {
-    const html = renderStatus({ ...base, blockers: [] }, strings("ko"));
-    expect(html).not.toContain("st-pop");
-    expect(html).toContain("✓ 답변 대기 없음");
+  test("an open gate with no question still counts as something awaiting you", () => {
+    const m: DashboardModel = {
+      ...base,
+      blockers: [],
+      timing: { ...base.timing, awaitingStage: "code-generation" },
+    };
+    const html = renderRunHealth(m, ko);
+    expect(html).toContain("승인 대기 code-generation");
+    expect(html).toContain('<b class="mc-n warn">1</b>');
   });
 
-  test("the page no longer has a blocker card", () => {
+  test("an open gate on the stage whose ask is waiting counts once, not twice", () => {
+    const m: DashboardModel = {
+      ...base,
+      timing: { ...base.timing, awaitingStage: base.state.currentStage },
+    };
+    expect(base.blockers.filter((b) => b.isCurrentStage).length).toBe(1);
+    const html = renderRunHealth(m, ko);
+    expect(html).toContain('<b class="mc-n warn">1</b>');
+    expect(html).not.toContain('<b class="mc-n warn">2</b>');
+  });
+
+  test("every ask is listed — none folded behind a '+N more' with nowhere to go", () => {
+    const b = base.blockers[0]!;
+    const blockers = Array.from({ length: 8 }, (_, i) => ({ ...b, rel: `${b.rel}-${i}` }));
+    const html = renderRunHealth({ ...base, blockers }, ko);
+    for (const x of blockers) expect(html).toContain(`/view?rel=${encodeURIComponent(x.rel)}`);
+    expect(html).not.toContain(ko.cards.moreRows(2));
+  });
+
+  test("a completed run renders every ask as parked, even one in the last named stage", () => {
+    expect(base.blockers[0]!.isCurrentStage).toBe(true);
+    const html = renderRunHealth({ ...base, state: { ...base.state, complete: true } }, ko);
+    expect(html).toContain(ko.blockers.staleStage);
+    expect(html).not.toContain("t-warn");
+  });
+
+  test("a completed run collapses to one summary tab and keeps parked asks reachable", () => {
+    const html = renderRunHealth({ ...base, state: { ...base.state, complete: true } }, ko);
+    expect(tabsOf(html)).toBe(1);
+    expect(html).toContain("✓ 완료");
+    expect(html).toContain(`/view?rel=${encodeURIComponent(base.blockers[0]!.rel)}`);
+  });
+
+  test("the page has no blocker card and no status strip", () => {
     const body = renderBody(base, "ko");
     expect(body).not.toContain('id="blockers"');
-    expect(body).not.toContain("🚧");
-    // …but the one path to the file survives, under the strip.
-    expect(body).toContain(`/view?rel=${encodeURIComponent(base.blockers[0]!.rel)}`);
-  });
-
-  test("an open popover survives the poll: the strip's details are keyed", () => {
-    expect(renderBody(base, "ko")).toContain('<details data-key="s-0"');
+    expect(body).not.toContain("status-strip");
   });
 
   test("English renders with no Hangul", () => {
-    const html = renderStatus(base, strings("en"));
+    const html = renderRunHealth(base, strings("en")) + renderRunLine(base, strings("en"));
     expect(/[가-힣]/.test(html)).toBe(false);
     expect(html).toContain("Blocked 1× with no progress");
-    expect(html).toContain("1 answer awaiting you");
+    expect(html).toContain("Your answers");
   });
 });

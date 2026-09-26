@@ -24,9 +24,9 @@
 //
 // See the `### Page language` section in CLAUDE.md for the rest of the reasoning.
 
-import type { Locale } from "../model/types";
+import type { Locale, SourceKind } from "../model/types";
 import type { OwnerStatus } from "../scan/deferrals";
-import type { ReceiptReason } from "../scan/matrix";
+import type { CellState, ReceiptReason } from "../scan/matrix";
 import type { StageEndKind } from "../scan/timing";
 import { EN } from "./i18n-en";
 import { KO } from "./i18n-ko";
@@ -50,6 +50,59 @@ export interface Strings {
   readonly viewer: ViewerStrings;
   readonly explorer: ExplorerStrings;
   readonly freshness: FreshnessStrings;
+  readonly cards: CardStrings;
+}
+
+/**
+ * The 2×2 card grid (render/cards.ts, render/status.ts) and the lines around it.
+ *
+ * The four card TITLES are English in both catalogues on purpose: "Stage" and "Unit"
+ * are engine vocabulary, and the other two were chosen to read as the same kind of
+ * label beside them. They still live here, not as literals, so a later change of mind
+ * is a catalogue edit.
+ */
+export interface CardStrings {
+  readonly stageTitle: string;
+  readonly unitTitle: string;
+  readonly unresolvedTitle: string;
+  readonly healthTitle: string;
+  readonly colStage: string;
+  /** Column header for work + conversation time. */
+  readonly colWorkChat: string;
+  readonly workChatTip: string;
+  unitsDone(done: number, total: number): string;
+  readonly noStages: string;
+  readonly colUnit: string;
+  readonly colArtifacts: string;
+  readonly cellLabel: Record<CellState, string>;
+  readonly decisionsTab: string;
+  readonly openQsTab: string;
+  readonly colItemOwner: string;
+  readonly colAge: string;
+  readonly noDecisions: string;
+  readonly noOpenQs: string;
+  readonly answersTab: string;
+  readonly stuckTab: string;
+  readonly checksTab: string;
+  readonly summaryTab: string;
+  readonly colAsk: string;
+  readonly colWait: string;
+  readonly colGuard: string;
+  readonly colCount: string;
+  readonly colCheck: string;
+  readonly colWhen: string;
+  /** Folded remainder under a list. */
+  moreRows(n: number): string;
+  readonly moreTimeline: string;
+  readonly moreMatrix: string;
+  readonly moreDeferrals: string;
+  readonly drillsHeading: string;
+  readonly sourcesLabel: string;
+  /** `age` already formatted. */
+  sourceAge(age: string): string;
+  readonly sourceMissing: string;
+  readonly sourceStale: string;
+  readonly sourceNames: Record<SourceKind, string>;
 }
 
 /** `model.warnings`, one member per `Warning` code — see model/types.ts. */
@@ -73,13 +126,11 @@ export interface WarnStrings {
   creditAssemblyFailed(detail: string): string;
 }
 
-/** One unanswered ask, in the list that opens under the status strip's "awaiting you" chip. */
+/** One unanswered ask, as a row in the Run Health card's "answers" tab. */
 export interface BlockerStrings {
-  readonly currentStage: string;
   readonly staleStage: string;
   readonly confirmation: string;
   readonly confirmationTip: string;
-  waiting(age: string): string;
   /** The path in a blocker row is a LINK now. It used to be plain text, so the one panel
    *  whose whole job is "something is waiting on you" named the file and left the reader
    *  to go find it. */
@@ -92,8 +143,6 @@ export interface BlockerStrings {
  * the four chips have four different sources and freshnesses.
  */
 export interface StatusStrings {
-  /** aria-label of the strip. */
-  readonly label: string;
   readonly runComplete: string;
   readonly runUnknown: string;
   readonly runSource: string;
@@ -107,12 +156,9 @@ export interface StatusStrings {
   stuckBlocked(count: number): string;
   readonly stuckSource: string;
   readonly stuckTip: string;
-  humanWaiting(count: number): string;
-  humanOldest(age: string): string;
   humanGate(stage: string): string;
   readonly humanGateSource: string;
   readonly humanNone: string;
-  humanEarlier(count: number): string;
   readonly humanSource: string;
   readonly checksNone: string;
   checksInFlight(pending: number): string;

@@ -14,7 +14,7 @@ import { bar, esc, pill, section, shortTs } from "./common";
 import type { Strings } from "./i18n";
 
 /** Glyph per stage status, matching the state file's checkbox vocabulary. */
-const STAGE_GLYPH: Record<StageStatus, string> = {
+export const STAGE_GLYPH: Record<StageStatus, string> = {
   done: "✔",
   active: "▶",
   awaiting: "⏸",
@@ -136,38 +136,52 @@ function cellHtml(
   s: Strings,
   reason?: ReceiptReason,
 ): string {
-  const glyph =
-    state === "complete"
-      ? "█"
-      : state === "unsettled"
-        ? "▩"
-        : state === "unverified"
-          ? "▤"
-          : state === "partial"
-            ? "▨"
-            : state === "n/a"
-              ? "–"
-              : "·";
-  const tip =
-    state === "partial"
-      ? s.overview.tipPartial(missing)
-      : state === "complete"
-        ? s.overview.tipComplete(present)
-        : state === "unsettled"
-          ? // Artifacts met, receipt missing. The engine treats this as UNCOVERED, so
-            // the cell must not read as done — a paused/stale/reopened unit lands here.
-            s.overview.tipUnsettled(present)
-          : state === "unverified"
-            ? // Not "not done" — "cannot be checked here". Merging this into unsettled put a
-              // red cell over every gap in this reader's reproduction of the engine. But the
-              // four causes do not agree on the ENGINE's verdict, so each says its own thing:
-              // with no `Run floor` the engine's answer is known and it is "uncovered".
-              s.overview.tipUnverified(reason ?? "no-run-floor", present)
-            : state === "n/a"
-              ? s.overview.tipNotApplicable(present)
-              : s.overview.tipNotStarted;
   // `n/a` needs a class the CSS can target, and "/" is not usable in one.
-  return `<td class="mx-cell c-${state === "n/a" ? "na" : state}" title="${esc(tip)}">${glyph}</td>`;
+  return `<td class="mx-cell c-${state === "n/a" ? "na" : state}" title="${esc(
+    cellTip(state, missing, present, s, reason),
+  )}">${cellGlyph(state)}</td>`;
+}
+
+/** The matrix's glyph per cell state. Exported so the Unit card speaks the same vocabulary. */
+export function cellGlyph(state: CellState): string {
+  return state === "complete"
+    ? "█"
+    : state === "unsettled"
+      ? "▩"
+      : state === "unverified"
+        ? "▤"
+        : state === "partial"
+          ? "▨"
+          : state === "n/a"
+            ? "–"
+            : "·";
+}
+
+/** The matrix's hover text per cell state. */
+export function cellTip(
+  state: CellState,
+  missing: string[],
+  present: string[],
+  s: Strings,
+  reason?: ReceiptReason,
+): string {
+  return state === "partial"
+    ? s.overview.tipPartial(missing)
+    : state === "complete"
+      ? s.overview.tipComplete(present)
+      : state === "unsettled"
+        ? // Artifacts met, receipt missing. The engine treats this as UNCOVERED, so
+          // the cell must not read as done — a paused/stale/reopened unit lands here.
+          s.overview.tipUnsettled(present)
+        : state === "unverified"
+          ? // Not "not done" — "cannot be checked here". Merging this into unsettled put a
+            // red cell over every gap in this reader's reproduction of the engine. But the
+            // four causes do not agree on the ENGINE's verdict, so each says its own thing:
+            // with no `Run floor` the engine's answer is known and it is "uncovered".
+            s.overview.tipUnverified(reason ?? "no-run-floor", present)
+          : state === "n/a"
+            ? s.overview.tipNotApplicable(present)
+            : s.overview.tipNotStarted;
 }
 
 function matrixTable(mx: ConstructionMatrix, s: Strings): string {

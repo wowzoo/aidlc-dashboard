@@ -8,6 +8,7 @@
 import type { ReceiptReason } from "../scan/matrix";
 import type {
   BlockerStrings,
+  CardStrings,
   CliStrings,
   DeferralStrings,
   ErrorPageStrings,
@@ -90,17 +91,14 @@ const warn: WarnStrings = {
 };
 
 const blockers: BlockerStrings = {
-  currentStage: "현재 stage",
   staleStage: "이전 stage (파킹된 질문)",
   confirmation: "게이트 확인",
   confirmationTip:
     "질문이 아니라 승인 관문의 확인 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
-  waiting: (age) => `${age} 대기`,
   viewTip: (rel) => `${rel} 원문을 대시보드에서 보기`,
 };
 
 const status: StatusStrings = {
-  label: "run 상태",
   runComplete: "✓ 완료",
   runUnknown: "? run 상태 확인 불가",
   runSource: "state.md",
@@ -115,12 +113,9 @@ const status: StatusStrings = {
   stuckSource: "stop hook · 이 clone",
   stuckTip:
     "stop hook 의 block-count.json 입니다. 진행 없이 멈추려 할 때마다 1 씩 오르고 진행하면 0 으로 돌아갑니다. 엔진이 포기하는 한도는 엔진 쪽 설정이라 여기서 판정하지 않습니다",
-  humanWaiting: (count) => `✋ 내 답변 대기 ${count}건`,
-  humanOldest: (age) => `가장 오래된 것 ${age}`,
   humanGate: (stage) => `승인 대기 ${stage}`,
   humanGateSource: "게이트 열림 · 감사 로그",
   humanNone: "✓ 답변 대기 없음",
-  humanEarlier: (count) => `이전 stage 미답변 ${count}건`,
   humanSource: "questions 파일",
   checksNone: "현재 stage 검사 기록 없음",
   checksInFlight: (pending) => `⋯ 검사 진행 중 ${pending}건`,
@@ -709,6 +704,62 @@ const freshness: FreshnessStrings = {
     `감사 기록의 sensor 발화 ${fired}건 중 ${missing}건이 이 스냅샷에 부재`,
 };
 
+const cards: CardStrings = {
+  stageTitle: "Stage",
+  unitTitle: "Unit",
+  unresolvedTitle: "Unresolved",
+  healthTitle: "Run Health",
+  colStage: "stage",
+  colWorkChat: "작업+대화",
+  workChatTip:
+    "감사 로그에서 작업(이벤트가 촘촘한 구간·위임)과 대화(사람 턴 사이) 로 분류된 시간의 합입니다. 사람 응답 대기·일시중지·분류 불가 구간은 넣지 않습니다",
+  unitsDone: (done, total) => `유닛 ${done}/${total}`,
+  noStages: "이 phase 에는 stage 가 없습니다",
+  colUnit: "unit",
+  colArtifacts: "산출물",
+  cellLabel: {
+    complete: "완료",
+    partial: "산출물 일부",
+    unsettled: "완료 기록 없음",
+    unverified: "확인 불가",
+    absent: "시작 전",
+    "n/a": "해당 없음",
+  },
+  decisionsTab: "미결 결정",
+  openQsTab: "Open questions",
+  colItemOwner: "항목 → 담당 stage",
+  colAge: "경과",
+  noDecisions: "미결 결정 없음",
+  noOpenQs: "열린 질문 없음",
+  answersTab: "내 답변",
+  stuckTab: "막힘",
+  checksTab: "검사 실패",
+  summaryTab: "요약",
+  colAsk: "질문 · 파일",
+  colWait: "대기",
+  colGuard: "stop hook",
+  colCount: "연속 차단",
+  colCheck: "검사 · stage",
+  colWhen: "시각",
+  moreRows: (n) => `외 ${n}건`,
+  moreTimeline: "Gantt 타임라인 전체 보기",
+  moreMatrix: "stage × unit 매트릭스 보기",
+  moreDeferrals: "미결 전체 보기",
+  drillsHeading: "자세히 보기",
+  sourcesLabel: "출처",
+  sourceAge: (age) => `${age} 전`,
+  sourceMissing: "기록 없음",
+  sourceStale: "낡음",
+  sourceNames: {
+    disk: "파일",
+    audit: "audit",
+    "state.md": "state.md",
+    "runtime-graph": "runtime-graph",
+    "hooks-health": "stop hook",
+    "stage-graph": "stage-graph",
+  },
+};
+
 export const KO: Strings = {
   locale: "ko",
   warn,
@@ -727,4 +778,5 @@ export const KO: Strings = {
   viewer,
   explorer,
   freshness,
+  cards,
 };

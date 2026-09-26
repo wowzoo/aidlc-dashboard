@@ -1,26 +1,24 @@
 // The page shell: CSS, layout, and the poll script.
 //
 // One self-contained HTML document, no framework and no build step — the whole
-// dashboard is a string. Collapsible sections are native <details>, so the only
-// client-side JavaScript is the refresh poll and the event-stream filter.
+// dashboard is a string. Collapsible sections are native <details> and card tabs are
+// radio inputs shown by CSS, so the client-side JavaScript is only the refresh poll
+// (which restores open sections and picked tabs across the swap), opening a
+// drill-down from a card link, and the event-stream filter.
 //
 // Refresh model: the browser re-fetches the rendered body every `pollMs` and
 // swaps it in. Deliberately NOT a file watcher — the inspected tree is usually a
 // synced copy, and sync tools write via atomic rename, which kqueue/FSEvents can
 // miss. A poll cannot miss anything; the whole read costs ~10ms.
 
-import { renderTokens } from "../credit/claude/token-view";
-import { renderCredit } from "../credit/view/credit-view";
 import type { DashboardModel, Locale } from "../model/types";
 import { VERSION } from "../version";
+import { DRILL, TAB_CSS } from "./card-kit";
+import { renderCards, renderDrills, renderSources } from "./cards";
 import { esc } from "./common";
-import { renderDeferrals } from "./deferrals";
-import { renderHealth } from "./health";
 import { type Strings, strings } from "./i18n";
 import { DEFAULT_LOCALE } from "./locale";
-import { renderOverview } from "./overview";
-import { renderStatus } from "./status";
-import { renderTimeline } from "./timeline";
+import { renderRunLine } from "./status";
 import { warningTextIn } from "./warnings";
 
 const STYLE = `
@@ -97,9 +95,8 @@ button.reload:disabled { opacity:.9; }
 @keyframes reload-spin { to { transform:rotate(360deg); } }
 #poll-state.err { color:var(--bad); }
 
-main { padding:16px 18px 60px; max-width:1500px; margin:0 auto; display:grid; gap:14px;
-  grid-template-columns:repeat(auto-fit,minmax(min(460px,100%),1fr)); align-items:start; }
-main > .col { display:grid; gap:14px; min-width:0; }
+main { padding:16px 18px 60px; max-width:1500px; margin:0 auto; display:flex;
+  flex-direction:column; gap:14px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:var(--r-box); padding:13px 15px;
   min-width:0; overflow:hidden; }
 .card h2 { font-size:var(--fs-3); margin:0 0 10px; font-weight:650; letter-spacing:.01em;
@@ -344,15 +341,6 @@ tr.mx-skip { opacity:.4; } tr.mx-skip td { font-size:var(--fs-1); color:var(--mu
 .dfr-ahead, .dfr-rest, .dfr-assum, .dfr-owners { border-top:1px solid var(--line); margin-top:11px;
   padding-top:2px; }
 
-.blocker { border:1px solid var(--line); border-left-width:3px; border-radius:var(--r-box); padding:9px 11px; margin-bottom:8px; }
-.blocker.bad { border-left-color:var(--bad); } .blocker.warn { border-left-color:var(--warn); }
-.blocker-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
-.blocker-where { font-weight:620; font-size:var(--fs-3); }
-.blocker-age { margin-left:auto; color:var(--mute); font-size:var(--fs-1); }
-.blocker-q { margin-top:5px; font-size:var(--fs-3); }
-.blocker-path { margin-top:3px; color:var(--mute); font-size:var(--fs-1); word-break:break-all; }
-/* 병목 행의 경로는 /view 링크 — 밑줄 없이 색만으로 눌릴 수 있음을 알린다(.dfr-source 와 동일). */
-.blocker-path a { text-decoration:none; }
 .pill { font-size:var(--fs-1); border-radius:var(--r-pill); padding:1px 7px; border:1px solid currentColor; white-space:nowrap; }
 .pill.has-help { cursor:help; text-decoration:underline dotted; text-underline-offset:2px; }
 .pill.ok { color:var(--ok); } .pill.warn { color:var(--warn); }
@@ -434,32 +422,70 @@ table.tbl td code { white-space:nowrap; }
 .warnbox { border:1px solid var(--warn); border-radius:var(--r-ctl); padding:8px 11px; margin-bottom:12px;
   font-size:var(--fs-2); color:var(--warn); grid-column:1/-1; }
 .warnbox ul { margin:4px 0 0; padding-left:17px; }
-/* Status strip: one full-width row, one chip per signal. The tone is carried by the
-   border and the head's colour AND by the leading glyph in the copy, so it does not
-   rely on colour alone. */
-.status-strip { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:8px; margin:0; padding:0;
-  list-style:none; }
-.st-chip { border:1px solid var(--line); border-radius:var(--r-box); background:var(--card); }
-.st-chip > a, .st-chip > span { display:flex; flex-direction:column; gap:1px; padding:6px 11px;
-  color:inherit; text-decoration:none; }
-.st-chip > a:hover .st-head { text-decoration:underline; }
-.st-head { font-size:var(--fs-3); font-weight:600; }
-.st-sub { font-size:var(--fs-1); color:var(--mute); }
-.st-chip.ok { border-color:var(--ok); } .st-chip.ok .st-head { color:var(--ok); }
-.st-chip.warn { border-color:var(--warn); } .st-chip.warn .st-head { color:var(--warn); }
-.st-chip.bad { border-color:var(--bad); } .st-chip.bad .st-head { color:var(--bad); }
-.st-chip.mute { border-style:dashed; } .st-chip.mute .st-head { color:var(--fg); }
-/* A chip with detail is a native <details>: the summary IS the chip, and the list
-   floats under it rather than taking a card slot of its own. */
-.st-chip.has-pop { position:relative; }
-.st-chip.has-pop summary { display:flex; flex-direction:column; gap:1px; padding:6px 11px; cursor:pointer;
-  list-style:none; }
-.st-chip.has-pop summary::-webkit-details-marker { display:none; }
-.st-chip.has-pop summary .st-head::after { content:" ▾"; font-weight:400; color:var(--mute); }
-.st-chip.has-pop details[open] summary .st-head::after { content:" ▴"; }
-.st-pop { position:absolute; top:calc(100% + 6px); left:0; z-index:20; width:min(620px,92vw);
-  max-height:60vh; overflow:auto; padding:10px 10px 2px; background:var(--card); color:var(--fg);
-  border:1px solid var(--line); border-radius:var(--r-box); box-shadow:0 6px 24px rgba(0,0,0,.28); }
+
+/* Run line: the phase/stage the run is on and how long since the audit last wrote. */
+.runline { display:flex; align-items:center; gap:9px; flex-wrap:wrap; font-size:var(--fs-3); }
+.rl-dot { width:9px; height:9px; border-radius:var(--r-pill); flex:none; }
+.rl-dot.run { background:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+.rl-dot.ok { background:var(--ok); }
+.rl-dot.mute { border:1px dashed var(--mute); }
+.rl-sub { color:var(--mute); font-size:var(--fs-2); }
+
+/* The 2×2 cards. Two columns down to 900px, then one. */
+.cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:stretch; }
+@media (max-width:900px) { .cards { grid-template-columns:1fr; } }
+.card.mc { display:flex; flex-direction:column; padding:13px 15px 11px; }
+/* The radios are the tab state, not something to look at: visually hidden, still
+   focusable, so Tab reaches the group and the arrow keys move the selection. */
+.mc-r { position:absolute; width:1px; height:1px; opacity:0; margin:0; pointer-events:none; }
+.mc-head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+.mc-head h2 { margin:0; font-size:var(--fs-4); }
+.mc-tabs { margin-left:auto; display:flex; gap:12px; flex-wrap:wrap; justify-content:flex-end; }
+.mc-tabs label { cursor:pointer; font-size:var(--fs-2); color:var(--mute); padding-bottom:2px;
+  border-bottom:2px solid transparent; white-space:nowrap; }
+.mc-tabs label:hover { color:var(--fg); }
+.mc-n { font-weight:700; font-variant-numeric:tabular-nums; }
+.mc-n.ok { color:var(--ok); } .mc-n.warn { color:var(--warn); } .mc-n.bad { color:var(--bad); }
+.mc-n.mute { color:var(--mute); }
+.mc-p { display:none; }
+${TAB_CSS}
+.mc-more { margin-top:auto; padding-top:9px; font-size:var(--fs-2); text-align:center; text-decoration:none; }
+.mc-more:hover { text-decoration:underline; }
+/* Bar-backed rows: a faint bar in the row's status colour behind the label, the value
+   right-aligned. The bar is tinted, never solid, so the text stays readable on it. */
+.mr-h { display:flex; justify-content:space-between; gap:10px; padding:0 8px 4px; color:var(--mute);
+  font-size:var(--fs-1); font-weight:600; }
+.mr-h .has-tip { cursor:help; text-decoration:underline dotted; text-underline-offset:2px; }
+.mr { position:relative; display:flex; justify-content:space-between; align-items:center; gap:10px;
+  min-height:30px; padding:4px 8px; margin:2px 0; border-radius:var(--r-ctl); font-size:var(--fs-2); }
+.mr-b { position:absolute; left:0; top:0; bottom:0; border-radius:var(--r-ctl); opacity:.2; }
+.mr-b.t-ok { background:var(--ok); } .mr-b.t-warn { background:var(--warn); }
+.mr-b.t-bad { background:var(--bad); } .mr-b.t-accent { background:var(--accent); }
+.mr-b.t-alt { background:var(--accent2); } .mr-b.t-none { background:var(--mute); opacity:.14; }
+.mr-l { position:relative; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mr-l > a { color:inherit; text-decoration:none; }
+.mr-l > a:hover { text-decoration:underline; }
+.mr-sub { color:var(--mute); }
+.mr-sub a { text-decoration:none; }
+.mr-v { position:relative; flex:none; font-weight:650; font-variant-numeric:tabular-nums; }
+/* "No record" is outlined, never tinted green. */
+.mr.dashed { border:1px dashed var(--mute); }
+.mr.dim { opacity:.55; }
+.mr.empty { color:var(--mute); }
+.mr-rest, .mr-note { padding:4px 8px 0; color:var(--mute); font-size:var(--fs-1); }
+
+/* Drill-downs: the full panels, one closed <details> each. */
+.drills { display:flex; flex-direction:column; gap:8px; }
+.drills-h { margin:6px 0 0; font-size:var(--fs-3); font-weight:600; color:var(--mute); }
+details.drill { border:1px solid var(--line); border-radius:var(--r-box); background:var(--card); }
+details.drill > summary { margin:0; padding:10px 15px; font-size:var(--fs-3); font-weight:600; color:var(--fg); }
+.drill-body { display:grid; gap:14px; padding:0 12px 12px; }
+
+/* Sources: every input's age on one line; a stale one is outlined and explains itself. */
+.sources { display:flex; flex-wrap:wrap; gap:6px 14px; color:var(--mute); font-size:var(--fs-1); }
+.src-l { font-weight:600; }
+.src.stale { color:var(--warn); border:1px dashed var(--warn); border-radius:var(--r-ctl); padding:0 5px; cursor:help; }
+.src.missing { opacity:.75; }
 
 /* Credit view (u3) — first card in the primary column. Uses host tokens only.
    The u3 view emits .card via section(); these style its inner blocks. */
@@ -516,6 +542,33 @@ const SCRIPT = (pollMs: number, s: Strings) => {
   }
   bindFilter();
 
+  // Card tabs the reader chose, by radio-group name. Delegated on document because the
+  // poll replaces every radio.
+  var pickedTabs = {};
+  document.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains('mc-r')) pickedTabs[t.name] = t.value;
+  });
+
+  // A card's "see all" link targets a closed <details>; an anchor alone would scroll
+  // to it without opening it.
+  function openDrill(id) {
+    var d = document.getElementById(id);
+    if (!d || d.tagName !== 'DETAILS') return false;
+    d.open = true;
+    d.scrollIntoView({ block: 'start' });
+    return true;
+  }
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[data-drill]');
+    if (a && openDrill(a.dataset.drill)) e.preventDefault();
+  });
+  // The usage panel's window toggle and its refresh redirect both land on \`?cw=\`, and
+  // that panel now sits in a closed drill-down — without this, choosing a window would
+  // reload onto a page with the panel it just changed folded away.
+  if (location.hash) openDrill(location.hash.slice(1));
+  else if (/[?&]cw=/.test(location.search)) openDrill(${j(DRILL.usage)});
+
   // One refresh path for every trigger — the button, the timer and the
   // tab-focus handler all call this, so they can never drift apart.
   var busy = false;
@@ -548,6 +601,13 @@ const SCRIPT = (pollMs: number, s: Strings) => {
       wrap.innerHTML = html;
       document.querySelectorAll('details[data-key]').forEach(function (d) {
         if (open.size) d.open = open.has(d.dataset.key);
+      });
+      // Re-apply the tabs the reader picked. Only picked ones: a card's default tab
+      // is chosen by the server (Run Health opens on its first problem), and that
+      // choice must be free to move when the run changes.
+      Object.keys(pickedTabs).forEach(function (name) {
+        var r = document.querySelector('input.mc-r[name="' + name + '"][value="' + pickedTabs[name] + '"]');
+        if (r) r.checked = true;
       });
       window.scrollTo(0, y);
       bindFilter();
@@ -669,16 +729,16 @@ function warnings(m: DashboardModel, s: Strings): string {
  * The refreshable part of the page: everything inside #body-wrap. Served on its
  * own at /api/body so the poll swaps only this.
  *
- * The primary column leads with what stops the run, then usage, then the deferral
- * ledger — what is owed now, what the run has spent, what it still owes later. The
- * secondary column presents run structure before its timing analysis, so the reader
- * sees what ran before interpreting how long it took.
+ * Top to bottom: the run line (is it moving), the warnings (what this read could not
+ * do — degradation stays visible above everything it degrades), the 2×2 cards (the
+ * summary), the drill-downs (the full panels, closed), and the sources line (how old
+ * each input is).
  *
- * Blockers and the deferral ledger are BOTH mounted because they answer different
- * questions from different files: a blank `[Answer]:` in `*-questions.md` stops the
- * run now, while `## Assumptions & Open Questions` records debt a later stage owes.
- * Measured on run C — 0 blockers and 230 open items — so neither count implies the
- * other and neither panel can stand in for the other.
+ * The unanswered asks and the deferral ledger are BOTH reachable because they answer
+ * different questions from different files: a blank `[Answer]:` in `*-questions.md`
+ * stops the run now (Run Health), while `## Assumptions & Open Questions` records debt
+ * a later stage owes (Unresolved). Measured on run C — 0 blockers and 230 open items —
+ * so neither count implies the other and neither card can stand in for the other.
  */
 export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): string {
   const s = strings(locale);
@@ -687,34 +747,11 @@ export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): 
     let i = 0;
     return html.replace(/<details/g, () => `<details data-key="${prefix}-${i++}"`);
   };
-  // Usage leads the primary column, then the decisions the run deferred. There is
-  // no blocker card: "what is waiting on you" is the status strip's chip, and the
-  // asks list opens under it. Overview cards lead the secondary column and provide
-  // context for timing. Which usage panel renders is resolved during assembly
-  // (model.usage), so the renderer just dispatches on the discriminant — the two
-  // panels share the card slot, the `?cw=` window contract and the `credit-*` CSS.
-  const usage =
-    m.usage.kind === "claude"
-      ? renderTokens(m.usage.tokens, m.usage.tokens.trend.window, s)
-      : renderCredit(m.usage.credit, m.usage.credit.trend.window, s);
-  // Filtered rather than interpolated: renderHealth's panels are both behind
-  // SHOW_ flags, so it emits nothing today and a blank line would be left behind.
-  const primary = [
-    keyed(usage, "credit"),
-    keyed(renderDeferrals(m, s), "d"),
-    keyed(renderHealth(m, s), "h"),
-  ]
-    .filter((part) => part.trim().length > 0)
-    .join("\n");
-  return `${keyed(renderStatus(m, s), "s")}
+  return `${renderRunLine(m, s)}
 ${warnings(m, s)}
-<div class="col primary-col">
-${primary}
-</div>
-<div class="col secondary-col">
-${keyed(renderOverview(m, s), "o")}
-${keyed(renderTimeline(m, s), "t")}
-</div>`;
+${renderCards(m, s)}
+${keyed(renderDrills(m, s), "x")}
+${renderSources(m, s)}`;
 }
 
 /**

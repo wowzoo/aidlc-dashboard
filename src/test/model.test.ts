@@ -299,36 +299,38 @@ describe("render", () => {
 
   test("surfaces the blocker and the partial cell, with the provenance badge removed", () => {
     const body = renderBody(m);
-    expect(body).toContain('class="col primary-col"');
-    expect(body).toContain('class="col secondary-col"');
+    expect(body).toContain('<div class="cards">');
+    expect(body).not.toContain("primary-col");
     expect(body).not.toContain('class="full"');
     expect(body).toContain("PU-B-ui");
     expect(body).toContain("code-summary");
     // 회귀 검증: 출처 배지/팝업은 화면에서 완전히 사라져야 한다 (stale·fresh 모두).
+    // The sources line is one summary line, not a badge on each number.
     expect(body).not.toContain("prov stale");
     expect(body).not.toContain('class="prov"');
     expect(body).toContain("c-partial");
   });
 
-  test("places the deferral ledger below credit and overview cards above timing", () => {
+  test("orders the page: run line, cards, then the full panels closed, then sources", () => {
     const body = renderBody(m);
-    const primaryStart = body.indexOf('<div class="col primary-col">');
-    const secondaryStart = body.indexOf('<div class="col secondary-col">');
-    const primary = body.slice(primaryStart, secondaryStart);
-    const secondary = body.slice(secondaryStart);
-
-    // Usage → deferrals: what the run spent, then what it still owes.
-    expect(primary.indexOf('id="credit"')).toBeLessThan(primary.indexOf('id="deferrals"'));
-    expect(primary).not.toContain(">진행 개요</h2>");
-
-    const overview = secondary.indexOf(">진행 개요</h2>");
-    const phases = secondary.indexOf(">Phase · Stage</h2>");
-    const matrix = secondary.indexOf('id="matrix"');
-    const timeline = secondary.indexOf('id="timeline"');
-    expect(overview).toBeLessThan(phases);
-    expect(phases).toBeLessThan(matrix);
-    expect(matrix).toBeLessThan(timeline);
-    expect(secondary).not.toContain('id="deferrals"');
+    const at = (needle: string) => {
+      const i = body.indexOf(needle);
+      expect(i).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+    // The four cards, in reading order.
+    expect(at('id="card-stage"')).toBeLessThan(at('id="card-unit"'));
+    expect(at('id="card-unit"')).toBeLessThan(at('id="card-unresolved"'));
+    expect(at('id="card-unresolved"')).toBeLessThan(at('id="card-health"'));
+    // Every full panel survives, behind the cards, inside a closed drill-down.
+    expect(at('id="card-health"')).toBeLessThan(at('id="drill-overview"'));
+    for (const id of ["matrix", "timeline", "deferrals", "credit"]) at(`id="${id}"`);
+    expect(at('id="drill-overview"')).toBeLessThan(at('id="matrix"'));
+    expect(at('id="drill-timeline"')).toBeLessThan(at('id="timeline"'));
+    expect(at('id="drill-deferrals"')).toBeLessThan(at('id="deferrals"'));
+    expect(at('id="drill-usage"')).toBeLessThan(at('id="credit"'));
+    expect(body).not.toMatch(/<details[^>]*class="drill"[^>]* open/);
+    expect(at('id="credit"')).toBeLessThan(at('<div class="sources">'));
   });
 
   test("the timing panel never prints a day unit", () => {
@@ -339,11 +341,16 @@ describe("render", () => {
     // comparable at a glance. The fixture's span is deliberately over 24h, so this
     // assertion has something to catch.
     const body = renderBody(m);
+    // Bounded to the timing section itself: other panels follow it in the drill-downs,
+    // and an AGE (how long a deferral has been open) is rightly printed in days.
     const start = body.indexOf('id="timeline"');
-    const timing = body.slice(start);
+    const timing = body.slice(start, body.indexOf("</section>", start));
     expect(m.timing.elapsedSec).toBeGreaterThan(86400);
     expect(timing).not.toMatch(/\d\.\dd\b/);
     expect(timing).toContain(`${(m.timing.elapsedSec / 3600).toFixed(1)}h`);
+    // The Stage card's time column is timing too, so it follows the same rule.
+    const stageCard = body.slice(body.indexOf('id="card-stage"'), body.indexOf('id="card-unit"'));
+    expect(stageCard).not.toMatch(/\d\.\dd\b/);
   });
 
   test("an age still rolls up to days — that is what the reader is asking", () => {
@@ -514,15 +521,14 @@ describe("render", () => {
     // 결정과 이슈 read memory.md — what the ORCHESTRATOR thought — and measured
     // against the deferral ledger on a real run it shared zero files and zero item
     // text with it, while naming nothing the run still owed. Both panels in
-    // render/health.ts are now behind SHOW_ flags; renderBody must drop the empty
-    // string rather than interpolate a blank line into the column.
+    // render/health.ts are now behind SHOW_ flags, and renderBody no longer mounts
+    // renderHealth at all — the retired panels have no slot to leave blank.
     const body = renderBody(m);
     expect(renderHealth(m, strings("ko"))).toBe("");
     expect(body).not.toContain("결정과 이슈");
     expect(body).not.toContain("후속 확인 후보");
     expect(body).not.toContain("Stage별 전체 기록");
     expect(body).not.toContain("감사 원장");
-    expect(body).not.toMatch(/<div class="col primary-col">\s*\n\s*\n/);
     // The diary still assembles: /api/model keeps it, like sensors and hook health.
     expect(m.diaries.records.length).toBe(6);
   });

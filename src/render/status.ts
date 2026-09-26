@@ -1,136 +1,246 @@
-// The status strip — see model/status.ts for what each chip reads and why there is
-// no combined verdict. This module only turns those readings into markup.
+// The run line at the top of the body, and the Run Health card — see model/status.ts
+// for what each reading is and why there is no combined verdict. This module only
+// turns those readings into markup.
 //
-// Deliberately NOT `role="status"`: the body is swapped on every poll, and a live
-// region would re-announce the whole strip each minute. It is a labelled list, so a
-// screen reader reaches it first and reads it on demand.
+// Run Health is a tabbed card, one tab per signal (your answers, stuck, failed
+// checks), and each tab's COUNT carries the signal at a glance: coloured when there is
+// something to act on, green when the source was read and is clear, and a muted dash
+// when there is no record at all — "no record" must never read as healthy. The card
+// opens on the first tab with a problem, so a reader who only glances at it lands on
+// the thing that needs them.
+//
+// Deliberately NOT `role="status"`: the body is swapped on every poll, and a live region
+// would re-announce the whole card each minute.
 
-import { type ChecksReading, type StuckReading, buildStatus } from "../model/status";
-import type { DashboardModel } from "../model/types";
-import { renderBlockerList } from "./blockers";
+import {
+  type ChecksReading,
+  type HumanReading,
+  type StuckReading,
+  buildStatus,
+} from "../model/status";
+import type { Blocker, DashboardModel } from "../model/types";
+import {
+  type CountTone,
+  DRILL,
+  type Row,
+  type Tab,
+  rowList,
+  share,
+  tabbedCard,
+  viewLink,
+} from "./card-kit";
 import { dur, esc } from "./common";
 import type { Strings } from "./i18n";
 
+// ── Run line ─────────────────────────────────────────────────────────────────
+
 /**
- * `mute` (dashed) means "no reading" — a source that is absent or has nothing for
- * this stage. `plain` is a reading that carries no judgement, like the run chip.
+ * "Is it moving": the phase and stage the run is on, and how long since the audit last
+ * recorded anything. Lives in the refreshed body, not the static header, because the
+ * age is the one number on it that changes every poll.
  */
-type Tone = "ok" | "warn" | "bad" | "mute" | "plain";
-
-interface Chip {
-  tone: Tone;
-  head: string;
-  sub: string;
-  /** In-page anchor of the panel that holds the detail. */
-  href?: string;
-  tip?: string;
-  /**
-   * Detail that opens UNDER the chip on click, instead of living in a card of its
-   * own. Native <details>, so it needs no script and page.ts's poll restores it open.
-   */
-  pop?: string;
-}
-
-function chip(c: Chip): string {
-  const title = c.tip ? ` title="${esc(c.tip)}"` : "";
-  const inner = `<span class="st-head">${esc(c.head)}</span><span class="st-sub">${esc(c.sub)}</span>`;
-  if (c.pop) {
-    return `<li class="st-chip ${c.tone} has-pop"><details><summary${title}>${inner}</summary><div class="st-pop">${c.pop}</div></details></li>`;
-  }
-  const body = c.href
-    ? `<a href="${esc(c.href)}"${title}>${inner}</a>`
-    : `<span${title}>${inner}</span>`;
-  return `<li class="st-chip ${c.tone}">${body}</li>`;
-}
-
-function stuckChip(r: StuckReading, s: Strings): Chip {
-  const x = s.status;
-  switch (r.state) {
-    case "no-record":
-      return { tone: "mute", head: x.stuckNoRecord, sub: x.stuckSource, tip: x.stuckTip };
-    case "clear":
-      return { tone: "ok", head: x.stuckClear, sub: x.stuckSource, tip: x.stuckTip };
-    case "earlier-stage":
-      return { tone: "ok", head: x.stuckClear, sub: x.stuckEarlier(r.stage), tip: x.stuckTip };
-    case "blocked":
-      return {
-        tone: "warn",
-        head: x.stuckBlocked(r.count),
-        sub: `${r.stage} · ${x.stuckSource}`,
-        tip: x.stuckTip,
-      };
-  }
-}
-
-function checksChip(r: ChecksReading, s: Strings): Chip {
-  const x = s.status;
-  const href = "#timeline";
-  switch (r.state) {
-    case "none":
-      return { tone: "mute", head: x.checksNone, sub: x.checksSource, href };
-    case "in-flight":
-      return { tone: "mute", head: x.checksInFlight(r.pending), sub: x.checksSource, href };
-    case "failed":
-      return {
-        tone: "warn",
-        head: x.checksFailed(r.failed),
-        sub: x.checksSource,
-        href,
-        tip: x.checksFailedTip,
-      };
-    case "passed":
-      return { tone: "ok", head: x.checksPassed(r.passed), sub: x.checksSource, href };
-  }
-}
-
-export function renderStatus(m: DashboardModel, s: Strings): string {
+export function renderRunLine(m: DashboardModel, s: Strings): string {
   const x = s.status;
   const st = buildStatus(m);
-  const chips: Chip[] = [];
+  if (st.run.state === "complete") {
+    return `<div class="runline"><span class="rl-dot ok"></span><b>${esc(x.runComplete)}</b><span class="rl-sub">${esc(
+      x.runSource,
+    )}</span></div>`;
+  }
+  if (st.run.state === "unknown") {
+    return `<div class="runline"><span class="rl-dot mute"></span><b>${esc(x.runUnknown)}</b><span class="rl-sub">${esc(
+      x.runSource,
+    )}</span></div>`;
+  }
+  const phase = m.state.lifecyclePhase;
+  const where = phase ? `${phase} › ${st.run.stageDisplay}` : st.run.stageDisplay;
+  return `<div class="runline" title="${esc(x.runTip)}"><span class="rl-dot run"></span><b>${esc(
+    x.running,
+  )}</b><span class="rl-sub">${esc(x.runningSub(where, dur(st.run.lastEventAgeSec)))}</span></div>`;
+}
+
+// ── Run Health ───────────────────────────────────────────────────────────────
+
+/**
+ * One unanswered ask. `parked` overrides the blocker's own `isCurrentStage`: on a
+ * finished run every ask is a loose end (model/status.ts), even one in the stage
+ * `state.md` still names as current.
+ */
+function askRow(b: Blocker, s: Strings, maxWait: number, parked = !b.isCurrentStage): Row {
+  const where = b.unit ? `${b.unit} · ${b.stage}` : b.stage;
+  const file = b.rel.split("/").pop() ?? b.rel;
+  const gate = b.kind === "confirmation" ? ` · ${s.blockers.confirmation}` : "";
+  const earlier = parked ? `${s.blockers.staleStage} · ` : "";
+  return {
+    label: `${esc(earlier)}${esc(where)} · ${esc(b.heading)}<span class="mr-sub">${esc(gate)} · ${viewLink(
+      b.rel,
+      file,
+      s.blockers.viewTip(b.rel),
+    )}</span>`,
+    value: dur(b.waitingSec),
+    pct: b.waitingSec === undefined ? undefined : share(b.waitingSec, maxWait),
+    tone: parked ? "none" : "warn",
+    dim: parked,
+    tip: b.kind === "confirmation" ? s.blockers.confirmationTip : undefined,
+  };
+}
+
+function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings): Tab {
+  const x = s.status;
+  const maxWait = Math.max(0, ...m.blockers.map((b) => b.waitingSec ?? 0));
+  const rows: Row[] = [];
+  if (h?.awaitingGate) {
+    rows.push({
+      label: `${esc(x.humanGate(h.awaitingGate))}<span class="mr-sub"> · ${esc(x.humanGateSource)}</span>`,
+      value: "",
+      pct: 100,
+      tone: "warn",
+    });
+  }
+  // buildBlockers already sorts current-stage asks first; parked ones follow, dimmed.
+  for (const b of m.blockers) rows.push(askRow(b, s, maxWait));
+  // An open gate is usually answered IN the current-stage questions file, so adding it
+  // to their count would report one approval twice. It counts on its own only when no
+  // current ask carries it — the same rule the status chip used.
+  const current = h?.current ?? 0;
+  const open = current > 0 ? current : h?.awaitingGate ? 1 : 0;
+  return {
+    label: s.cards.answersTab,
+    count: { text: String(open), tone: open > 0 ? "warn" : "ok" },
+    // Not capped. This card is the only place the asks are listed — the "see all" link
+    // goes to the timeline, which does not list them — so a "+N more" here would make
+    // the rest unreachable. The list the old blockers card showed was never capped.
+    body: rowList(rows, {
+      head: [s.cards.colAsk, s.cards.colWait],
+      empty: x.humanNone,
+      note: x.humanSource,
+    }),
+  };
+}
+
+function stuckTab(r: StuckReading, s: Strings): Tab {
+  const x = s.status;
+  let row: Row;
+  let count: { text: string; tone: CountTone };
+  switch (r.state) {
+    case "no-record":
+      row = { label: esc(x.stuckNoRecord), value: "—", dashed: true };
+      count = { text: "–", tone: "mute" };
+      break;
+    case "clear":
+      row = { label: esc(x.stuckClear), value: "0", tone: "ok" };
+      count = { text: "0", tone: "ok" };
+      break;
+    case "earlier-stage":
+      row = {
+        label: `${esc(x.stuckClear)}<span class="mr-sub"> · ${esc(x.stuckEarlier(r.stage))}</span>`,
+        value: "0",
+        tone: "ok",
+      };
+      count = { text: "0", tone: "ok" };
+      break;
+    case "blocked":
+      row = {
+        label: `${esc(x.stuckBlocked(r.count))}<span class="mr-sub"> · ${esc(r.stage)}</span>`,
+        value: String(r.count),
+        pct: 100,
+        tone: "warn",
+      };
+      count = { text: String(r.count), tone: "warn" };
+      break;
+  }
+  return {
+    label: s.cards.stuckTab,
+    count,
+    body: rowList([{ ...row, tip: x.stuckTip }], {
+      head: [s.cards.colGuard, s.cards.colCount],
+      note: x.stuckSource,
+    }),
+  };
+}
+
+function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
+  const x = s.status;
+  const stage = m.state.currentStage;
+  const now = Date.parse(m.generatedAt);
+  const failures = m.sensors.failures.filter((f) => f.stage === stage);
+  const rows: Row[] = failures.map((f) => {
+    const age = (now - Date.parse(f.ts)) / 1000;
+    const findings = f.findingsCount !== undefined ? ` · ${f.findingsCount}` : "";
+    return {
+      label: `✗ ${esc(f.id)}<span class="mr-sub"> · ${esc(f.stage)}${esc(findings)}</span>`,
+      value: Number.isFinite(age) && age >= 0 ? dur(age) : "—",
+      pct: 100,
+      tone: "bad",
+      tip: x.checksFailedTip,
+    };
+  });
+  let count: { text: string; tone: CountTone };
+  switch (r.state) {
+    case "none":
+      rows.push({ label: esc(x.checksNone), value: "—", dashed: true });
+      count = { text: "–", tone: "mute" };
+      break;
+    case "in-flight":
+      rows.push({ label: esc(x.checksInFlight(r.pending)), value: "", dashed: true });
+      count = r.failed > 0 ? { text: String(r.failed), tone: "bad" } : { text: "…", tone: "mute" };
+      break;
+    case "failed":
+      // The roll-up counted a failure whose firing is not in the failure list (no
+      // terminal record read) — still say it happened rather than show nothing.
+      if (failures.length === 0) {
+        rows.push({ label: esc(x.checksFailed(r.failed)), value: "", pct: 100, tone: "bad" });
+      }
+      count = { text: String(r.failed), tone: "bad" };
+      break;
+    case "passed":
+      rows.push({ label: esc(x.checksPassed(r.passed)), value: "", tone: "ok" });
+      count = { text: "0", tone: "ok" };
+      break;
+  }
+  return {
+    label: s.cards.checksTab,
+    count,
+    body: rowList(rows, {
+      head: [s.cards.colCheck, s.cards.colWhen],
+      max: 6,
+      moreText: s.cards.moreRows,
+      note: x.checksSource,
+    }),
+  };
+}
+
+export function renderRunHealth(m: DashboardModel, s: Strings): string {
+  const st = buildStatus(m);
+  const more = { href: `#${DRILL.timeline}`, label: s.cards.moreTimeline };
 
   if (st.run.state === "complete") {
-    chips.push({ tone: "ok", head: x.runComplete, sub: x.runSource });
-  } else if (st.run.state === "unknown") {
-    chips.push({ tone: "mute", head: x.runUnknown, sub: x.runSource });
-  } else {
-    chips.push({
-      tone: "plain",
-      head: x.running,
-      sub: x.runningSub(st.run.stageDisplay, dur(st.run.lastEventAgeSec)),
-      tip: x.runTip,
+    // A finished run: past blocks and failed checks are history (model/status.ts). What
+    // is left to show is that it finished, and any ask it left unanswered.
+    const maxWait = Math.max(0, ...m.blockers.map((b) => b.waitingSec ?? 0));
+    const rows: Row[] = [
+      { label: esc(s.status.runComplete), value: "", tone: "ok" },
+      ...m.blockers.map((b) => askRow(b, s, maxWait, true)),
+    ];
+    return tabbedCard({
+      id: "health",
+      title: s.cards.healthTitle,
+      tabs: [{ label: s.cards.summaryTab, body: rowList(rows, { note: s.status.runSource }) }],
+      more,
     });
   }
 
-  if (st.stuck) chips.push(stuckChip(st.stuck, s));
-
-  const h = st.human;
-  if (h) {
-    const earlier = h.earlier > 0 ? ` · ${x.humanEarlier(h.earlier)}` : "";
-    // The asks themselves — which file to open — open under this chip. Present
-    // whenever any ask is unanswered, current or parked, so none is unreachable.
-    const pop = m.blockers.length > 0 ? renderBlockerList(m, s) : undefined;
-    if (h.current > 0) {
-      const gate = h.awaitingGate ? ` · ${x.humanGate(h.awaitingGate)}` : "";
-      chips.push({
-        tone: "bad",
-        head: x.humanWaiting(h.current),
-        sub: `${x.humanOldest(dur(h.oldestWaitingSec))}${gate}${earlier}`,
-        pop,
-      });
-    } else if (h.awaitingGate) {
-      chips.push({
-        tone: "warn",
-        head: x.humanGate(h.awaitingGate),
-        sub: `${x.humanGateSource}${earlier}`,
-        href: pop ? undefined : "#timeline",
-        pop,
-      });
-    } else {
-      chips.push({ tone: "ok", head: x.humanNone, sub: `${x.humanSource}${earlier}`, pop });
-    }
-  }
-
-  if (st.checks) chips.push(checksChip(st.checks, s));
-
-  return `<ul class="status-strip" aria-label="${esc(x.label)}">${chips.map(chip).join("")}</ul>`;
+  const tabs = [
+    answersTab(st.human, m, s),
+    stuckTab(st.stuck ?? { state: "no-record" }, s),
+    checksTab(st.checks ?? { state: "none" }, m, s),
+  ];
+  const problem = tabs.findIndex((t) => t.count?.tone === "warn" || t.count?.tone === "bad");
+  return tabbedCard({
+    id: "health",
+    title: s.cards.healthTitle,
+    tabs,
+    selected: problem < 0 ? 0 : problem,
+    more,
+  });
 }

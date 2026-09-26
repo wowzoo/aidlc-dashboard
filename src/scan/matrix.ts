@@ -326,7 +326,9 @@ export interface MatrixCell {
   present: string[];
   /** Contracted artifacts for this unit's kind ([] when no catalogue). */
   expected: string[];
-  /** expected − present, non-empty only when state is "partial". */
+  /** The part of `expected` that judges the cell — `optional_produces` excluded. */
+  required: string[];
+  /** required − present; empty on every state but "partial" and "absent". */
   missing: string[];
   /** Why the receipt could not be checked. Set only when state is "unverified". */
   receiptReason?: ReceiptReason;
@@ -565,6 +567,7 @@ export function buildConstructionMatrix(
         state,
         present,
         expected,
+        required,
         missing,
         ...(receipt?.reason ? { receiptReason: receipt.reason } : {}),
       };

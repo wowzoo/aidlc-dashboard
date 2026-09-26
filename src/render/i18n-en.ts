@@ -15,6 +15,7 @@
 import type { ReceiptReason } from "../scan/matrix";
 import type {
   BlockerStrings,
+  CardStrings,
   CliStrings,
   DeferralStrings,
   ErrorPageStrings,
@@ -99,19 +100,16 @@ const warn: WarnStrings = {
 };
 
 const blockers: BlockerStrings = {
-  currentStage: "current stage",
   staleStage: "earlier stage (parked question)",
   confirmation: "gate confirmation",
   confirmationTip:
     "Not a question but an approval-gate confirmation — the run proceeds only once you pick one of the engine's options or state what should change",
-  waiting: (age) => `waiting ${age}`,
   viewTip: (rel) => `Read ${rel} in the dashboard`,
 };
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const status: StatusStrings = {
-  label: "Run status",
   runComplete: "✓ Complete",
   runUnknown: "? Run state unknown",
   runSource: "state.md",
@@ -126,12 +124,9 @@ const status: StatusStrings = {
   stuckSource: "stop hook · this clone",
   stuckTip:
     "The stop hook's block-count.json. It rises by one each time the run tries to stop without progress and returns to 0 when work advances. The limit at which the engine gives up is engine-side, so it is not judged here",
-  humanWaiting: (count) => `✋ ${plural(count, "answer")} awaiting you`,
-  humanOldest: (age) => `oldest ${age}`,
   humanGate: (stage) => `Approval pending: ${stage}`,
   humanGateSource: "gate open · audit log",
   humanNone: "✓ Nothing awaiting you",
-  humanEarlier: (count) => `${count} unanswered in earlier stages`,
   humanSource: "questions files",
   checksNone: "No checks recorded this stage",
   checksInFlight: (pending) => `⋯ ${plural(pending, "check")} running`,
@@ -741,6 +736,62 @@ const freshness: FreshnessStrings = {
     `${missing} of the ${fired} sensor firings in the audit ledger are absent from this snapshot`,
 };
 
+const cards: CardStrings = {
+  stageTitle: "Stage",
+  unitTitle: "Unit",
+  unresolvedTitle: "Unresolved",
+  healthTitle: "Run Health",
+  colStage: "stage",
+  colWorkChat: "work+chat",
+  workChatTip:
+    "Time the audit ledger classifies as work (event-dense stretches and delegation) plus conversation (between human turns). Waiting on a human, parked time and unclassified gaps are left out",
+  unitsDone: (done, total) => `units ${done}/${total}`,
+  noStages: "No stages in this phase",
+  colUnit: "unit",
+  colArtifacts: "artifacts",
+  cellLabel: {
+    complete: "done",
+    partial: "partial",
+    unsettled: "no receipt",
+    unverified: "unverifiable",
+    absent: "not started",
+    "n/a": "n/a",
+  },
+  decisionsTab: "Open decisions",
+  openQsTab: "Open questions",
+  colItemOwner: "item → owner stage",
+  colAge: "age",
+  noDecisions: "No open decisions",
+  noOpenQs: "No open questions",
+  answersTab: "Your answers",
+  stuckTab: "Stuck",
+  checksTab: "Failed checks",
+  summaryTab: "Summary",
+  colAsk: "question · file",
+  colWait: "waiting",
+  colGuard: "stop hook",
+  colCount: "blocks in a row",
+  colCheck: "check · stage",
+  colWhen: "when",
+  moreRows: (n) => `+${n} more`,
+  moreTimeline: "Open the full Gantt timeline",
+  moreMatrix: "Open the stage × unit matrix",
+  moreDeferrals: "Open the full list",
+  drillsHeading: "Details",
+  sourcesLabel: "Sources",
+  sourceAge: (age) => `${age} ago`,
+  sourceMissing: "no record",
+  sourceStale: "stale",
+  sourceNames: {
+    disk: "files",
+    audit: "audit",
+    "state.md": "state.md",
+    "runtime-graph": "runtime-graph",
+    "hooks-health": "stop hook",
+    "stage-graph": "stage-graph",
+  },
+};
+
 export const EN: Strings = {
   locale: "en",
   warn,
@@ -759,4 +810,5 @@ export const EN: Strings = {
   viewer,
   explorer,
   freshness,
+  cards,
 };

@@ -1,0 +1,309 @@
+// The 2×2 cards (render/cards.ts) and the tab/row kit they share (render/card-kit.ts).
+// Each test states the reading it protects; the fixture supplies real values, and the
+// variants override exactly one field.
+
+import { describe, expect, test } from "bun:test";
+import * as path from "node:path";
+import { assemble } from "../model/assemble";
+import type { DashboardModel, SourceKind } from "../model/types";
+import { DRILL, MAX_TABS, TAB_CSS, tabbedCard } from "../render/card-kit";
+import {
+  renderCards,
+  renderSources,
+  renderStageCard,
+  renderUnitCard,
+  renderUnresolvedCard,
+} from "../render/cards";
+import { esc } from "../render/common";
+import { strings } from "../render/i18n";
+import { STAGE_GLYPH } from "../render/overview";
+import { renderPage } from "../render/page";
+import type { MatrixCell } from "../scan/matrix";
+import type { StageStatus } from "../scan/parser";
+
+const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+const base = assemble(FIXTURE);
+const ko = strings("ko");
+const en = strings("en");
+const checkedTab = (html: string, id: string) =>
+  new RegExp(`id="mc-${id}-(\\d+)" value="\\d+" checked`).exec(html)?.[1];
+
+describe("card kit", () => {
+  test("one radio per tab, exactly one checked, labels wired to them", () => {
+    const html = tabbedCard({
+      id: "t",
+      title: "T",
+      tabs: [
+        { label: "a", body: "A" },
+        { label: "b", body: "B" },
+      ],
+      selected: 1,
+    });
+    expect(html.match(/<input class="mc-r"/g)?.length).toBe(2);
+    expect(html.match(/ checked>/g)?.length).toBe(1);
+    expect(checkedTab(html, "t")).toBe("1");
+    expect(html).toContain('<label for="mc-t-0">a</label>');
+  });
+
+  test("an out-of-range selection is clamped, never left with nothing checked", () => {
+    const html = tabbedCard({
+      id: "t",
+      title: "T",
+      tabs: [{ label: "a", body: "A" }],
+      selected: 9,
+    });
+    expect(checkedTab(html, "t")).toBe("0");
+  });
+
+  test("the CSS covers every tab position the kit allows", () => {
+    for (let n = 1; n <= MAX_TABS; n++) {
+      expect(TAB_CSS).toContain(
+        `.mc-r:nth-of-type(${n}):checked ~ .mc-panels > .mc-p:nth-child(${n})`,
+      );
+    }
+  });
+
+  test("the page ships the tab CSS and restores picked tabs across the poll", () => {
+    const html = renderPage(base, 60000, "ko");
+    expect(html).toContain(".mc-r:nth-of-type(1):checked");
+    expect(html).toContain("pickedTabs");
+    // A drill-down link must open its closed <details>, not just scroll to it.
+    expect(html).toContain("a[data-drill]");
+    // The usage window toggle reloads onto ?cw=, and must land with that panel open.
+    expect(html).toContain(`/[?&]cw=/.test(location.search)) openDrill("${DRILL.usage}")`);
+  });
+});
+
+describe("Stage card", () => {
+  test("tabs by phase and opens on the phase the run is in", () => {
+    const html = renderStageCard(base, ko);
+    const phases = base.state.phases.filter((p) => p.stages.length > 0);
+    expect(html.match(/<label for="mc-stage-\d+">/g)?.length).toBe(phases.length);
+    const at = phases.findIndex((p) => p.stages.some((s) => s.slug === base.state.currentStage));
+    expect(checkedTab(html, "stage")).toBe(String(at));
+  });
+
+  test("time is work + conversation, never elapsed wall time", () => {
+    const sp = base.timing.stages.find((t) => t.stage === "code-generation")!;
+    expect(sp.elapsedSec).toBeGreaterThan(sp.observedSec + sp.conversationSec);
+    const html = renderStageCard(base, ko);
+    const row = html.slice(html.indexOf('title="code-generation"'));
+    const value = /<span class="mr-v">([^<]*)<\/span>/.exec(row)?.[1];
+    // hours() of observed + conversation: 8m on the fixture, not the ~31h wall span.
+    expect(value).toBe("8m");
+    expect(html).toContain("작업+대화");
+    expect(html).toContain('class="has-tip"');
+  });
+
+  test("a stage with no audit span shows a dash, not zero hours", () => {
+    const html = renderStageCard(base, ko);
+    expect(base.timing.stages.some((t) => t.stage === "infrastructure-design")).toBe(false);
+    const skipped = html.slice(html.indexOf('title="infrastructure-design"'));
+    expect(/<span class="mr-v">([^<]*)<\/span>/.exec(skipped)?.[1]).toBe("—");
+  });
+
+  test("per-unit copies fold into one row: partly done and idle is pending, not active", () => {
+    const phase = base.state.phases.find((p) => p.key.toLowerCase().includes("construction"))!;
+    const copy = phase.stages.find((s) => s.slug === "functional-design")!;
+    const m: DashboardModel = {
+      ...base,
+      state: {
+        ...base.state,
+        phases: base.state.phases.map((p) =>
+          p !== phase
+            ? p
+            : {
+                ...p,
+                stages: [
+                  { ...copy, bolt: "PU-A-core", status: "done" as const },
+                  { ...copy, bolt: "PU-B-ui", status: "pending" as const },
+                  ...p.stages.filter((s) => s.slug !== "functional-design"),
+                ],
+              },
+        ),
+      },
+    };
+    const html = renderStageCard(m, ko);
+    const row = html.slice(html.indexOf('title="functional-design"'));
+    const label = /<span class="mr-l">(.*?)<\/span><span class="mr-v">/.exec(row)?.[1] ?? "";
+    expect(label).toContain("· Functional Design");
+    expect(label).not.toContain("▶");
+    expect(label).toContain("유닛 1/2");
+    // One row for the slug, not one per unit copy.
+    expect(html.split('title="functional-design"').length - 1).toBe(1);
+  });
+
+  const foldRow = (copies: { bolt: string; status: StageStatus }[]) => {
+    const phase = base.state.phases.find((p) => p.key.toLowerCase().includes("construction"))!;
+    const copy = phase.stages.find((s) => s.slug === "functional-design")!;
+    const m: DashboardModel = {
+      ...base,
+      state: {
+        ...base.state,
+        phases: base.state.phases.map((p) =>
+          p !== phase
+            ? p
+            : {
+                ...p,
+                stages: [
+                  ...copies.map((c) => ({ ...copy, ...c })),
+                  ...p.stages.filter((s) => s.slug !== "functional-design"),
+                ],
+              },
+        ),
+      },
+    };
+    const html = renderStageCard(m, ko);
+    const row = html.slice(html.indexOf('title="functional-design"'));
+    return /<span class="mr-l">(.*?)<\/span><span class="mr-v">/.exec(row)?.[1] ?? "";
+  };
+
+  test("a unit at its gate outranks a unit that is working: the fold shows awaiting", () => {
+    const label = foldRow([
+      { bolt: "PU-A-core", status: "active" },
+      { bolt: "PU-B-ui", status: "awaiting" },
+    ]);
+    expect(label.startsWith(`${STAGE_GLYPH.awaiting} `)).toBe(true);
+  });
+
+  test("a unit that skipped the stage leaves the units denominator, as it leaves the fold", () => {
+    const label = foldRow([
+      { bolt: "PU-A-core", status: "done" },
+      { bolt: "PU-B-ui", status: "done" },
+      { bolt: "PU-C-api", status: "skipped" },
+    ]);
+    expect(label.startsWith(`${STAGE_GLYPH.done} `)).toBe(true);
+    expect(label).toContain("유닛 2/2");
+  });
+});
+
+describe("Unit card", () => {
+  test("shows the current construction stage, one row per unit, with the matrix glyphs", () => {
+    const html = renderUnitCard(base, ko);
+    expect(html).toContain(">Unit</h2>");
+    expect(html).toContain("Code Generation");
+    expect(html).toContain("█ PU-A-core");
+    expect(html).toContain("▨ PU-B-ui");
+    // Contract met as a fraction when a contract exists.
+    expect(html).toContain('<span class="mr-v">1/2</span>');
+    // The hover text is the matrix's own tip, naming what is missing.
+    expect(html).toContain("미완: code-summary");
+  });
+
+  const withCell = (cell: Partial<MatrixCell>) => {
+    const matrix = base.matrix!;
+    const m: DashboardModel = {
+      ...base,
+      matrix: {
+        ...matrix,
+        stages: matrix.stages.map((st) =>
+          st.slug !== base.state.currentStage
+            ? st
+            : { ...st, cells: [{ ...(st.cells[0] as MatrixCell), ...cell }] },
+        ),
+      },
+    };
+    const html = renderUnitCard(m, ko);
+    // From the first ROW — `<div class="mr` alone would also match the `mr-h` header.
+    return html.slice(html.indexOf('<div class="mr"'));
+  };
+
+  test("the fraction counts REQUIRED artifacts — an optional one is neither owed nor met", () => {
+    const expected = ["plan", "code-summary", "optional-notes"];
+    const required = ["plan", "code-summary"];
+    const complete = withCell({
+      state: "complete",
+      present: ["plan", "code-summary"],
+      expected,
+      required,
+      missing: [],
+    });
+    expect(complete).toContain('<span class="mr-v">2/2</span>');
+    const partial = withCell({
+      state: "partial",
+      present: ["plan"],
+      expected,
+      required,
+      missing: ["code-summary"],
+    });
+    expect(partial).toContain('<span class="mr-v">1/2</span>');
+  });
+
+  test("with no required set the figure is a file count, and no bar is drawn for it", () => {
+    const row = withCell({
+      state: "complete",
+      present: ["plan", "code-summary"],
+      expected: [],
+      required: [],
+      missing: [],
+    });
+    expect(row).toContain('<span class="mr-v">2</span>');
+    expect(row.slice(0, row.indexOf("</div>"))).not.toContain("mr-b");
+  });
+
+  test("with no matrix it says so rather than rendering an empty grid", () => {
+    const html = renderUnitCard({ ...base, matrix: undefined }, ko);
+    expect(html).toContain(ko.overview.noUnits);
+  });
+});
+
+describe("Unresolved card", () => {
+  test("two tabs — open decisions and open questions — each counted", () => {
+    const html = renderUnresolvedCard(base, ko);
+    expect(html).toContain(`미결 결정 <b class="mc-n mute">${base.deferrals.items.length}</b>`);
+    const open = base.diaries.records.filter(
+      (r) => r.axis === "openQuestions" && r.questionStatus !== "resolved",
+    ).length;
+    expect(html).toContain(`Open questions <b class="mc-n mute">${open}</b>`);
+  });
+
+  test("each item links to the file it came from and names its owner", () => {
+    const html = renderUnresolvedCard(base, ko);
+    const it = base.deferrals.items[0]!;
+    expect(html).toContain(`/view?rel=${encodeURIComponent(it.rel)}`);
+    expect(html).toContain(`→ ${it.ownerStage}`);
+  });
+
+  test("opens the questions tab when there are no decisions but there are questions", () => {
+    const m: DashboardModel = { ...base, deferrals: { ...base.deferrals, items: [] } };
+    expect(checkedTab(renderUnresolvedCard(m, ko), "unresolved")).toBe("1");
+  });
+});
+
+describe("grid, drill-downs and sources", () => {
+  test("four cards in reading order", () => {
+    const html = renderCards(base, ko);
+    const order = ["card-stage", "card-unit", "card-unresolved", "card-health"].map((id) =>
+      html.indexOf(`id="${id}"`),
+    );
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  test("every source is named with its age, and a stale one is outlined with its reason", () => {
+    const html = renderSources(base, ko);
+    const kinds = Object.keys(base.provenance) as SourceKind[];
+    expect(kinds.length).toBe(6);
+    for (const k of kinds) expect(html).toContain(`${esc(ko.cards.sourceNames[k])} · `);
+    expect(base.provenance["runtime-graph"].stale).toBe(true);
+    expect(html).toMatch(
+      /<span class="src stale" title="[^"]+">runtime-graph · [^<]+ · 낡음<\/span>/,
+    );
+  });
+
+  test("English renders the cards with no Hangul outside text quoted from the run", () => {
+    let html = renderCards(base, en) + renderSources(base, en);
+    // The fixture's run content is Korean; the cards quote it verbatim, as they must.
+    for (const t of treeText(base)) html = html.split(esc(t)).join("");
+    expect(html.match(/[가-힣]+/g) ?? []).toEqual([]);
+  });
+});
+
+/** Text the cards quote verbatim from the run (item text, question headings). */
+function treeText(m: DashboardModel): string[] {
+  return [
+    ...m.deferrals.items.map((i) => i.item),
+    ...m.diaries.records.map((r) => r.text),
+    ...m.blockers.map((b) => b.heading),
+  ];
+}
