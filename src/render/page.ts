@@ -17,6 +17,7 @@ import { DRILL, TAB_CSS } from "./card-kit";
 import { renderCards, renderDrills, renderSources } from "./cards";
 import { esc } from "./common";
 import { type Strings, strings } from "./i18n";
+import { KPI_CSS, renderKpis } from "./kpi";
 import { DEFAULT_LOCALE } from "./locale";
 import { renderRunLine } from "./status";
 import { warningTextIn } from "./warnings";
@@ -431,6 +432,32 @@ table.tbl td code { white-space:nowrap; }
 .rl-dot.mute { border:1px dashed var(--mute); }
 .rl-sub { color:var(--mute); font-size:var(--fs-2); }
 
+/* KPI strip: three tiles, the checked one drives the chart below them. The radios are
+   hidden the same way the card tabs' are (.mc-r). */
+.kpis { display:flex; flex-direction:column; gap:10px; }
+.kpi-tiles { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+@media (max-width:700px) { .kpi-tiles { grid-template-columns:1fr; } }
+.kpi { display:flex; flex-direction:column; gap:2px; cursor:pointer; padding:10px 14px;
+  border:1px solid var(--line); border-radius:var(--r-box); background:transparent; }
+.kpi:hover { border-color:var(--mute); }
+.kpi.missing { border-style:dashed; }
+.kpi-l { color:var(--mute); font-size:var(--fs-2); font-weight:600; }
+.kpi-v { font-size:1.6rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.2; }
+.kpi.missing .kpi-v { color:var(--mute); }
+.kpi-s { color:var(--mute); font-size:var(--fs-1); }
+.kpi-n { color:var(--warn); }
+.kpi-c { display:none; background:var(--card); border:1px solid var(--line); border-radius:var(--r-box);
+  padding:11px 15px; }
+.kpi-c h3 { margin:0 0 6px; font-size:var(--fs-3); }
+.kpi-svg { display:block; height:auto; }
+.kpi-svg .k-work, .kpi-legend .k-work { fill:var(--accent); background:var(--accent); }
+.kpi-svg .k-chat, .kpi-legend .k-chat { fill:var(--accent2); background:var(--accent2); }
+.kpi-svg .kpi-silence { fill:var(--mute); opacity:.12; }
+.kpi-legend .k-silence { background:var(--mute); opacity:.35; }
+.kpi-legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:4px; color:var(--mute); font-size:var(--fs-1); }
+.kpi-legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+${KPI_CSS}
+
 /* The 2×2 cards. Two columns down to 900px, then one. */
 .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; align-items:stretch; }
 @media (max-width:900px) { .cards { grid-template-columns:1fr; } }
@@ -749,6 +776,7 @@ export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): 
   };
   return `${renderRunLine(m, s)}
 ${warnings(m, s)}
+${renderKpis(m, s)}
 ${renderCards(m, s)}
 ${keyed(renderDrills(m, s), "x")}
 ${renderSources(m, s)}`;

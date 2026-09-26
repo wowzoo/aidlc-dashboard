@@ -51,6 +51,7 @@ export interface Strings {
   readonly explorer: ExplorerStrings;
   readonly freshness: FreshnessStrings;
   readonly cards: CardStrings;
+  readonly kpi: KpiStrings;
 }
 
 /**
@@ -103,6 +104,48 @@ export interface CardStrings {
   readonly sourceMissing: string;
   readonly sourceStale: string;
   readonly sourceNames: Record<SourceKind, string>;
+}
+
+/**
+ * The KPI strip and the one chart it drives (render/kpi.ts). Figures arrive already
+ * formatted; each tile says where its number came from.
+ */
+export interface KpiStrings {
+  readonly heading: string;
+  readonly progressLabel: string;
+  progressSub(done: number, total: number): string;
+  readonly usageLabel: string;
+  /** Kiro: `limit` and `pct` already formatted; both absent when ACP sent no limit. */
+  creditSub(limit: string | undefined, pct: string | undefined): string;
+  /** Claude Code: `window` is the usage window's long name. No limit exists locally. */
+  tokenSub(window: string): string;
+  readonly usageNone: string;
+  readonly timeLabel: string;
+  timeSub(work: string, chat: string): string;
+  /** Unclassified time left out of the figure — stated, never silently dropped. */
+  timeExcluded(unknown: string): string;
+  readonly timeTip: string;
+  /** Multi-shard runs only: person-time, which the merged figure is not. `concurrent`
+   *  = the clones' windows actually overlapped. */
+  personTime(total: string, clones: number, concurrent: boolean): string;
+  readonly progressChartTitle: string;
+  readonly progressChartNote: string;
+  progressChartAria(completed: number): string;
+  readonly timeChartTitle: string;
+  timeChartAria(total: string, bins: number): string;
+  /** Hover text of one 6h bar; every argument already formatted. */
+  binTip(
+    start: string,
+    work: string,
+    chat: string,
+    wait: string,
+    parked: string,
+    unknown: string,
+  ): string;
+  readonly legendWork: string;
+  readonly legendChat: string;
+  readonly legendSilence: string;
+  readonly noEvents: string;
 }
 
 /** `model.warnings`, one member per `Warning` code — see model/types.ts. */

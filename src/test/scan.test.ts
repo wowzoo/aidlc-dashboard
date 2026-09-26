@@ -28,7 +28,15 @@ import {
   requiredArtifacts,
   vacuouslyCovered,
 } from "../scan/stage-catalog";
-import { type GapSplit, buildTiming, buildWorkers, classifyGaps, shardLabel } from "../scan/timing";
+import {
+  BIN_SEC,
+  type GapSplit,
+  buildBins,
+  buildTiming,
+  buildWorkers,
+  classifyGaps,
+  shardLabel,
+} from "../scan/timing";
 
 describe("audit shard", () => {
   const SHARD = `# AI-DLC Audit Log
@@ -1861,5 +1869,71 @@ None.
         ownerStatus: "unassigned",
       });
     });
+  });
+});
+
+describe("time bins", () => {
+  const ev = (ts: string, event: string, shard = "s"): AuditEvent => ({
+    ts,
+    event,
+    fields: {},
+    shard,
+  });
+  // Local wall-clock times, so bin boundaries (local 00/06/12/18) are exact on any TZ.
+  const local = (h: number, min = 0) => new Date(2026, 0, 1, h, min, 0).toISOString();
+  const FIELDS = [
+    "humanWaitSec",
+    "parkedSec",
+    "observedSec",
+    "conversationSec",
+    "unknownSec",
+  ] as const;
+
+  test("each bucket summed over the bins equals that bucket in total — a re-cut, not a re-count", () => {
+    const events = [
+      ev(local(1), "WORKFLOW_STARTED"),
+      ev(local(1, 2), "ARTIFACT_CREATED"),
+      ev(local(1, 4), "STAGE_AWAITING_APPROVAL"),
+      ev(local(7), "GATE_APPROVED"),
+      ev(local(7, 1), "HUMAN_TURN"),
+      ev(local(7, 30), "HUMAN_TURN"),
+      ev(local(8), "WORKFLOW_PARKED"),
+      ev(local(20), "WORKFLOW_UNPARKED"),
+      ev(local(21), "SENSOR_PASSED"),
+    ];
+    const t = buildTiming({ events, counts: new Map(), shards: ["s"] }, local(23));
+    expect(t.bins.length).toBeGreaterThan(2);
+    for (const f of FIELDS) {
+      expect(t.bins.reduce((n, b) => n + b[f], 0)).toBeCloseTo(t.total[f], 6);
+    }
+    // Every bucket is exercised, so the sum check is not vacuous on any of them.
+    for (const f of FIELDS) expect(t.total[f]).toBeGreaterThan(0);
+  });
+
+  test("a gap crossing a bin edge is split by overlap, not dropped into the bin it starts in", () => {
+    const bins = buildBins(
+      [{ from: local(4), to: local(10), bucket: "parked" }],
+      local(4),
+      local(10),
+    );
+    expect(bins.map((b) => b.start)).toEqual([local(0), local(6)]);
+    expect(bins[0]!.parkedSec).toBe(2 * 3600);
+    expect(bins[1]!.parkedSec).toBe(4 * 3600);
+    expect(BIN_SEC).toBe(6 * 3600);
+  });
+
+  test("bins stop at the last event; the silence after it is carried by sinceLastEventSec", () => {
+    const events = [ev(local(1), "WORKFLOW_STARTED"), ev(local(1, 3), "ARTIFACT_CREATED")];
+    const t = buildTiming({ events, counts: new Map(), shards: ["s"] }, local(23));
+    // The window reaches the read clock…
+    expect(t.sinceLastEventSec).toBe(22 * 3600 - 180);
+    // …but bins cover only what was recorded, so a long-silent tree is not squeezed
+    // into one edge of its chart by hundreds of empty bins.
+    expect(t.bins.length).toBe(1);
+    expect(t.bins[0]!.observedSec).toBe(180);
+  });
+
+  test("an empty ledger has no bins", () => {
+    expect(buildTiming({ events: [], counts: new Map(), shards: [] }).bins).toEqual([]);
   });
 });

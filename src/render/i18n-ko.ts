@@ -15,6 +15,7 @@ import type {
   ExplorerStrings,
   FreshnessStrings,
   HealthStrings,
+  KpiStrings,
   OpenFileStrings,
   OverviewStrings,
   PageStrings,
@@ -760,6 +761,38 @@ const cards: CardStrings = {
   },
 };
 
+const kpi: KpiStrings = {
+  heading: "핵심 지표",
+  progressLabel: "진행률",
+  progressSub: (done, total) => `${done}/${total} stage · state.md`,
+  usageLabel: "사용량",
+  creditSub: (limit, pct) =>
+    limit === undefined ? "Kiro 크레딧 · 한도 미확인" : `Kiro 크레딧 · 한도 ${limit} 중 ${pct}`,
+  tokenSub: (window) => `${window} 측정 토큰 · 로컬에 한도 없음`,
+  usageNone: "사용량 기록 없음",
+  timeLabel: "작업+대화",
+  timeSub: (work, chat) => `작업 ${work} · 대화 ${chat} · audit`,
+  timeExcluded: (unknown) => `미분류 ${unknown}은 포함하지 않음`,
+  timeTip:
+    "관측된 작업 시간과 대화 시간의 합입니다. 사람 대기·일시중지·미분류 구간과 마지막 기록 이후는 넣지 않았습니다. 벽시계 경과 시간이 아닙니다.",
+  personTime: (total, clones, concurrent) =>
+    concurrent
+      ? `clone ${clones}개가 동시에 작업 — 위 수치는 팀 기준, 사람 시간 합계 ${total}`
+      : `clone ${clones}개가 차례로 작업 — 위 수치는 팀 기준, 사람 시간 합계 ${total}`,
+  progressChartTitle: "처음 완료된 stage 누적",
+  progressChartNote:
+    "audit 의 STAGE_COMPLETED 를 stage slug 마다 처음 완료된 시각에 한 번만 셉니다. Construction 의 unit 별 반복과 이후 재실행은 반영하지 않으므로, 다시 열린 stage 도 완료로 남습니다. 위 진행률은 state.md 체크박스 기준이라 두 수가 다를 수 있습니다.",
+  progressChartAria: (completed) => `완료된 stage 누적 추이, 현재 ${completed}개`,
+  timeChartTitle: "6시간 단위 작업+대화 시간",
+  timeChartAria: (total, bins) => `6시간 구간 ${bins}개의 작업+대화 시간, 합계 ${total}`,
+  binTip: (start, work, chat, wait, parked, unknown) =>
+    `${start}부터 6시간 — 작업 ${work} · 대화 ${chat} · 사람 대기 ${wait} · 일시중지 ${parked} · 미분류 ${unknown}`,
+  legendWork: "작업",
+  legendChat: "대화",
+  legendSilence: "마지막 기록 이후",
+  noEvents: "audit 기록이 없습니다",
+};
+
 export const KO: Strings = {
   locale: "ko",
   warn,
@@ -779,4 +812,5 @@ export const KO: Strings = {
   explorer,
   freshness,
   cards,
+  kpi,
 };

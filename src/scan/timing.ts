@@ -119,6 +119,30 @@ const IDLE_FLOOR_SEC = 60;
 /** Unclassified gaps at or above this are surfaced for human judgement. */
 const SUSPECT_SEC = 300;
 
+/** Width of one time bin in `TimingReport.bins`. */
+export const BIN_SEC = 6 * 3600;
+
+/** Which bucket `classifyGaps` put one gap in. Delegated time is `observed`. */
+export type GapBucket = "humanWait" | "parked" | "observed" | "conversation" | "unknown";
+
+/**
+ * One fixed-width slice of the run window, holding the part of every classified gap
+ * that falls inside it. Bins are a RE-CUT of `TimingReport.total`, not a second
+ * classification: each gap keeps the bucket `classifyGaps` gave it and is split
+ * across bins by overlap, so a bucket summed over the bins equals that bucket in
+ * `total`.
+ */
+export interface TimeBin {
+  /** Bin start, ISO. The first bin starts on a local 00/06/12/18 boundary, the rest
+   *  follow in fixed `BIN_SEC` steps. */
+  start: string;
+  humanWaitSec: number;
+  parkedSec: number;
+  observedSec: number;
+  conversationSec: number;
+  unknownSec: number;
+}
+
 /** Per-stage workload tally — what the stage actually produced. */
 export interface Workload {
   /** ARTIFACT_CREATED + ARTIFACT_UPDATED. */
@@ -322,6 +346,15 @@ export interface TimingReport {
   elapsedSec: number;
   /** Stage awaiting approval right now, per the ledger. */
   awaitingStage?: string;
+  /**
+   * `total` re-cut into `BIN_SEC` slices from the first event to the LAST EVENT, for
+   * the time chart. Merged timeline, like `total` and the stage spans — see TimeBin.
+   * The silence after the last event gets no bins: it is in no bucket, so every bin
+   * there would read zero, and a tree opened months after its last event (the
+   * reference fixture: 1,073 bins against 6 recorded) would squeeze the whole run into
+   * one edge of the chart. `sinceLastEventSec` carries that stretch instead.
+   */
+  bins: TimeBin[];
   /** Per-shard timelines, busiest first. One entry for a single-clone run. */
   workers: WorkerSpan[];
   /** True when more than one shard carries events. Says nothing about concurrency. */
@@ -371,8 +404,14 @@ function secs(a: string, b: string): number {
 /**
  * Classify the gaps between consecutive events. Exported for tests: the whole
  * IDLE/AGENT/WORK rule is here and checkable from a synthetic event list.
+ *
+ * `onGap`, when given, is told the bucket of every gap it counts — the one place the
+ * time bins read from, so they cannot drift from this rule.
  */
-export function classifyGaps(events: AuditEvent[]): GapSplit {
+export function classifyGaps(
+  events: AuditEvent[],
+  onGap?: (from: string, to: string, bucket: GapBucket) => void,
+): GapSplit {
   let humanWaitSec = 0;
   let parkedSec = 0;
   let inferredParkSec = 0;
@@ -449,30 +488,39 @@ export function classifyGaps(events: AuditEvent[]): GapSplit {
     // being parked does.
     const present = presentAt(i);
     const parkedPresent = present.filter((shard) => parkedShards.has(shard));
+    let bucket: GapBucket;
     if (present.length > 0 && parkedPresent.length === present.length) {
       parkedSec += gap;
+      bucket = "parked";
     } else if (GATE_OPEN.has(a.event) && GATE_CLOSE.has(b.event) && gap >= IDLE_FLOOR_SEC) {
       humanWaitSec += gap;
+      bucket = "humanWait";
     } else if (SESSION_RESUME.has(b.event) && gap >= IDLE_FLOOR_SEC) {
       // Old ledgers do not always carry balanced park markers. Keep this
       // conservative fallback visible as inferred pause time.
       parkedSec += gap;
       inferredParkSec += gap;
+      bucket = "parked";
     } else if (delegatedGaps.has(i)) {
       delegatedSec += gap;
       observedSec += gap;
+      bucket = "observed";
     } else if (a.event === "HUMAN_TURN" && b.event === "HUMAN_TURN" && a.shard === b.shard) {
       // A chat exchange. Same shard is load-bearing: two clones' human turns next to
       // each other in the merged ledger are two developers, not one conversation.
       // No duration floor either — the classification reads the marker, not the clock,
       // so a 3-second exchange is the same phenomenon as a 40-minute one.
       conversationSec += gap;
+      bucket = "conversation";
     } else if (gap >= SUSPECT_SEC) {
       unknownSec += gap;
       unknown.push({ seconds: gap, fromEvent: a.event, toEvent: b.event, at: a.ts });
+      bucket = "unknown";
     } else {
       observedSec += gap;
+      bucket = "observed";
     }
+    onGap?.(a.ts, b.ts, bucket);
   }
 
   const idleSec = humanWaitSec + parkedSec;
@@ -582,6 +630,63 @@ export function buildWorkers(events: AuditEvent[]): WorkerSpan[] {
   return out.sort((a, b) => b.events - a.events);
 }
 
+/** The local 00/06/12/18 boundary at or before `ms`. */
+function binFloor(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(d.getHours() - (d.getHours() % (BIN_SEC / 3600)), 0, 0, 0);
+  return d.getTime();
+}
+
+const BUCKET_FIELD: Record<GapBucket, keyof Omit<TimeBin, "start">> = {
+  humanWait: "humanWaitSec",
+  parked: "parkedSec",
+  observed: "observedSec",
+  conversation: "conversationSec",
+  unknown: "unknownSec",
+};
+
+/**
+ * Lay classified gaps onto `BIN_SEC` bins covering `firstTs`…`endTs`. A gap crossing a
+ * bin edge is split by overlap — never assigned whole to the bin it starts in, which
+ * would pile a 30-hour park into one bar.
+ */
+export function buildBins(
+  gaps: { from: string; to: string; bucket: GapBucket }[],
+  firstTs: string,
+  endTs: string,
+): TimeBin[] {
+  const start = binFloor(Date.parse(firstTs));
+  const end = Date.parse(endTs);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return [];
+  const width = BIN_SEC * 1000;
+  const bins: TimeBin[] = [];
+  // Fixed-width steps from a local boundary: a DST change shifts later labels by an
+  // hour instead of producing a 5h or 7h bin, which would skew the bars it holds.
+  for (let at = start; at < end || bins.length === 0; at += width) {
+    bins.push({
+      start: new Date(at).toISOString(),
+      humanWaitSec: 0,
+      parkedSec: 0,
+      observedSec: 0,
+      conversationSec: 0,
+      unknownSec: 0,
+    });
+  }
+  for (const g of gaps) {
+    const from = Date.parse(g.from);
+    const to = Date.parse(g.to);
+    const field = BUCKET_FIELD[g.bucket];
+    const first = Math.max(0, Math.floor((from - start) / width));
+    for (let k = first; k < bins.length; k++) {
+      const lo = Math.max(from, start + k * width);
+      const hi = Math.min(to, start + (k + 1) * width);
+      if (hi <= lo) break;
+      (bins[k] as TimeBin)[field] += (hi - lo) / 1000;
+    }
+  }
+  return bins;
+}
+
 /**
  * Derive per-stage spans and the whole-run split from the ledger.
  *
@@ -597,6 +702,7 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
       total: classifyGaps([]),
       sinceLastEventSec: 0,
       elapsedSec: 0,
+      bins: [],
       workers: [],
       parallel: false,
       clones: 0,
@@ -786,15 +892,19 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
   const lastEventSpanSec = secs(firstTs, lastActualTs);
   const handoverSec = Math.max(0, lastEventSpanSec - coveredSec);
 
+  const gaps: { from: string; to: string; bucket: GapBucket }[] = [];
+  const total = classifyGaps(actual, (from, to, bucket) => gaps.push({ from, to, bucket }));
+
   return {
     stages,
-    total: classifyGaps(actual),
+    total,
     firstTs,
     lastTs: endTs,
     lastEventTs: lastActualTs,
     sinceLastEventSec: Math.max(0, secs(lastActualTs, endTs)),
     elapsedSec,
     awaitingStage,
+    bins: buildBins(gaps, firstTs, lastActualTs),
     workers,
     parallel: workers.length > 1,
     clones: new Set(workers.map((w) => w.cloneId ?? w.shard)).size,

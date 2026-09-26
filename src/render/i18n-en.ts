@@ -22,6 +22,7 @@ import type {
   ExplorerStrings,
   FreshnessStrings,
   HealthStrings,
+  KpiStrings,
   OpenFileStrings,
   OverviewStrings,
   PageStrings,
@@ -792,6 +793,39 @@ const cards: CardStrings = {
   },
 };
 
+const kpi: KpiStrings = {
+  heading: "Key figures",
+  progressLabel: "Progress",
+  progressSub: (done, total) => `${done}/${total} stages · state.md`,
+  usageLabel: "Usage",
+  creditSub: (limit, pct) =>
+    limit === undefined ? "Kiro credits · limit unknown" : `Kiro credits · ${pct} of ${limit}`,
+  tokenSub: (window) => `Measured tokens, ${window} · no limit exists locally`,
+  usageNone: "No usage recorded",
+  timeLabel: "Work + chat",
+  timeSub: (work, chat) => `work ${work} · chat ${chat} · audit`,
+  timeExcluded: (unknown) => `${unknown} unclassified, not included`,
+  timeTip:
+    "Observed work time plus conversation time. Human waits, parked time, unclassified gaps and the stretch after the last event are left out. This is not elapsed wall-clock time.",
+  personTime: (total, clones, concurrent) =>
+    concurrent
+      ? `${clones} clones worked at once — the figure is the team's; ${total} of person-time`
+      : `${clones} clones worked in turn — the figure is the team's; ${total} of person-time`,
+  progressChartTitle: "Stages first completed, cumulative",
+  progressChartNote:
+    "Counts each stage slug once, at its first STAGE_COMPLETED in the audit. Construction's per-unit repeats and later re-runs are not reflected, so a reopened stage stays counted. The progress figure above is state.md's checkbox count, so the two can differ.",
+  progressChartAria: (completed) => `Cumulative completed stages, ${completed} so far`,
+  timeChartTitle: "Work + chat time per 6 hours",
+  timeChartAria: (total, bins) =>
+    `Work + chat time across ${bins} six-hour bins, ${total} in total`,
+  binTip: (start, work, chat, wait, parked, unknown) =>
+    `6 hours from ${start} — work ${work} · chat ${chat} · human wait ${wait} · parked ${parked} · unclassified ${unknown}`,
+  legendWork: "work",
+  legendChat: "chat",
+  legendSilence: "since the last event",
+  noEvents: "No audit events",
+};
+
 export const EN: Strings = {
   locale: "en",
   warn,
@@ -811,4 +845,5 @@ export const EN: Strings = {
   explorer,
   freshness,
   cards,
+  kpi,
 };
