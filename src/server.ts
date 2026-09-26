@@ -205,8 +205,10 @@ export interface CreditRuntime {
   markCollectionDone?: () => void;
 }
 
-/** Seams for tests, so a route that walks the home directory can be exercised on a
- *  synthetic result instead. Production passes nothing. */
+/** Seams for tests. Every route that lists workspaces (/pick, /browse, a refused
+ *  /select, the no-root landing page, /api/workspaces) walks the home directory, and a
+ *  test that let it would print this machine's directory names on failure. Production
+ *  passes nothing. */
 export interface HandleDeps {
   discover?: (o: DiscoveryOptions) => WorkspaceDiscovery;
 }
@@ -218,6 +220,7 @@ export async function handle(
   deps: HandleDeps = {},
 ): Promise<Response> {
   const url = new URL(req.url);
+  const discover = deps.discover ?? discoverWorkspaces;
 
   // ---- browser-mediated request guards -------------------------------------
   //
@@ -351,7 +354,7 @@ export async function handle(
             listing,
             showHidden,
             activeRoot,
-            discoverWorkspaces({ launchDir: opts.launchDir }),
+            discover({ launchDir: opts.launchDir }),
             buildExplorer(listing.dir, { activeRoot }),
             locale,
           ),
@@ -375,7 +378,7 @@ export async function handle(
               { ...listing, error: s.errorPage.notAWorkspace(dir) },
               showHidden,
               activeRoot,
-              discoverWorkspaces({ launchDir: opts.launchDir }),
+              discover({ launchDir: opts.launchDir }),
               buildExplorer(listing.dir, { activeRoot }),
               locale,
             ),
@@ -397,7 +400,7 @@ export async function handle(
               listing,
               showHidden,
               undefined,
-              discoverWorkspaces({ launchDir: opts.launchDir }),
+              discover({ launchDir: opts.launchDir }),
               buildExplorer(listing.dir),
               locale,
             ),
@@ -503,7 +506,7 @@ export async function handle(
       // and paths the picker already shows, and switching still goes through
       // `/select` and its validation.
       case "/api/workspaces": {
-        const d = (deps.discover ?? discoverWorkspaces)({ launchDir: opts.launchDir });
+        const d = discover({ launchDir: opts.launchDir });
         // Compared by identity, not spelling — see `workspaceKey`.
         const key = activeRoot ? workspaceKey(activeRoot) : undefined;
         const same = d.workspaces.filter((w) => key !== undefined && workspaceKey(w.path) === key);

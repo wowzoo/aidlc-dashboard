@@ -17,9 +17,30 @@ import type { CaptureSource, CreditSnapshot, ParsedUsage } from "../credit/types
 import type { CreditReadStore, CreditViewModel } from "../credit/view/credit-model";
 import { type UsageContext, assemble } from "../model/assemble";
 import type { DashboardModel } from "../model/types";
-import { type CreditRuntime, bootCredit, handle, shutdownCredit } from "../server";
+import type { WorkspaceDiscovery } from "../scan/workspaces";
+import { type CreditRuntime, bootCredit, handle as handleWith, shutdownCredit } from "../server";
 
 const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+
+/**
+ * Every call here goes through a SYNTHETIC workspace discovery. The real one walks the
+ * home directory, so a picker test used to list this machine's directories — and a
+ * failing assertion prints them. `discovered` records that the stub is the path taken.
+ */
+const discovered: string[] = [];
+const SYNTHETIC: WorkspaceDiscovery = {
+  workspaces: [{ name: "reference", path: FIXTURE }],
+  searchedRoots: ["/synthetic-home"],
+  scannedDirectories: 1,
+  truncated: false,
+};
+const handle = (req: Request, opts: Options, credit: CreditRuntime = {}) =>
+  handleWith(req, opts, credit, {
+    discover: () => {
+      discovered.push(new URL(req.url).pathname);
+      return SYNTHETIC;
+    },
+  });
 const OPTS: Options = parseArgs(["--root", FIXTURE]);
 
 function usage(overrides: Partial<ParsedUsage> = {}): ParsedUsage {
@@ -239,7 +260,11 @@ describe("handle routing", () => {
 
     test("the picker carries it as well, not just the dashboard", async () => {
       const res = await handle(new Request("http://127.0.0.1/pick?lang=en"), OPTS);
-      expect(await res.text()).toContain('<html lang="en"');
+      const body = await res.text();
+      expect(body).toContain('<html lang="en"');
+      // The picker listed the synthetic discovery, not the home directory.
+      expect(discovered).toContain("/pick");
+      expect(body).toContain(FIXTURE);
       expect(res.headers.get("set-cookie")).toContain("aidlc_lang=en");
     });
   });
