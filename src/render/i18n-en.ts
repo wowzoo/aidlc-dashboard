@@ -188,6 +188,13 @@ const page: PageStrings = {
   warningsHeading: "Read warnings",
   harnessNotFound: "not found",
   pickFolder: "📁 Change folder",
+  wsMenuTip: "Switch workspace",
+  wsHeading: "Workspaces",
+  wsNoOthers: "No other workspaces found.",
+  wsLoading: "Looking for workspaces…",
+  wsLoadFailed: "Could not load the list",
+  wsCurrent: "current",
+  wsTruncated: "The search limit was reached. If yours is missing, browse for it.",
   reloadTitle:
     "Read again now (r) — picks up edits a poll can miss, such as switching SKIP\u2194EXECUTE by hand",
   reloadLabel: "Refresh",

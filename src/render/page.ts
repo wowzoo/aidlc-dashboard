@@ -21,6 +21,7 @@ import { KPI_CSS, renderKpis } from "./kpi";
 import { DEFAULT_LOCALE } from "./locale";
 import { renderRunLine } from "./status";
 import { warningTextIn } from "./warnings";
+import { WS_SLOT, renderWorkspaceMenuShell } from "./workspace-menu";
 
 const STYLE = `
 :root {
@@ -80,6 +81,30 @@ a { color: var(--accent); }
 header.top { position:sticky; top:0; z-index:5; background:var(--bg); border-bottom:1px solid var(--line);
   padding:10px 18px; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
 header.top h1 { font-size:var(--fs-4); margin:0; font-weight:650; }
+/* Workspace switcher: the name is the trigger. The list is fetched on first open into
+   a slot (render/workspace-menu.ts); the heading and the /pick link are in the markup
+   from the start, so the menu still offers a way out with scripts off. */
+.ws-menu { position:relative; }
+.ws-menu > summary { list-style:none; display:flex; align-items:baseline; gap:6px; cursor:pointer; }
+.ws-menu > summary::-webkit-details-marker { display:none; }
+.ws-menu > summary:hover h1 { text-decoration:underline; text-underline-offset:3px; }
+.ws-caret { color:var(--mute); font-size:var(--fs-2); }
+.ws-pop { position:absolute; top:calc(100% + 6px); left:0; z-index:10; min-width:320px;
+  max-width:min(560px, 90vw); max-height:60vh; overflow:auto; background:var(--card);
+  border:1px solid var(--line); border-radius:var(--r-box); padding:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,.25); }
+.ws-list { list-style:none; margin:0; padding:0; }
+.ws-list li > a, .ws-cur { position:relative; display:flex; flex-direction:column; padding:6px 9px;
+  border-radius:var(--r-ctl); text-decoration:none; color:var(--fg); }
+.ws-list li > a:hover, .ws-list li > a:focus-visible { background:color-mix(in srgb, var(--accent) 12%, transparent); }
+.ws-tag { position:absolute; right:9px; top:7px; font-size:var(--fs-1); color:var(--accent); }
+.ws-name { font-weight:600; font-size:var(--fs-2); padding-right:48px; }
+.ws-path { color:var(--mute); font-size:var(--fs-1); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ws-note { color:var(--mute); font-size:var(--fs-1); margin:6px 9px; }
+.ws-note.err { color:var(--bad); }
+.ws-h { margin:4px 9px 2px; color:var(--mute); font-size:var(--fs-1); font-weight:600; }
+.ws-browse { display:block; border-bottom:1px solid var(--line); margin-bottom:4px; padding:4px 9px 8px;
+  font-size:var(--fs-2); text-decoration:none; }
 header.top .path { color:var(--mute); font-size:var(--fs-2); }
 header.top nav { margin-left:auto; display:flex; gap:12px; align-items:center; font-size:var(--fs-2); }
 header.top nav a { text-decoration:none; }
@@ -577,6 +602,32 @@ const SCRIPT = (pollMs: number, s: Strings) => {
     if (t && t.classList && t.classList.contains('mc-r')) pickedTabs[t.name] = t.value;
   });
 
+  // Header workspace switcher: fetch the list the first time it opens, into its slot
+  // only — the heading and the /pick link stay put, so focus on the link survives. A
+  // failed fetch is retried by reopening.
+  var ws = document.getElementById('ws-menu');
+  var wsLoaded = false;
+  if (ws) {
+    ws.addEventListener('toggle', function () {
+      if (!ws.open || wsLoaded) return;
+      wsLoaded = true;
+      var slot = document.getElementById(${j(WS_SLOT)});
+      fetch('/api/workspaces', { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+        .then(function (h) { slot.innerHTML = h; })
+        .catch(function () {
+          wsLoaded = false;
+          slot.innerHTML = '<p class="ws-note err">' + ${j(esc(s.page.wsLoadFailed))} + '</p>';
+        });
+    });
+    document.addEventListener('click', function (e) {
+      if (ws.open && !ws.contains(e.target)) ws.open = false;
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && ws.open) { ws.open = false; ws.querySelector('summary').focus(); }
+    });
+  }
+
   // A card's "see all" link targets a closed <details>; an anchor alone would scroll
   // to it without opening it.
   function openDrill(id) {
@@ -808,13 +859,17 @@ export function renderPage(
 </head>
 <body>
 <header class="top">
-  <h1>${esc(m.identity.slug ?? m.identity.record)}</h1>
+  <details class="ws-menu" id="ws-menu">
+    <summary title="${esc(s.page.wsMenuTip)}"><h1>${esc(
+      m.identity.slug ?? m.identity.record,
+    )}</h1><span class="ws-caret" aria-hidden="true">▾</span></summary>
+    <div class="ws-pop" id="ws-pop">${renderWorkspaceMenuShell(s)}</div>
+  </details>
   <span class="path">${esc(m.identity.root)} · space ${esc(m.identity.space)} · harness ${esc(
     m.identity.harnessDir ?? s.page.harnessNotFound,
   )}</span>
   <nav>
     ${langToggle(locale, s)}
-    <a class="pickbtn" href="/pick">${esc(s.page.pickFolder)}</a>
     <button id="reload-btn" class="pickbtn reload" type="button"
             title="${esc(s.page.reloadTitle)}">
       <span class="reload-icon" aria-hidden="true">⟳</span><span class="reload-label">${esc(

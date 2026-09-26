@@ -138,6 +138,23 @@ export function browse(dir: string, showHidden = false): BrowseResult {
  * reject it with "select the parent instead". Returns undefined when neither
  * interpretation holds.
  */
+/**
+ * A workspace path's identity for comparison. `resolveWorkspace` and discovery both
+ * stop at `path.resolve`, so the same tree reached through a symlink, or spelled in
+ * another case on Windows, compares unequal as a string — and the header menu listed
+ * the current workspace a second time as somewhere else to go. Never throws: an
+ * unresolvable path keys on its resolved spelling.
+ */
+export function workspaceKey(p: string, platform: NodeJS.Platform = process.platform): string {
+  let real = path.resolve(p);
+  try {
+    real = fs.realpathSync.native(real);
+  } catch {
+    // Keep the resolved spelling; comparison degrades to what it was before.
+  }
+  return platform === "win32" ? real.toLowerCase() : real;
+}
+
 export function resolveWorkspace(picked: string): string | undefined {
   const abs = path.resolve(picked);
   if (isWorkspaceDir(abs)) return abs;

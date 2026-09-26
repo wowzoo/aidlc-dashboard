@@ -37,13 +37,18 @@ import { renderBody, renderPage } from "./render/page";
 import { renderPicker } from "./render/picker";
 import { renderViewPage } from "./render/view-page";
 import { refusalText, warningText } from "./render/warnings";
-import { browse, resolveWorkspace } from "./scan/browse";
+import { renderWorkspaceMenu } from "./render/workspace-menu";
+import { browse, resolveWorkspace, workspaceKey } from "./scan/browse";
 import { buildExplorer } from "./scan/explorer";
 import { openArtifact } from "./scan/open-file";
 import { resolveState } from "./scan/resolve";
 import { readWorkspaceSummary } from "./scan/summary";
 import { readArtifactSource } from "./scan/view-file";
-import { discoverWorkspaces } from "./scan/workspaces";
+import {
+  type DiscoveryOptions,
+  type WorkspaceDiscovery,
+  discoverWorkspaces,
+} from "./scan/workspaces";
 import { VERSION } from "./version";
 
 /** Path the u3 credit view's no-JS refresh form POSTs to (must match verbatim). */
@@ -200,10 +205,17 @@ export interface CreditRuntime {
   markCollectionDone?: () => void;
 }
 
+/** Seams for tests, so a route that walks the home directory can be exercised on a
+ *  synthetic result instead. Production passes nothing. */
+export interface HandleDeps {
+  discover?: (o: DiscoveryOptions) => WorkspaceDiscovery;
+}
+
 export async function handle(
   req: Request,
   opts: Options,
   credit: CreditRuntime = {},
+  deps: HandleDeps = {},
 ): Promise<Response> {
   const url = new URL(req.url);
 
@@ -483,6 +495,23 @@ export async function handle(
         const picked = resolveWorkspace(expandHome(raw));
         if (!picked) return json({ error: "not a workspace" }, 400);
         return json(readWorkspaceSummary(picked));
+      }
+
+      // ---- header workspace switcher -----------------------------------------
+      // The discovery list for the header menu, fetched when the menu first opens
+      // (render/workspace-menu.ts says why not with the page). A read: it lists names
+      // and paths the picker already shows, and switching still goes through
+      // `/select` and its validation.
+      case "/api/workspaces": {
+        const d = (deps.discover ?? discoverWorkspaces)({ launchDir: opts.launchDir });
+        // Compared by identity, not spelling — see `workspaceKey`.
+        const key = activeRoot ? workspaceKey(activeRoot) : undefined;
+        const same = d.workspaces.filter((w) => key !== undefined && workspaceKey(w.path) === key);
+        const active = activeRoot
+          ? { path: activeRoot, name: same[0]?.name ?? path.basename(activeRoot) }
+          : undefined;
+        const others = d.workspaces.filter((w) => !same.includes(w));
+        return html(renderWorkspaceMenu({ ...d, workspaces: others }, active, s));
       }
 
       // ---- show an artifact's source in the dashboard ------------------------

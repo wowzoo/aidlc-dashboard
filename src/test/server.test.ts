@@ -134,7 +134,7 @@ describe("handle routing", () => {
     test("a non-loopback Host is refused on every route (DNS rebinding)", async () => {
       // A domain resolving to 127.0.0.1 is same-origin to the browser, so without this
       // an attacker's script could READ /api/model — paths, artifact names, questions.
-      for (const p of ["/", "/api/model", "/api/body", "/healthz"]) {
+      for (const p of ["/", "/api/model", "/api/body", "/api/workspaces", "/healthz"]) {
         const res = await handle(
           new Request(`http://evil.example.com${p}`, {
             headers: { "sec-fetch-site": "same-origin" },

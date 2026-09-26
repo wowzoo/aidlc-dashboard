@@ -256,6 +256,15 @@ export interface PageStrings {
   readonly warningsHeading: string;
   readonly harnessNotFound: string;
   readonly pickFolder: string;
+  /** Header workspace switcher (render/workspace-menu.ts). */
+  readonly wsMenuTip: string;
+  readonly wsHeading: string;
+  /** Discovery found nothing besides the current workspace. */
+  readonly wsNoOthers: string;
+  readonly wsLoading: string;
+  readonly wsLoadFailed: string;
+  readonly wsCurrent: string;
+  readonly wsTruncated: string;
   readonly reloadTitle: string;
   readonly reloadLabel: string;
   readonly footer: string;
