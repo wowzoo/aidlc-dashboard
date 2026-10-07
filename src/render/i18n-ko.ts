@@ -95,7 +95,7 @@ const blockers: BlockerStrings = {
   staleStage: "이전 stage (파킹된 질문)",
   confirmation: "게이트 확인",
   confirmationTip:
-    "질문이 아니라 승인 관문의 확인 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
+    "승인 관문의 결정 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
   viewTip: (rel) => `${rel} 원문을 대시보드에서 보기`,
 };
 

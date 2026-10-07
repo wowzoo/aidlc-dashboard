@@ -398,9 +398,13 @@ export function displayFromSlug(slug: string): string {
     .join(" ");
 }
 
-/** Derive a Bolt's overall status from its stages (active states win). */
+/**
+ * Derive a Bolt's overall status from its stages (active states win). Only stages
+ * that run count — the same set as the done/total below, so a runtime skip (`[S]`
+ * on an EXECUTE row) cannot leave a Bolt reading 1/1 and "pending" at once.
+ */
 function boltStatusFromStages(stages: StageInfo[]): StageStatus {
-  const exec = stages.filter((s) => s.execute);
+  const exec = stages.filter((s) => s.execute && s.status !== "skipped");
   if (exec.length === 0) return "pending";
   for (const s of exec) {
     if (s.status === "active" || s.status === "awaiting" || s.status === "revising") {

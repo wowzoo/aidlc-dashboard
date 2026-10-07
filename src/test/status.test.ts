@@ -67,6 +67,18 @@ describe("status — readings", () => {
     });
   });
 
+  test("a 2.10 three-part signature still names the current stage", () => {
+    // 2.10 writes `<stage>::<state sha256>::<directive fingerprint>`. Cutting at the
+    // LAST `::` read the stage as `<stage>::<sha>`, so a current block drew as a
+    // green "cleared in an earlier stage".
+    const signature = `${base.state.currentStage}::${"a".repeat(64)}::${"b".repeat(64)}`;
+    expect(buildStatus(withGuard({ signature, count: 3 })).stuck).toEqual({
+      state: "blocked",
+      count: 3,
+      stage: base.state.currentStage,
+    });
+  });
+
   test("a block recorded in a stage the run has left is not a current block", () => {
     const st = buildStatus(withGuard({ signature: "functional-design::12", count: 5 }));
     expect(st.stuck).toEqual({ state: "earlier-stage", stage: "functional-design" });

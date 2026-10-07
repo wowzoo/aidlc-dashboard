@@ -104,7 +104,7 @@ const blockers: BlockerStrings = {
   staleStage: "earlier stage (parked question)",
   confirmation: "gate confirmation",
   confirmationTip:
-    "Not a question but an approval-gate confirmation — the run proceeds only once you pick one of the engine's options or state what should change",
+    "An approval-gate decision — the run proceeds only once you pick one of the engine's options or state what should change",
   viewTip: (rel) => `Read ${rel} in the dashboard`,
 };
 

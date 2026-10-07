@@ -25,6 +25,16 @@
 //
 // Pre-2.9 trees (the reference fixture among them) keep reading through the fallback.
 //
+// THE FALLBACK IS NOT FOR EVERY DIR. The engine gives read-only fallbacks to
+// persistent evidence only — sensors, hook health, summary authorizations, source
+// review — and says everything else "is transient or derived and is rebuilt at the
+// new path without a fallback" (`aidlc-lib.ts`, above `engineDir`). The stop
+// hook's no-progress counter is one of those: `stopHookDir` returns the new path
+// unconditionally. Falling back for it would hand a 2.9+ record a counter last
+// written by the previous engine as if it were current, so `engineTransientDir`
+// reads the legacy name only for a record with no `.aidlc-engine` at all — a record
+// no 2.9+ engine has touched, whose counter is still that engine's own.
+//
 // Node fs only, never throws.
 
 import * as fs from "node:fs";
@@ -38,8 +48,8 @@ function lstat(p: string): fs.Stats | undefined {
 }
 
 /**
- * The directory to read `sub` from: `<record>/.aidlc-engine/<sub>`, or
- * `<record>/<legacyName>` when the new one is absent and the legacy one exists.
+ * The directory to read persistent evidence `sub` from: `<record>/.aidlc-engine/<sub>`,
+ * or `<record>/<legacyName>` when the new one is absent and the legacy one exists.
  */
 export function engineReadDir(recordDir: string, sub: string, legacyName: string): string {
   const current = path.join(recordDir, ENGINE_DIR, sub);
@@ -48,6 +58,22 @@ export function engineReadDir(recordDir: string, sub: string, legacyName: string
     const engine = lstat(path.join(recordDir, ENGINE_DIR));
     if (engine !== undefined && !engine.isDirectory()) return current;
     return lstat(current) === undefined && fs.existsSync(legacy) ? legacy : current;
+  } catch {
+    return current;
+  }
+}
+
+/**
+ * The directory to read transient state `sub` from: the new path whenever the
+ * record has an `.aidlc-engine` entry of any kind, the legacy name only when it has
+ * none. See the header for why this differs from `engineReadDir`.
+ */
+export function engineTransientDir(recordDir: string, sub: string, legacyName: string): string {
+  const current = path.join(recordDir, ENGINE_DIR, sub);
+  try {
+    return lstat(path.join(recordDir, ENGINE_DIR)) === undefined
+      ? path.join(recordDir, legacyName)
+      : current;
   } catch {
     return current;
   }

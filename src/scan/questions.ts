@@ -58,6 +58,15 @@
 // files read as zero asks, and blanking one answer on a copy still showed zero
 // blockers on both the dashboard and the picker card.
 //
+// Two things make it unlike the other three. It is matched the way the ENGINE
+// matches it (`isPlanApprovalLabel`, `aidlc-testing-posture.ts`): one wrapping
+// emphasis pair and a trailing `?`/`:` are ignored, because the legacy recovery
+// path has the model write this heading by hand (`code-generation.md`) and the
+// engine accepts those spellings — a stricter reader would miss a blank one the
+// engine is waiting on. And with plan approval off, the engine writes the same
+// section pre-answered `Plan approval off` as a record that "asks nothing"; that
+// one is dropped, not counted as an answered ask.
+//
 // TWO RULES KEEP THAT WIDENING FROM INVENTING QUESTIONS:
 //
 //   1. A heading is an ask only if its span holds an `[Answer]:` marker. The
@@ -136,20 +145,37 @@ const QUESTION_HEADING_RE = /^##\s+\[?([QF]\d+(?:-?[A-Za-z0-9]+)?)\]?(?:$|[\s.:\
 /** Just the heading text, for the id-less gate headings below. */
 const H2_TITLE_RE = /^##\s+(.+?)\s*$/;
 /**
- * The four id-less headings the engine writes as questions. Matched on the exact
- * literal (lowercased) because `memory-seed/org.md` lists the first three among the
- * tokens a stage must write "character for character", and the engine itself
- * writes the fourth from code — all stay English even in a Korean run, so there is
- * no localisation to tolerate here. A suffix is NOT accepted: the protocol appends
- * *sibling* sections sharing the title, and `aidlc-lib.ts` guards duplicates by
- * that same exact name; plan approval's tags count only under the exact title.
+ * Three of the four id-less headings the engine writes as questions. Matched on the
+ * exact literal (lowercased) because `memory-seed/org.md` lists these H2s among the
+ * tokens a stage must write "character for character" — they stay English even in
+ * a Korean run, so there is no localisation to tolerate here. A suffix is NOT
+ * accepted: the protocol appends *sibling* sections sharing the title, and
+ * `aidlc-lib.ts` guards duplicates by that same exact name. The fourth, plan
+ * approval, is matched by `isPlanApprovalTitle` below.
  */
 const GATE_HEADINGS = new Set([
   "consolidated summary confirmation",
   "assumption confirmation",
   "requested changes feedback",
-  "plan approval",
 ]);
+
+/** The engine's `isPlanApprovalLabel`: one emphasis pair and a trailing `?`/`:` ignored. */
+function isPlanApprovalTitle(title: string): boolean {
+  let t = title
+    .trim()
+    .replace(/[?:][ \t]*$/, "")
+    .trim();
+  for (const m of ["**", "__", "*", "_"]) {
+    if (t.startsWith(m) && t.endsWith(m) && t.length > m.length * 2) {
+      t = t.slice(m.length, -m.length).trim();
+      break;
+    }
+  }
+  return t.toLowerCase() === "plan approval";
+}
+
+/** What the engine writes after `[Answer]:` for a plan built with approval off. */
+const PLAN_APPROVAL_OFF = "plan approval off";
 // The engine writes `[Answer]:` at line start; capture the remainder verbatim so
 // a multi-word answer with a trailing comment still reads as answered.
 const ANSWER_RE = /^\[Answer\]:[ \t]*(.*)$/;
@@ -165,18 +191,20 @@ const ANSWER_RE = /^\[Answer\]:[ \t]*(.*)$/;
  * the first heading, or under a prose heading) is ignored.
  */
 export function parseQuestions(text: string): QuestionEntry[] {
-  const spans: { heading: string; markers: string[]; kind: AskKind }[] = [];
-  let current: { heading: string; markers: string[]; kind: AskKind } | undefined;
+  type Span = { heading: string; markers: string[]; kind: AskKind; planApproval: boolean };
+  const spans: Span[] = [];
+  let current: Span | undefined;
 
   for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
     if (H2_RE.test(line)) {
       const title = (H2_TITLE_RE.exec(line)?.[1] ?? "").trim();
+      const planApproval = !QUESTION_HEADING_RE.test(line) && isPlanApprovalTitle(title);
       const kind: AskKind | undefined = QUESTION_HEADING_RE.test(line)
         ? "question"
-        : GATE_HEADINGS.has(title.toLowerCase())
+        : planApproval || GATE_HEADINGS.has(title.toLowerCase())
           ? "confirmation"
           : undefined;
-      current = kind ? { heading: title, markers: [], kind } : undefined;
+      current = kind ? { heading: title, markers: [], kind, planApproval } : undefined;
       if (current) spans.push(current);
       continue;
     }
@@ -185,13 +213,16 @@ export function parseQuestions(text: string): QuestionEntry[] {
     if (a) current.markers.push((a[1] ?? "").trim());
   }
 
-  return spans
-    .filter((s) => s.markers.length > 0)
-    .map((s) => {
-      // Blank after the colon == still waiting. This is the whole signal.
-      const answer = s.markers.find((m) => m.length > 0) ?? "";
-      return { heading: s.heading, answer, answered: answer.length > 0, kind: s.kind };
-    });
+  const out: QuestionEntry[] = [];
+  for (const s of spans) {
+    if (s.markers.length === 0) continue;
+    // Blank after the colon == still waiting. This is the whole signal.
+    const answer = s.markers.find((m) => m.length > 0) ?? "";
+    // A plan built with approval off left a record, not an ask (see the header).
+    if (s.planApproval && answer.toLowerCase() === PLAN_APPROVAL_OFF) continue;
+    out.push({ heading: s.heading, answer, answered: answer.length > 0, kind: s.kind });
+  }
+  return out;
 }
 
 function statMtime(p: string): string {

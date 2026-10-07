@@ -21,18 +21,24 @@
 // A `.drops` reason containing "[degraded]" marks a degraded-mode drop, which the
 // engine's doctor counts separately; we surface it the same way.
 //
-// NOT EVERY `.last` IS A HOOK. A hook also keeps its own markers in the same dir,
-// named `<hook>.<marker>.last` — `reviewer-scope.missing-record.last` rate-limits
-// one advisory to a line per 10 minutes (`hooks/aidlc-reviewer-scope.ts`). Read as
-// a hook it would add a row that never fires on its own and lend its timestamp to
-// `lastActivity`. Hook names are kebab-case filenames with no dot, so a stem that
-// carries one is a marker and stays out.
+// NOT EVERY `.last` IS A HOOK. `reviewer-scope.missing-record.last` is a hook's own
+// marker in the same dir: it rate-limits one advisory to a line per 10 minutes
+// (`hooks/aidlc-reviewer-scope.ts`). Read as a hook it adds a row that never fires
+// and lends its stamp to `lastActivity`. Only KNOWN marker suffixes are excluded,
+// and only on `.last`: the engine does not restrict hook names (`recordHookDrop`
+// writes `<anything>.drops`, and the plugin composer writes harness-scoped drop
+// names), so "a dotted stem is a marker" would be a rule we invented, and its
+// failure would hide a real hook's drops. An unknown marker shows up as an extra
+// row instead — visible, which is the failure we can afford.
 //
 // Node fs only, never throws.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { engineReadDir } from "./engine-dir";
+import { engineReadDir, engineTransientDir } from "./engine-dir";
+
+/** `<hook><suffix>.last` files that are a hook's own markers, not heartbeats. */
+const MARKER_SUFFIXES = [".missing-record"];
 
 /** One hook's liveness + drop history. */
 export interface HookStatus {
@@ -114,12 +120,14 @@ export function readHealth(recordDir: string): HealthReport {
   }
 
   // Union of names seen as `<name>.last` and `<name>.drops` — a hook can have
-  // dropped without ever having fired, and vice versa. A dotted stem is a hook's
-  // marker, not a hook (see the header).
+  // dropped without ever having fired, and vice versa. A known marker is not a
+  // hook (see the header).
   const names = new Set<string>();
   for (const f of entries) {
-    const stem = f.endsWith(".last") ? f.slice(0, -5) : f.endsWith(".drops") ? f.slice(0, -6) : "";
-    if (stem.length > 0 && !stem.includes(".")) names.add(stem);
+    if (f.endsWith(".last")) {
+      const stem = f.slice(0, -5);
+      if (!MARKER_SUFFIXES.some((m) => stem.endsWith(m))) names.add(stem);
+    } else if (f.endsWith(".drops")) names.add(f.slice(0, -6));
   }
 
   const hooks: HookStatus[] = [];
@@ -151,7 +159,7 @@ export function readHealth(recordDir: string): HealthReport {
 
   let stopGuard: StopGuard | undefined;
   const guardRaw = readText(
-    path.join(engineReadDir(recordDir, "stop-hook", ".aidlc-stop-hook"), "block-count.json"),
+    path.join(engineTransientDir(recordDir, "stop-hook", ".aidlc-stop-hook"), "block-count.json"),
   );
   if (guardRaw) {
     try {

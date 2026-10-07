@@ -82,9 +82,17 @@ type StatusInput = Pick<
   "state" | "health" | "blockers" | "sensors" | "timing" | "provenance"
 >;
 
-/** The stage half of a `<stage>::<audit line count>` signature. */
+/**
+ * The stage part of a stop-guard signature — everything before the FIRST `::`.
+ * The engine has written two shapes: `<stage>::<audit line count>` before 2.9 and
+ * `<stage>::<state sha256>::<directive fingerprint>` in 2.10
+ * (`hooks/aidlc-continue-workflow.ts`). Cutting at the last `::` read the 2.10 shape
+ * as the stage `<stage>::<sha>`, which never equals the current stage, so a run
+ * blocked right now drew as a green "cleared, last block in an earlier stage".
+ * A stage slug never contains `::`, so the first separator is right for both.
+ */
 function signatureStage(signature: string): string {
-  const cut = signature.lastIndexOf("::");
+  const cut = signature.indexOf("::");
   return cut < 0 ? signature : signature.slice(0, cut);
 }
 

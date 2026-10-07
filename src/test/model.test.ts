@@ -18,12 +18,14 @@ import { renderHealth } from "../render/health";
 import { strings } from "../render/i18n";
 
 const KO = strings("ko");
+import { renderUnitCard } from "../render/cards";
 import { renderBody, renderPage } from "../render/page";
 import { renderPicker } from "../render/picker";
 import { listStageArtifacts } from "../scan/artifacts";
 import { browse, resolveWorkspace } from "../scan/browse";
 import { openArtifact } from "../scan/open-file";
 import { findHarnessDir } from "../scan/stage-catalog";
+import { readWorkspaceSummary } from "../scan/summary";
 import { MAX_VIEW_BYTES, readArtifactSource } from "../scan/view-file";
 
 const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
@@ -656,8 +658,23 @@ describe("2.9+ record layout", () => {
       fs.writeFileSync(path.join(health, "session-start.last"), "2026-02-01T00:00:00Z");
       const m = assemble(dir);
       expect(m.health.hooks.map((h) => h.name)).toEqual(["session-start"]);
-      // The stop guard has no new dir yet, so it still falls back.
-      expect(m.health.stopGuard?.count).toBe(1);
+      // The stop counter is transient: the engine rebuilds it at the new path and
+      // never reads the old one, so once `.aidlc-engine/` exists the legacy count
+      // (1 in the fixture) is the previous engine's, not a current block.
+      expect(m.health.stopGuard).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an empty new sensors dir does not revive legacy finding bodies", () => {
+    // Same rule for the second persistent dir: present-but-empty is not absent.
+    const { dir, record } = copyFixture();
+    try {
+      fs.mkdirSync(path.join(record, ".aidlc-engine", "sensors"), { recursive: true });
+      const m = assemble(dir);
+      expect(m.sensors.totalFailed).toBe(1);
+      expect(m.sensors.failuresWithoutBody).toBe(1);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -675,7 +692,7 @@ describe("2.9+ record layout", () => {
         "2099-01-01T00:00:00Z",
       );
       const m = assemble(dir);
-      expect(m.health.hooks.some((h) => h.name.includes("."))).toBe(false);
+      expect(m.health.hooks.some((h) => h.name.includes("missing-record"))).toBe(false);
       expect(m.health.hooks.length).toBe(7);
       expect(m.health.lastActivity).not.toBe("2099-01-01T00:00:00Z");
     } finally {
@@ -713,6 +730,9 @@ describe("2.9+ record layout", () => {
       expect(plan?.heading).toBe("Plan Approval");
       expect(plan?.kind).toBe("confirmation");
       expect(m.blockers.length).toBe(2); // the fixture's own Q1 plus this one
+      // The picker card reads the same parser, and must say the same.
+      const summary = readWorkspaceSummary(dir);
+      expect(summary.kind === "ok" ? summary.blockers.count : -1).toBe(2);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -738,6 +758,11 @@ describe("2.9+ record layout", () => {
       expect(cg?.provisional).toBe(false);
       const row = /<tr class="mx-skip"><th>Code Generation<\/th>/;
       expect(renderBody(m)).toMatch(row);
+      // The unit card picks among stages that ran, so it falls back to Functional
+      // Design rather than showing the skipped stage's absent cells.
+      const card = renderUnitCard(m, strings("en"));
+      expect(card).toContain("Functional Design");
+      expect(card).not.toContain("Code Generation");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

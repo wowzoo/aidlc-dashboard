@@ -9,7 +9,8 @@ import * as path from "node:path";
 import { parseAuditShard, parseContext } from "../scan/audit";
 import type { AuditEvent } from "../scan/audit";
 import { parseDeferralSections, readDeferrals, resolveOwner } from "../scan/deferrals";
-import { parseDrops } from "../scan/hooks-health";
+import { engineReadDir, engineTransientDir } from "../scan/engine-dir";
+import { parseDrops, readHealth } from "../scan/hooks-health";
 import {
   type BoltDag,
   type LifecycleEvent,
@@ -18,7 +19,7 @@ import {
   readUnitLifecycle,
 } from "../scan/matrix";
 import { parseDiary, readDiaries } from "../scan/memory-diary";
-import { type StageInfo, parseUnitProgress } from "../scan/parser";
+import { type StageInfo, parseState, parseUnitProgress } from "../scan/parser";
 import { parseQuestions } from "../scan/questions";
 import { buildRework } from "../scan/rework";
 import { parseSensorDetail, readSensorReport } from "../scan/sensors";
@@ -245,6 +246,26 @@ describe("unit progress table", () => {
       parseUnitProgress("## Unit Progress\n\n  | unit | gate |\n  | --- | --- |\n  | api | [x] |\n")
         ?.malformed,
     ).toBe(true);
+  });
+});
+
+describe("bolt status", () => {
+  test("a runtime skip leaves the Bolt and batch status like it leaves the count", () => {
+    // done/total already dropped `[S]`, but the status fold still waited on it, so a
+    // finished Bolt read 1/1 and "pending" at the same time.
+    const st = parseState(
+      [
+        "## Stage Progress",
+        "### CONSTRUCTION PHASE",
+        "Per unit: unit-a",
+        "Bolt batches: B1=[unit-a]",
+        "#### Bolt: unit-a",
+        "- [x] functional-design — EXECUTE",
+        "- [S] nfr-design — EXECUTE",
+      ].join("\n"),
+    );
+    expect(st.constructionBolts?.[0]).toMatchObject({ done: 1, total: 1, status: "done" });
+    expect(st.constructionBatches?.[0]?.status).toBe("done");
   });
 });
 
@@ -839,8 +860,23 @@ prose only, no marker
       { heading: "Plan Approval", answer: "", answered: false, kind: "confirmation" },
     ]);
     expect(parseQuestions(text(" A. Approve Plan"))[0]?.answered).toBe(true);
-    // Exact title only, same as the other three.
+    // A suffix is still a different heading.
     expect(parseQuestions("## Plan Approval for unit-a\n\n[Answer]:\n")).toEqual([]);
+  });
+
+  test("plan approval is matched the way the engine matches it", () => {
+    // `isPlanApprovalLabel`: one emphasis pair and a trailing `?`/`:` are ignored —
+    // the legacy recovery path has the model write this heading by hand.
+    for (const h of ["**Plan Approval**", "Plan Approval:", "plan approval?", "_Plan Approval_"]) {
+      expect(parseQuestions(`## ${h}\n\n[Answer]:\n`)[0]?.answered).toBe(false);
+    }
+  });
+
+  test("a plan built with approval off is a record, not an ask", () => {
+    // The engine writes the same section pre-answered and says it "asks nothing".
+    const off =
+      "## Plan Approval\n\nBuilt without asking: plan approval is off.\n\n[Answer]: Plan approval off\n";
+    expect(parseQuestions(off)).toEqual([]);
   });
 
   test("a gate heading still needs an [Answer] marker, and a near-miss title is prose", () => {
@@ -1008,6 +1044,61 @@ describe("sensor detail", () => {
       expect(bodyless.errors).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("engine dir (2.9+)", () => {
+  test("a dangling new entry pins the new path, as the engine's lstat check does", () => {
+    // `existsSync` would follow the link, call it absent, and revive legacy data.
+    const record = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-edir-"));
+    try {
+      fs.mkdirSync(path.join(record, ".aidlc-hooks-health"));
+      fs.writeFileSync(
+        path.join(record, ".aidlc-hooks-health", "stop.last"),
+        "2026-01-01T00:00:00Z",
+      );
+      const current = path.join(record, ".aidlc-engine", "hooks-health");
+      fs.mkdirSync(path.dirname(current));
+      fs.symlinkSync("missing-target", current, "dir");
+      expect(engineReadDir(record, "hooks-health", ".aidlc-hooks-health")).toBe(current);
+      expect(readHealth(record).hooks).toEqual([]);
+    } finally {
+      fs.rmSync(record, { recursive: true, force: true });
+    }
+  });
+
+  test("transient state falls back only for a record no 2.9+ engine has touched", () => {
+    const record = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-edir-"));
+    try {
+      const legacy = path.join(record, ".aidlc-stop-hook");
+      expect(engineTransientDir(record, "stop-hook", ".aidlc-stop-hook")).toBe(legacy);
+      fs.mkdirSync(path.join(record, ".aidlc-engine"));
+      expect(engineTransientDir(record, "stop-hook", ".aidlc-stop-hook")).toBe(
+        path.join(record, ".aidlc-engine", "stop-hook"),
+      );
+    } finally {
+      fs.rmSync(record, { recursive: true, force: true });
+    }
+  });
+
+  test("a dotted .drops name is still a hook; only known .last markers are not", () => {
+    // The engine does not restrict hook names, and the plugin composer writes
+    // harness-scoped drop files — hiding dotted names would hide real drops.
+    const record = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-edir-"));
+    try {
+      const dir = path.join(record, ".aidlc-engine", "hooks-health");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "plugin-compose.v2.drops"), "2026-01-01T00:00:00Z\tx\n");
+      fs.writeFileSync(path.join(dir, "reviewer-scope.last"), "2026-01-01T00:00:00Z");
+      fs.writeFileSync(
+        path.join(dir, "reviewer-scope.missing-record.last"),
+        "2026-01-02T00:00:00Z",
+      );
+      const names = readHealth(record).hooks.map((h) => h.name);
+      expect(names).toEqual(["plugin-compose.v2", "reviewer-scope"]);
+    } finally {
+      fs.rmSync(record, { recursive: true, force: true });
     }
   });
 });
