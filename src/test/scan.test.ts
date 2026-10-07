@@ -830,6 +830,19 @@ prose only, no marker
     ]);
   });
 
+  test("the engine-held plan approval is the fourth id-less ask", () => {
+    // The intro line mentions `[Answer]:` mid-sentence, before any heading — it must
+    // neither open a span nor count as an answer.
+    const text = (answer: string) =>
+      `# Code Generation Plan Approval\n\nAI-DLC writes this file when it asks you to approve the plan. To answer here\ninstead of in chat, write your answer after \`[Answer]:\` and say done.\n\n## Plan Approval\n\nApprove the code plan for unit-a?\n\n- A. Approve Plan\n- B. Request Changes\n- C. I'll edit the files\n\n[Answer]:${answer}\n`;
+    expect(parseQuestions(text(""))).toEqual([
+      { heading: "Plan Approval", answer: "", answered: false, kind: "confirmation" },
+    ]);
+    expect(parseQuestions(text(" A. Approve Plan"))[0]?.answered).toBe(true);
+    // Exact title only, same as the other three.
+    expect(parseQuestions("## Plan Approval for unit-a\n\n[Answer]:\n")).toEqual([]);
+  });
+
   test("a gate heading still needs an [Answer] marker, and a near-miss title is prose", () => {
     // Same guard as the id path: the marker is what makes a heading an ask.
     expect(parseQuestions("## Assumption Confirmation\n\n확인 절차 설명\n")).toEqual([]);

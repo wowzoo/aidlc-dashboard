@@ -196,7 +196,7 @@ function matrixTable(mx: ConstructionMatrix, s: Strings): string {
 
   const rows = mx.stages
     .map((st) => {
-      if (!st.execute) {
+      if (!st.execute || st.status === "skipped") {
         return `<tr class="mx-skip"><th>${esc(st.display)}</th><td colspan="${mx.units.length}">SKIP</td><td class="mx-n">—</td></tr>`;
       }
       const cells = st.cells

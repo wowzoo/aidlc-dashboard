@@ -47,6 +47,17 @@
 // summary confirmation exists at every stage gate, which makes it the single most
 // likely state for a run to be waiting in.
 //
+// A FOURTH ARRIVED WITH THE ENGINE-HELD PLAN APPROVAL. Code Generation's
+// `<unit>/code-generation/code-generation-questions.md` is now written by
+// `aidlc-plan-approval-ask.ts` as one `## Plan Approval` section — question,
+// `A. Approve Plan` / `B. Request Changes` / `C. I'll edit the files`, then
+// `[Answer]:` — and the engine counts its tags only under a heading that is
+// "exactly `Plan Approval`" (`aidlc-testing-posture.ts`). Plan approval is
+// human-owned even under Construction autonomy, so a blank one is a hard stop.
+// Measured on a completed 2.10 run: all three of its code-generation questions
+// files read as zero asks, and blanking one answer on a copy still showed zero
+// blockers on both the dashboard and the picker card.
+//
 // TWO RULES KEEP THAT WIDENING FROM INVENTING QUESTIONS:
 //
 //   1. A heading is an ask only if its span holds an `[Answer]:` marker. The
@@ -70,7 +81,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
- * What kind of ask a heading is. `confirmation` is one of the three id-less gate
+ * What kind of ask a heading is. `confirmation` is one of the four id-less gate
  * headings; the remedy differs (pick a fixed option / write feedback rather than
  * answer a question), so the panel says which one it is looking at.
  */
@@ -125,17 +136,19 @@ const QUESTION_HEADING_RE = /^##\s+\[?([QF]\d+(?:-?[A-Za-z0-9]+)?)\]?(?:$|[\s.:\
 /** Just the heading text, for the id-less gate headings below. */
 const H2_TITLE_RE = /^##\s+(.+?)\s*$/;
 /**
- * The three id-less headings the engine writes as questions. Matched on the exact
- * literal (lowercased) because `memory-seed/org.md` lists these H2s among the
- * tokens a stage must write "character for character" — they stay English even in
- * a Korean run, so there is no localisation to tolerate here. A suffix is NOT
- * accepted: the protocol appends *sibling* sections sharing the title, and
- * `aidlc-lib.ts` guards duplicates by that same exact name.
+ * The four id-less headings the engine writes as questions. Matched on the exact
+ * literal (lowercased) because `memory-seed/org.md` lists the first three among the
+ * tokens a stage must write "character for character", and the engine itself
+ * writes the fourth from code — all stay English even in a Korean run, so there is
+ * no localisation to tolerate here. A suffix is NOT accepted: the protocol appends
+ * *sibling* sections sharing the title, and `aidlc-lib.ts` guards duplicates by
+ * that same exact name; plan approval's tags count only under the exact title.
  */
 const GATE_HEADINGS = new Set([
   "consolidated summary confirmation",
   "assumption confirmation",
   "requested changes feedback",
+  "plan approval",
 ]);
 // The engine writes `[Answer]:` at line start; capture the remainder verbatim so
 // a multi-word answer with a trailing comment still reads as answered.

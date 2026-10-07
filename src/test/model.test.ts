@@ -601,6 +601,149 @@ describe("degradation", () => {
   });
 });
 
+// AI-DLC 2.9+ writes its record bookkeeping under `.aidlc-engine/`, and 2.10 runs
+// carry two shapes the reference fixture predates. Each test rebuilds the fixture in
+// the newer shape and asserts the page says what the pre-2.9 fixture already says —
+// a reader that missed the new shape did not fail, it reported less, silently.
+describe("2.9+ record layout", () => {
+  const RECORD = "aidlc/spaces/default/intents/260101-demo-migration";
+
+  function copyFixture(): { dir: string; record: string } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-engine-"));
+    fs.cpSync(path.join(FIXTURE, "aidlc"), path.join(dir, "aidlc"), { recursive: true });
+    fs.cpSync(path.join(FIXTURE, ".kiro"), path.join(dir, ".kiro"), { recursive: true });
+    return { dir, record: path.join(dir, RECORD) };
+  }
+
+  /** Move the three legacy dirs to where 2.9.0 put them. */
+  function relocate(record: string): void {
+    const engine = path.join(record, ".aidlc-engine");
+    fs.mkdirSync(engine);
+    for (const [legacy, sub] of [
+      [".aidlc-hooks-health", "hooks-health"],
+      [".aidlc-stop-hook", "stop-hook"],
+      [".aidlc-sensors", "sensors"],
+    ] as const) {
+      fs.renameSync(path.join(record, legacy), path.join(engine, sub));
+    }
+  }
+
+  test("hooks, the stop guard and sensor bodies are read from .aidlc-engine/", () => {
+    const { dir, record } = copyFixture();
+    try {
+      const legacy = assemble(dir);
+      relocate(record);
+      const m = assemble(dir);
+      // Same seven hooks, same guard, same body as the legacy layout.
+      expect(m.health.hooks.map((h) => h.name)).toEqual(legacy.health.hooks.map((h) => h.name));
+      expect(m.health.hooks.length).toBe(7);
+      expect(m.health.stopGuard).toEqual({ signature: "code-generation::19", count: 1 });
+      expect(m.sensors.failuresWithoutBody).toBe(0);
+      expect(m.sensors.failures[0]?.errors.length).toBe(2);
+      expect(m.provenance["hooks-health"].asOf).toBe(legacy.provenance["hooks-health"].asOf);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a new engine dir wins over a stale legacy one, as the engine reads it", () => {
+    // `engineReadDirFor` revives legacy data only when the new entry is ABSENT. A
+    // record mid-migration holds both, and the old heartbeats must not mask the new.
+    const { dir, record } = copyFixture();
+    try {
+      const health = path.join(record, ".aidlc-engine", "hooks-health");
+      fs.mkdirSync(health, { recursive: true });
+      fs.writeFileSync(path.join(health, "session-start.last"), "2026-02-01T00:00:00Z");
+      const m = assemble(dir);
+      expect(m.health.hooks.map((h) => h.name)).toEqual(["session-start"]);
+      // The stop guard has no new dir yet, so it still falls back.
+      expect(m.health.stopGuard?.count).toBe(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a hook's own marker file is not a hook", () => {
+    // `reviewer-scope.missing-record.last` rate-limits one advisory; read as a hook
+    // it adds a row that never fires and lends its stamp to the last-activity time.
+    const { dir, record } = copyFixture();
+    try {
+      relocate(record);
+      const health = path.join(record, ".aidlc-engine", "hooks-health");
+      fs.writeFileSync(
+        path.join(health, "reviewer-scope.missing-record.last"),
+        "2099-01-01T00:00:00Z",
+      );
+      const m = assemble(dir);
+      expect(m.health.hooks.some((h) => h.name.includes("."))).toBe(false);
+      expect(m.health.hooks.length).toBe(7);
+      expect(m.health.lastActivity).not.toBe("2099-01-01T00:00:00Z");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a blank engine-held plan approval is a blocker", () => {
+    // `aidlc-plan-approval-ask.ts` writes this file shape; it carries no Q<n>, and
+    // reading only ids showed zero blockers over a run parked on it.
+    const { dir, record } = copyFixture();
+    try {
+      fs.writeFileSync(
+        path.join(record, "construction/PU-A-core/code-generation/code-generation-questions.md"),
+        [
+          "# Code Generation Plan Approval",
+          "",
+          "AI-DLC writes this file when it asks you to approve the plan. To answer here",
+          "instead of in chat, write your answer after `[Answer]:` and say done.",
+          "",
+          "## Plan Approval",
+          "",
+          "Approve the code plan for PU-A-core?",
+          "",
+          "- A. Approve Plan",
+          "- B. Request Changes",
+          "- C. I'll edit the files",
+          "",
+          "[Answer]:",
+          "",
+        ].join("\n"),
+      );
+      const m = assemble(dir);
+      const plan = m.blockers.find((b) => b.unit === "PU-A-core");
+      expect(plan?.heading).toBe("Plan Approval");
+      expect(plan?.kind).toBe("confirmation");
+      expect(m.blockers.length).toBe(2); // the fixture's own Q1 plus this one
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a runtime-skipped per-unit stage ([S]) is a skip row in the matrix", () => {
+    // `[S] … — EXECUTE` still says EXECUTE, and the matrix used to scan it: every
+    // unit drew as absent with a provisional mark on a stage the run had skipped.
+    const { dir, record } = copyFixture();
+    try {
+      const statePath = path.join(record, "aidlc-state.md");
+      fs.writeFileSync(
+        statePath,
+        fs
+          .readFileSync(statePath, "utf-8")
+          .replace("- [-] code-generation — EXECUTE", "- [S] code-generation — EXECUTE"),
+      );
+      const m = assemble(dir);
+      const cg = m.matrix?.stages.find((st) => st.slug === "code-generation");
+      expect(cg?.status).toBe("skipped");
+      expect(cg?.execute).toBe(true); // what the state file says, kept
+      expect(cg?.cells).toEqual([]);
+      expect(cg?.provisional).toBe(false);
+      const row = /<tr class="mx-skip"><th>Code Generation<\/th>/;
+      expect(renderBody(m)).toMatch(row);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 // The dashboard reads the `aidlc/` docs tree, which is byte-identical across
 // harnesses — so it must not care WHICH harness produced the run. These build
 // throwaway trees that rename the harness dir and assert the model is unchanged.

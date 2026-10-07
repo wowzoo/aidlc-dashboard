@@ -347,7 +347,11 @@ export interface MatrixStage {
   status: StageStatus;
   /** false when the stage is scope-excluded (SKIP): no cells, no counts. */
   execute: boolean;
-  /** Per-unit cells in roster order (empty for a skipped stage). */
+  /**
+   * Per-unit cells in roster order — empty for a stage that did not run, which is
+   * EITHER spelling of skip: scope-excluded (`— SKIP`, `execute` false) or skipped at
+   * runtime (`[S]` on an `— EXECUTE` row, `status` "skipped").
+   */
   cells: MatrixCell[];
   /** Units whose cell is "complete". */
   complete: number;
@@ -359,7 +363,7 @@ export interface MatrixStage {
   unverified: number;
   /** Units the stage contracts nothing for — excluded from the row's denominator. */
   notApplicable: number;
-  /** Roster size (0 for a skipped stage). */
+  /** Roster size (0 for a stage that did not run). */
   total: number;
   /** True when the stage is not yet [x] — counts are a snapshot, not final. */
   provisional: boolean;
@@ -511,13 +515,17 @@ export function buildConstructionMatrix(
   const stages: MatrixStage[] = [];
   for (const st of constructionStages) {
     if (!isPerUnitStage(st.slug, catalog)) continue; // global stage — not a row
-    if (!st.execute) {
-      // Scope-excluded (SKIP): a row for continuity, but no per-unit scan/count.
+    if (!st.execute || st.status === "skipped") {
+      // Did not run — scope-excluded (SKIP) or skipped at runtime ([S]): a row for
+      // continuity, but no per-unit scan/count. `[S]` has to be caught here too: its
+      // row still says EXECUTE, and scanning it drew every unit as absent with a
+      // provisional mark — "0/3, still growing" for a stage the run had closed by
+      // skipping. `execute` keeps what the state file says.
       stages.push({
         slug: st.slug,
         display: st.display,
         status: st.status,
-        execute: false,
+        execute: st.execute,
         cells: [],
         complete: 0,
         partial: 0,

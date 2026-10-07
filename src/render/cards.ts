@@ -171,7 +171,7 @@ function unitRows(st: MatrixStage, s: Strings): Row[] {
 
 export function renderUnitCard(m: DashboardModel, s: Strings): string {
   const more = { href: `#${DRILL.overview}`, label: s.cards.moreMatrix };
-  const stages = m.matrix?.stages.filter((st) => st.execute) ?? [];
+  const stages = m.matrix?.stages.filter((st) => st.execute && st.status !== "skipped") ?? [];
   if (stages.length === 0) {
     return tabbedCard({
       id: "unit",

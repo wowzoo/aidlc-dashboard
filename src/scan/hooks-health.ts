@@ -1,7 +1,8 @@
 // Engine health: are the hooks firing, what have they dropped, and is the stop
 // guard seeing progress.
 //
-// THREE ARTEFACTS, all under the record dir:
+// THREE ARTEFACTS, all under the record dir — inside `.aidlc-engine/` since
+// AI-DLC 2.9.0, at the legacy names below before it (see scan/engine-dir.ts):
 //
 //   .aidlc-hooks-health/<hook>.last   a bare ISO timestamp, rewritten each time
 //                                     that hook fires. The liveness probe the
@@ -20,10 +21,18 @@
 // A `.drops` reason containing "[degraded]" marks a degraded-mode drop, which the
 // engine's doctor counts separately; we surface it the same way.
 //
+// NOT EVERY `.last` IS A HOOK. A hook also keeps its own markers in the same dir,
+// named `<hook>.<marker>.last` — `reviewer-scope.missing-record.last` rate-limits
+// one advisory to a line per 10 minutes (`hooks/aidlc-reviewer-scope.ts`). Read as
+// a hook it would add a row that never fires on its own and lend its timestamp to
+// `lastActivity`. Hook names are kebab-case filenames with no dot, so a stem that
+// carries one is a marker and stays out.
+//
 // Node fs only, never throws.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { engineReadDir } from "./engine-dir";
 
 /** One hook's liveness + drop history. */
 export interface HookStatus {
@@ -96,7 +105,7 @@ function readText(p: string): string | undefined {
  * shows up without a code change. Never throws.
  */
 export function readHealth(recordDir: string): HealthReport {
-  const healthDir = path.join(recordDir, ".aidlc-hooks-health");
+  const healthDir = engineReadDir(recordDir, "hooks-health", ".aidlc-hooks-health");
   let entries: string[] = [];
   try {
     entries = fs.readdirSync(healthDir);
@@ -105,11 +114,12 @@ export function readHealth(recordDir: string): HealthReport {
   }
 
   // Union of names seen as `<name>.last` and `<name>.drops` — a hook can have
-  // dropped without ever having fired, and vice versa.
+  // dropped without ever having fired, and vice versa. A dotted stem is a hook's
+  // marker, not a hook (see the header).
   const names = new Set<string>();
   for (const f of entries) {
-    if (f.endsWith(".last")) names.add(f.slice(0, -5));
-    else if (f.endsWith(".drops")) names.add(f.slice(0, -6));
+    const stem = f.endsWith(".last") ? f.slice(0, -5) : f.endsWith(".drops") ? f.slice(0, -6) : "";
+    if (stem.length > 0 && !stem.includes(".")) names.add(stem);
   }
 
   const hooks: HookStatus[] = [];
@@ -140,7 +150,9 @@ export function readHealth(recordDir: string): HealthReport {
   }
 
   let stopGuard: StopGuard | undefined;
-  const guardRaw = readText(path.join(recordDir, ".aidlc-stop-hook", "block-count.json"));
+  const guardRaw = readText(
+    path.join(engineReadDir(recordDir, "stop-hook", ".aidlc-stop-hook"), "block-count.json"),
+  );
   if (guardRaw) {
     try {
       const j = JSON.parse(guardRaw) as Record<string, unknown>;

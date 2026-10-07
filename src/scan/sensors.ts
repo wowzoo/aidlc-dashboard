@@ -5,7 +5,8 @@
 //   - the audit ledger has EVERY firing (SENSOR_FIRED, then a terminal
 //     SENSOR_PASSED / SENSOR_FAILED / SENSOR_BUDGET_OVERRIDE correlated by
 //     `Fire id`) but no finding bodies;
-//   - `.aidlc-sensors/<stage>/<sensorId>-<fireId>.md` has the finding bodies but
+//   - `.aidlc-sensors/<stage>/<sensorId>-<fireId>.md` (`.aidlc-engine/sensors/…`
+//     since AI-DLC 2.9.0 — scan/engine-dir.ts) has the finding bodies but
 //     ONLY for failures — a passing fire writes no file (verified twice: 46 detail
 //     files all `**Pass**: false`, and 54 on a second run, likewise all false).
 //
@@ -41,6 +42,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AuditLedger } from "./audit";
+import { engineReadDir } from "./engine-dir";
 
 /** A type-check finding row from the detail file's JSON block. */
 export interface TypeCheckError {
@@ -182,10 +184,13 @@ export function parseSensorDetail(
   };
 }
 
-/** Read every detail file under `.aidlc-sensors/`, keyed by fire id. */
+/**
+ * Read every detail file under the sensors dir, keyed by fire id —
+ * `.aidlc-engine/sensors/` since AI-DLC 2.9.0, `.aidlc-sensors/` before it.
+ */
 function readDetailBodies(recordDir: string): Map<string, DetailBody> {
   const out = new Map<string, DetailBody>();
-  const root = path.join(recordDir, ".aidlc-sensors");
+  const root = engineReadDir(recordDir, "sensors", ".aidlc-sensors");
   let stageDirs: string[];
   try {
     stageDirs = fs.readdirSync(root);
