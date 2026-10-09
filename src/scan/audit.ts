@@ -120,10 +120,13 @@ export function parseAuditShard(text: string, shard: string, isStage?: IsStage):
   // Normalise CRLF first so the `---` split and the line regex both hold on a
   // shard that travelled through a Windows clone.
   for (const block of text.replace(/\r\n/g, "\n").split("\n---\n")) {
+    // The engine's `auditBlockField`: an optional leading `- ` is stripped, and a
+    // duplicated field keeps its FIRST value. Keeping the last one let a repeated
+    // `**Fingerprint**:` line hold open a decision the engine had closed.
     const fields: Record<string, string> = {};
-    for (const line of block.split("\n")) {
-      const m = FIELD_RE.exec(line);
-      if (m) fields[m[1]!] = (m[2] ?? "").trim();
+    for (const raw of block.split("\n")) {
+      const m = FIELD_RE.exec(raw.startsWith("- ") ? raw.slice(2) : raw);
+      if (m && !Object.hasOwn(fields, m[1]!)) fields[m[1]!] = (m[2] ?? "").trim();
     }
     const ts = fields.Timestamp;
     const event = fields.Event;

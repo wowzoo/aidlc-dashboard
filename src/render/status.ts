@@ -158,7 +158,11 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
   }
   if (w?.decision) {
     rows.push({
-      label: `${esc(x.humanDecision(w.decision.checkpoint, w.decision.decision))}${sub(x.humanDecisionSource)}`,
+      label: `${esc(x.humanDecision(w.decision.checkpoint, w.decision.decision))}${sub(
+        w.decision.scopeVerified === false
+          ? `${x.humanDecisionSource} · ${x.humanDecisionUnscoped}`
+          : x.humanDecisionSource,
+      )}`,
       value: age(w.decision.since),
       pct: 100,
       tone: "warn",
@@ -233,7 +237,7 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
       ),
       value: "",
       tone: "warn",
-      tip: x.humanHooksTip,
+      tip: w.hooks.state === "stale" ? x.humanHooksStaleTip : x.humanHooksNeverTip,
     });
   }
   if (w?.autonomous) {

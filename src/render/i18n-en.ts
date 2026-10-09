@@ -184,6 +184,7 @@ const status: StatusStrings = {
   humanDecision: (checkpoint, decision) =>
     `Decision pending — ${[checkpoint, decision].filter(Boolean).join(": ") || "unnamed decision"}`,
   humanDecisionSource: "audit log · DECISION_RECORDED",
+  humanDecisionUnscoped: "scope unconfirmed — taken from the state's unit cache alone",
   humanDecisionTip:
     "A decision opened through the audit log rather than a questions file (a learnings selection, anything to add, a unit or batch approval). The engine waits for your answer until a receipt closes it",
   humanCompose: "Compose proposal awaiting approval",
@@ -195,8 +196,10 @@ const status: StatusStrings = {
   humanHooksStale: (hb, ev) =>
     `⚠ Hooks look stopped — last fired ${hb} ago, last stage/gate record ${ev} ago`,
   humanHooksNever: "⚠ No hook has fired — but stage/gate records exist",
-  humanHooksTip:
-    "The newest hook heartbeat is more than five minutes behind the newest STAGE_/GATE_ record (the engine's hookLiveness comparison). 2.11 refuses a plan approval in this state; check the harness's hook registration",
+  humanHooksStaleTip:
+    "The newest hook heartbeat is more than five minutes behind the newest STAGE_/GATE_ record (the engine's hookLiveness comparison). 2.11 refuses to record a plan-approval decision (aidlc-log decision --checkpoint plan-approval) in this state; check the harness's hook registration",
+  humanHooksNeverTip:
+    "hooks-health holds no .last file at all, yet STAGE_/GATE_ records exist. The hooks may not be registered, or did not run on this clone",
   humanAutonomous: "Autonomous mode — questions and decisions do not hold the run",
   humanAutonomousTip:
     "Construction Autonomy Mode is autonomous. Only a unit-major plan approval stops the run; other questions, decisions and compose proposals let it keep going",

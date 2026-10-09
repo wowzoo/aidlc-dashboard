@@ -184,11 +184,23 @@ function readRegistry(
   return {};
 }
 
-/** A file's mtime in ms, or undefined when it is absent or not a regular file. */
-function mtimeMs(p: string): number | undefined {
+/**
+ * A turn marker's mtime in ms, as the engine's `turnMarkerStat` reads it: a regular
+ * file reached without a symlink, else undefined.
+ */
+function markerMtimeMs(p: string): number | undefined {
   try {
-    const st = fs.statSync(p);
+    const st = fs.lstatSync(p);
     return st.isFile() ? st.mtimeMs : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The compose marker's mtime — the engine `statSync`s it with no type check. */
+function statMtimeMs(p: string): number | undefined {
+  try {
+    return fs.statSync(p).mtimeMs;
   } catch {
     return undefined;
   }
@@ -361,21 +373,23 @@ export function assemble(
   });
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
+  const blockers = buildBlockers(questions, position, now);
   const waits = buildWaits({
     state,
     position,
     marker,
     events: ledger.events,
     questions,
+    blockers,
     checkoutParkFile: fs.existsSync(path.join(root, "aidlc", ".aidlc-unit-parked")),
     guard: health.stopGuard
       ? { signature: health.stopGuard.signature, stateDigest: stateDigest(stateText) }
       : undefined,
-    hookHeartbeats: health.hooks.map((h) => h.lastFired),
+    hookHeartbeats: health.heartbeats,
     marks: {
-      turnEnd: mtimeMs(path.join(recordDir, ENGINE_DIR, "turn-end")),
-      humanTurn: mtimeMs(path.join(recordDir, ENGINE_DIR, "human-turn")),
-      compose: mtimeMs(path.join(root, "aidlc", ".aidlc-compose-pending")),
+      turnEnd: markerMtimeMs(path.join(recordDir, ENGINE_DIR, "turn-end")),
+      humanTurn: markerMtimeMs(path.join(recordDir, ENGINE_DIR, "human-turn")),
+      compose: statMtimeMs(path.join(root, "aidlc", ".aidlc-compose-pending")),
     },
     now,
     stageIndex: catalog ? (s) => catalog?.stages.findIndex((x) => x.slug === s) ?? -1 : undefined,
@@ -690,7 +704,7 @@ export function assemble(
     deferrals,
     health,
     timing,
-    blockers: buildBlockers(questions, position, now),
+    blockers,
     // The gate claim comes from the state row, as the engine's does — see model/waits.ts.
     gates: buildGates(ledger, state.revisionCount, waits.gate?.stage),
     waits,

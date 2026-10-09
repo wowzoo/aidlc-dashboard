@@ -243,6 +243,8 @@ export interface StatusStrings {
   humanDecision(checkpoint: string | undefined, decision: string | undefined): string;
   readonly humanDecisionSource: string;
   readonly humanDecisionTip: string;
+  /** Appended when the decision's stage came from the unit cache alone. */
+  readonly humanDecisionUnscoped: string;
   readonly humanCompose: string;
   readonly humanComposeTip: string;
   readonly humanTurnEnded: string;
@@ -250,7 +252,8 @@ export interface StatusStrings {
   /** Both ages already formatted. */
   humanHooksStale(heartbeatAge: string, eventAge: string): string;
   readonly humanHooksNever: string;
-  readonly humanHooksTip: string;
+  readonly humanHooksStaleTip: string;
+  readonly humanHooksNeverTip: string;
   readonly humanAutonomous: string;
   readonly humanAutonomousTip: string;
   readonly humanNone: string;

@@ -53,6 +53,15 @@ const PAIRING = new Set(["DECISION_RECORDED", ...CLOSING, ...GATE_ANSWER]);
 /** The open decision's own fields — what was asked, and under which checkpoint. */
 export interface OpenDecision {
   stage: string;
+  /** `Unit` on a unit's checkpoint. */
+  unit?: string;
+  /** `Units` on a batch decision (comma-separated in the audit). */
+  units?: string[];
+  /**
+   * False when the stage was scoped by the unit cache alone, not by a current
+   * directive — set by model/waits.ts, which knows where the scope came from.
+   */
+  scopeVerified?: boolean;
   checkpoint?: string;
   /** The `Decision` field: the question as the engine recorded it. */
   decision?: string;
@@ -86,8 +95,13 @@ function next(open: AuditEvent | undefined, e: AuditEvent): AuditEvent | undefin
 
 function asOpen(e: AuditEvent | undefined): OpenDecision | undefined {
   if (!e) return undefined;
+  const units = e.fields.Units?.split(",")
+    .map((u) => u.trim())
+    .filter(Boolean);
   return {
     stage: e.fields.Stage ?? "",
+    ...(e.fields.Unit ? { unit: e.fields.Unit } : {}),
+    ...(units && units.length > 0 ? { units } : {}),
     checkpoint: e.fields.Checkpoint,
     decision: e.fields.Decision,
     since: e.ts,
@@ -130,9 +144,14 @@ export function openDecisionInAttempt(
   const reaches = (e: AuditEvent): boolean => {
     const target = e.fields.Target;
     if (!target || target === stage) return true;
-    const t = stageIndex?.(target) ?? -1;
-    const at = stageIndex?.(stage) ?? -1;
-    return t === -1 || at === -1 || at >= t;
+    // The engine catches a failing lookup and counts the jump as reaching.
+    try {
+      const t = stageIndex?.(target) ?? -1;
+      const at = stageIndex?.(stage) ?? -1;
+      return t === -1 || at === -1 || at >= t;
+    } catch {
+      return true;
+    }
   };
   const boundary = rows.findLastIndex(
     (e) => e.event === "WORKFLOW_STARTED" || (e.event === "STAGE_JUMPED" && reaches(e)),

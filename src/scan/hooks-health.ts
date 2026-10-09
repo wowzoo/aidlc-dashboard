@@ -72,6 +72,13 @@ export interface HealthReport {
   lastActivity?: string;
   stopGuard?: StopGuard;
   totalDrops: number;
+  /**
+   * Every `*.last` file, read the way the engine's `hookLiveness` reads them — which is
+   * not the hook list above: a marker-suffixed `.last` counts, and a file that exists
+   * counts as "fired" even when empty or unreadable. `stamps` holds the parseable
+   * timestamps.
+   */
+  heartbeats: { present: boolean; stamps: string[] };
 }
 
 /** Collapse a drop reason to a groupable key: the leading clause, truncated. */
@@ -172,8 +179,16 @@ export function readHealth(recordDir: string): HealthReport {
     }
   }
 
+  const lastFiles = entries.filter((f) => f.endsWith(".last"));
+  const stamps: string[] = [];
+  for (const f of lastFiles) {
+    const ts = readText(path.join(healthDir, f))?.trim();
+    if (ts && Number.isFinite(Date.parse(ts))) stamps.push(ts);
+  }
+
   const fired = hooks.map((h) => h.lastFired).filter((t): t is string => !!t);
   return {
+    heartbeats: { present: lastFiles.length > 0, stamps },
     hooks,
     firstFired: readText(path.join(healthDir, ".first-fired"))?.trim() || undefined,
     lastActivity: fired.length > 0 ? fired.sort()[fired.length - 1] : undefined,

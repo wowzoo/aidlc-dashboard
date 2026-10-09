@@ -172,6 +172,7 @@ const status: StatusStrings = {
   humanDecision: (checkpoint, decision) =>
     `결정 대기 — ${[checkpoint, decision].filter(Boolean).join(": ") || "이름 없는 결정"}`,
   humanDecisionSource: "감사 로그 · DECISION_RECORDED",
+  humanDecisionUnscoped: "범위 미확인 — state 의 유닛 위치로만 정함",
   humanDecisionTip:
     "질문 파일 없이 감사 로그로 연 결정입니다(학습 항목 선택, 추가할 것, 유닛·배치 승인 등). 엔진은 이것을 닫는 기록이 남을 때까지 사람의 답을 기다립니다",
   humanCompose: "작업 묶음(compose) 승인 대기",
@@ -183,8 +184,10 @@ const status: StatusStrings = {
   humanHooksStale: (hb, ev) =>
     `⚠ hook 이 멈춘 듯함 — 마지막 발화 ${hb} 전, 마지막 stage·게이트 기록 ${ev} 전`,
   humanHooksNever: "⚠ hook 발화 기록 없음 — stage·게이트 기록은 있음",
-  humanHooksTip:
-    "가장 최근 hook 발화가 가장 최근 STAGE_/GATE_ 기록보다 5분 넘게 뒤처졌습니다(엔진 hookLiveness 와 같은 비교). 2.11 은 이 상태에서 계획 승인을 거부하니, 하네스의 hook 등록을 확인하세요",
+  humanHooksStaleTip:
+    "가장 최근 hook 발화가 가장 최근 STAGE_/GATE_ 기록보다 5분 넘게 뒤처졌습니다(엔진 hookLiveness 와 같은 비교). 2.11 은 이 상태에서 계획 승인 결정 기록(aidlc-log decision --checkpoint plan-approval)을 거부하니, 하네스의 hook 등록을 확인하세요",
+  humanHooksNeverTip:
+    "hooks-health 에 .last 파일이 하나도 없는데 STAGE_/GATE_ 기록은 있습니다. hook 이 등록되지 않았거나 이 clone 에서 돌지 않았을 수 있습니다",
   humanAutonomous: "자율 모드 — 질문·결정이 런을 붙잡지 않음",
   humanAutonomousTip:
     "Construction Autonomy Mode 가 autonomous 입니다. 이 모드에서는 unit-major 의 계획 승인만 런을 멈추고, 나머지 질문·결정·작업 묶음 제안은 run 이 계속 진행합니다",

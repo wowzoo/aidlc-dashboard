@@ -69,6 +69,7 @@ import { pendingGate } from "../scan/gate-wait";
 import type { AidlcState } from "../scan/parser";
 import type { QuestionsReport } from "../scan/questions";
 import type { DirectiveMarker, MarkerMiss, RunPosition } from "../scan/run-position";
+import type { Blocker } from "./types";
 
 export interface Waits {
   position: RunPosition;
@@ -112,11 +113,13 @@ export interface WaitsInput {
   marker: { marker: DirectiveMarker } | { miss: MarkerMiss };
   events: AuditEvent[];
   questions: QuestionsReport;
+  /** The blocker list, already classified current/earlier — for the plan-approval dedup. */
+  blockers: Blocker[];
   checkoutParkFile: boolean;
   /** The block-count signature, and the digest of the current state. */
   guard?: { signature: string; stateDigest: string };
-  /** Each hook's last heartbeat (`<hook>.last`), undefined for one that never fired. */
-  hookHeartbeats: (string | undefined)[];
+  /** Every `*.last` file, as `hookLiveness` reads them (scan/hooks-health.ts). */
+  hookHeartbeats: { present: boolean; stamps: string[] };
   /** mtimes (ms) of the engine's turn markers and the compose marker, when present. */
   marks: { turnEnd?: number; humanTurn?: number; compose?: number };
   /** The read clock, ISO. */
@@ -125,12 +128,17 @@ export interface WaitsInput {
   stageIndex?: (slug: string) => number;
 }
 
+/** The engine's `PLAN_APPROVAL_CHECKPOINT` (aidlc-testing-posture.ts), matched exactly. */
+const PLAN_APPROVAL_CHECKPOINT = "Code Generation Plan Approval";
 /** The engine's `HOOK_HEARTBEAT_STALE_SLACK_MS`. */
 const HOOK_STALE_MS = 5 * 60 * 1000;
 /** The engine's `COMPOSE_MARKER_TTL_MS`. */
 const COMPOSE_TTL_MS = 24 * 60 * 60 * 1000;
 
-function hookLiveness(heartbeats: (string | undefined)[], events: AuditEvent[]): HookLiveness {
+function hookLiveness(
+  heartbeats: { present: boolean; stamps: string[] },
+  events: AuditEvent[],
+): HookLiveness {
   const newest = (xs: string[]) =>
     xs.reduce<string | undefined>(
       (m, x) => (m === undefined || Date.parse(x) > Date.parse(m) ? x : m),
@@ -145,10 +153,10 @@ function hookLiveness(heartbeats: (string | undefined)[], events: AuditEvent[]):
       )
       .map((e) => e.ts),
   );
-  const fired = heartbeats.filter((h): h is string => h !== undefined);
   if (!event) return { state: "unknown" };
-  if (fired.length === 0) return { state: "never", event };
-  const heartbeat = newest(fired.filter((h) => Number.isFinite(Date.parse(h))));
+  // The engine's `neverFired`: no `.last` file at all — an empty one still counts.
+  if (!heartbeats.present) return { state: "never", event };
+  const heartbeat = newest(heartbeats.stamps);
   if (!heartbeat) return { state: "unknown" };
   return Date.parse(event) - Date.parse(heartbeat) > HOOK_STALE_MS
     ? { state: "stale", heartbeat, event }
@@ -174,15 +182,17 @@ export function buildWaits(w: WaitsInput): Waits {
   const rt = state.runtime;
   const current =
     state.currentStage && state.currentStage !== "none" ? state.currentStage : undefined;
-  const rows = current ? rowStatuses(state, current) : [];
+  // The engine reads the FIRST row of the Current Stage's slug (`parseCheckboxes(…)
+  // .find`), so a later `[-]` row of the same slug does not make it in progress.
+  const row = current ? rowStatuses(state, current)[0] : undefined;
   const autonomous = rt.autonomyMode === "autonomous";
   const marker = "marker" in w.marker ? w.marker.marker : undefined;
 
   const gate =
-    current && rows.includes("awaiting")
+    current && row === "awaiting"
       ? { stage: current, since: pendingGate(w.events, current)?.since }
       : undefined;
-  const revising = current && rows.includes("revising") ? current : undefined;
+  const revising = current && row === "revising" ? current : undefined;
 
   const parkedHere = rt.parked !== "" && rt.parkedAtStage !== "" && rt.parkedAtStage === current;
   const parked = parkedHere
@@ -227,7 +237,7 @@ export function buildWaits(w: WaitsInput): Waits {
   const team = state.unitOwnership === "team";
   const teamUnitMajor = team && state.constructionIteration === "unit-major" && !!position.unit;
   const engineOnly =
-    position.stage && !autonomous && (teamUnitMajor || rows.includes("active"))
+    position.stage && !autonomous && (teamUnitMajor || row === "active")
       ? w.questions.files
           .filter(
             (f) =>
@@ -247,35 +257,53 @@ export function buildWaits(w: WaitsInput): Waits {
     /^[0-9a-f]{64}$/.test(sigDigest) &&
     sigDigest !== w.guard.stateDigest;
 
-  // Open decision, under `isPendingDecisionStop`'s own preconditions.
+  // Open decision, under `isPendingDecisionStop`'s own preconditions. The hook's
+  // `activeStage`/`activeUnit` come from its own fresh `next` probe, and the nearest
+  // record of that is a current directive marker; the unit cache is a mirror the
+  // engine keeps for cheap status reads, so a decision scoped by it alone is said to be
+  // unconfirmed rather than claimed as the hook's.
+  const scope = marker
+    ? { stage: marker.stage, unit: marker.unit }
+    : { stage: position.stage, unit: position.unit };
+  const scopeVerified = !!marker || (position.basis === "current-stage" && position.verified);
+  const teamScope = team && state.constructionIteration === "unit-major" && !!scope.unit;
   let decision: OpenDecision | undefined;
   if (!autonomous) {
-    if (teamUnitMajor && position.stage) {
-      decision = openDecisionInAttempt(w.events, position.stage, position.unit, w.stageIndex);
-    } else if (current && rows.includes("active")) {
-      const ahead = position.stage;
+    if (teamScope && scope.stage) {
+      decision = openDecisionInAttempt(w.events, scope.stage, scope.unit, w.stageIndex);
+    } else if (current && row === "active") {
+      const ahead = scope.stage;
       if (ahead && ahead !== current)
         decision = openDecisionInAttempt(w.events, ahead, undefined, w.stageIndex);
       decision ??= openDecision(w.events, current);
     }
   }
-  // A plan approval asked through a decision also has its section in the file, which
-  // the blocker list already counts while it is blank.
-  if (
-    decision &&
-    /plan approval/i.test(decision.checkpoint ?? "") &&
-    w.questions.files.some(
-      (f) =>
-        f.stage === decision?.stage &&
-        f.unanswered.some((q) => q.kind === "confirmation" && /plan approval/i.test(q.heading)),
-    )
-  ) {
-    decision = undefined;
+  // A plan approval asked through a decision (the legacy picker path, one unit or a
+  // batch) also has its section in each unit's file. It is the same interaction only
+  // where that section is a blank ask ALREADY COUNTED as current — a file of another
+  // unit, or one only listed as an earlier leftover, is not a duplicate of it.
+  if (decision && decision.checkpoint === PLAN_APPROVAL_CHECKPOINT) {
+    const units = decision.unit ? [decision.unit] : (decision.units ?? []);
+    const counted = w.blockers.some(
+      (b) =>
+        b.isCurrentStage &&
+        b.stage === decision?.stage &&
+        b.kind === "confirmation" &&
+        /plan approval/i.test(b.heading) &&
+        (units.length === 0
+          ? b.unit === undefined
+          : b.unit !== undefined && units.includes(b.unit)),
+    );
+    if (counted) decision = undefined;
   }
+  if (decision) decision = { ...decision, scopeVerified };
 
   const nowMs = Date.parse(w.now);
   const compose =
-    !autonomous && w.marks.compose !== undefined && nowMs - w.marks.compose <= COMPOSE_TTL_MS
+    !autonomous &&
+    w.marks.compose !== undefined &&
+    Number.isFinite(w.marks.compose) &&
+    nowMs - w.marks.compose <= COMPOSE_TTL_MS
       ? { since: new Date(w.marks.compose).toISOString().replace(/\.\d{3}Z$/, "Z") }
       : undefined;
   const turnEnded =

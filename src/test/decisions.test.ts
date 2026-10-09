@@ -5,13 +5,17 @@
 // 2026-10-09), and the cases below pin the rules that comparison exercised.
 
 import { describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import { buildWaits } from "../model/waits";
 import { strings } from "../render/i18n";
 import { renderRunHealth } from "../render/status";
 import type { AuditEvent } from "../scan/audit";
+import { parseAuditShard } from "../scan/audit";
 import { openDecision, openDecisionInAttempt } from "../scan/decision-wait";
+import { readHealth } from "../scan/hooks-health";
 import { parseState } from "../scan/parser";
 import type { QuestionsReport } from "../scan/questions";
 
@@ -164,7 +168,8 @@ describe("waits — decisions, compose, turn shape, hooks", () => {
       events: [],
       questions: empty,
       checkoutParkFile: false,
-      hookHeartbeats: [],
+      hookHeartbeats: { present: false, stamps: [] },
+      blockers: [],
       marks: {},
       now: NOW,
       ...extra,
@@ -199,24 +204,31 @@ describe("waits — decisions, compose, turn shape, hooks", () => {
     expect(w(STATE(ACTIVE), { events, position: ahead }).decision?.stage).toBe("code-generation");
   });
 
-  test("a plan approval decision whose section is blank in the file is not counted twice", () => {
-    const events = [START(), ASK({ Checkpoint: "Code Generation Plan Approval" })];
-    const file = {
-      rel: "inception/requirements-analysis/requirements-analysis-questions.md",
-      phase: "inception",
+  test("a plan approval decision is deduplicated only against the same unit's counted ask", () => {
+    const PA = "Code Generation Plan Approval";
+    const blocker = (unit: string | undefined, isCurrentStage = true) => ({
       stage: "requirements-analysis",
-      questions: [],
-      unanswered: [
-        { heading: "Plan Approval", answer: "", answered: false, kind: "confirmation" as const },
-      ],
-      mtime: "",
-      unclosed: false,
-      rawBlank: true,
-    };
+      unit,
+      heading: "Plan Approval",
+      kind: "confirmation" as const,
+      rel: "x",
+      since: NOW,
+      isCurrentStage,
+    });
+    const one = [START(), ASK({ Checkpoint: PA, Unit: "u1" })];
+    expect(w(STATE(ACTIVE), { events: one, blockers: [blocker("u1")] }).decision).toBeUndefined();
+    // Second review: another unit's file, or an earlier leftover, deleted the decision.
+    expect(w(STATE(ACTIVE), { events: one, blockers: [blocker("u2")] }).decision).toBeDefined();
     expect(
-      w(STATE(ACTIVE), { events, questions: { ...empty, files: [file] } }).decision,
-    ).toBeUndefined();
-    expect(w(STATE(ACTIVE), { events }).decision).toBeDefined();
+      w(STATE(ACTIVE), { events: one, blockers: [blocker("u1", false)] }).decision,
+    ).toBeDefined();
+    // A batch decision names its members in `Units`.
+    const batch = [START(), ASK({ Checkpoint: PA, Units: "u1, u2" })];
+    expect(w(STATE(ACTIVE), { events: batch, blockers: [blocker("u2")] }).decision).toBeUndefined();
+    expect(w(STATE(ACTIVE), { events: batch, blockers: [blocker("u9")] }).decision).toBeDefined();
+    // The checkpoint is matched exactly, not by a substring.
+    const near = [START(), ASK({ Checkpoint: "Plan Approval Notes", Unit: "u1" })];
+    expect(w(STATE(ACTIVE), { events: near, blockers: [blocker("u1")] }).decision).toBeDefined();
   });
 
   test("a compose marker counts while fresh and not under autonomy", () => {
@@ -244,25 +256,34 @@ describe("waits — decisions, compose, turn shape, hooks", () => {
   test("hook liveness: stale beyond five minutes, never fired, live, unknown", () => {
     const stage = (ts: string) => ev("STAGE_COMPLETED", {}, "a", ts);
     const at = (h: string) => `2026-10-09T${h}Z`;
+    const hb = (...stamps: string[]) => ({ present: true, stamps });
     expect(
-      w(STATE(ACTIVE), { events: [stage(at("10:06:00"))], hookHeartbeats: [at("10:00:00")] }).hooks,
+      w(STATE(ACTIVE), { events: [stage(at("10:06:00"))], hookHeartbeats: hb(at("10:00:00")) })
+        .hooks,
     ).toEqual({
       state: "stale",
       heartbeat: at("10:00:00"),
       event: at("10:06:00"),
     });
     expect(
-      w(STATE(ACTIVE), { events: [stage(at("10:04:00"))], hookHeartbeats: [at("10:00:00")] }).hooks,
+      w(STATE(ACTIVE), { events: [stage(at("10:04:00"))], hookHeartbeats: hb(at("10:00:00")) })
+        .hooks,
     ).toEqual({
       state: "live",
     });
     expect(
-      w(STATE(ACTIVE), { events: [stage(at("10:04:00"))], hookHeartbeats: [undefined] }).hooks,
+      w(STATE(ACTIVE), {
+        events: [stage(at("10:04:00"))],
+        hookHeartbeats: { present: false, stamps: [] },
+      }).hooks,
+    ).toEqual({ state: "never", event: at("10:04:00") });
+    // A `.last` that exists but holds no timestamp is not "never fired" (engine `neverFired`).
+    expect(
+      w(STATE(ACTIVE), { events: [stage(at("10:04:00"))], hookHeartbeats: hb() }).hooks,
     ).toEqual({
-      state: "never",
-      event: at("10:04:00"),
+      state: "unknown",
     });
-    expect(w(STATE(ACTIVE), { hookHeartbeats: [at("10:00:00")] }).hooks).toEqual({
+    expect(w(STATE(ACTIVE), { hookHeartbeats: hb(at("10:00:00")) }).hooks).toEqual({
       state: "unknown",
     });
   });
@@ -301,5 +322,136 @@ describe("waits on the page — decisions and turn shape", () => {
     }
     // 1 current ask + decision + compose.
     expect(html).toContain('<b class="mc-n warn">3</b>');
+  });
+});
+
+describe("second-review regressions — decisions", () => {
+  test("audit fields are read as the engine reads them: bullets allowed, first value wins", () => {
+    const shard = [
+      "**Event**: STAGE_STARTED",
+      "**Timestamp**: 2026-10-09T01:00:00Z",
+      "- **Stage**: requirements-analysis",
+      "---",
+      "**Event**: DECISION_RECORDED",
+      "**Timestamp**: 2026-10-09T01:01:00Z",
+      "**Stage**: requirements-analysis",
+      "**Stage**: user-stories",
+      "**Checkpoint**: Construction Unit Approval",
+      "**Unit**: u1",
+      "**Fingerprint**: f1",
+      "**Fingerprint**: f2",
+      "---",
+      "**Event**: GATE_APPROVED",
+      "**Timestamp**: 2026-10-09T01:02:00Z",
+      "**Stage**: requirements-analysis",
+      "**Checkpoint**: construction-unit",
+      "**Unit**: u1",
+      "**Fingerprint**: f1",
+    ].join("\n");
+    const events = parseAuditShard(shard, "a");
+    expect(events.map((e) => e.fields.Stage)).toEqual([
+      "requirements-analysis",
+      "requirements-analysis",
+      "requirements-analysis",
+    ]);
+    // The first Fingerprint is f1, which the gate receipt matches: closed.
+    expect(openDecision(events, "requirements-analysis")).toBeUndefined();
+  });
+
+  const STATE = (rows: string, runtime = "") =>
+    `## Runtime State\n${runtime}\n## Current Status\n- **Current Stage**: functional-design\n\n## Stage Progress\n### CONSTRUCTION PHASE\n${rows}\n`;
+  const base = (stateText: string, extra: Partial<Parameters<typeof buildWaits>[0]> = {}) =>
+    buildWaits({
+      state: parseState(stateText),
+      position: { stage: "functional-design", basis: "current-stage", verified: true },
+      marker: { miss: "absent" },
+      events: [],
+      questions: { files: [], blocked: [], totalQuestions: 0, totalUnanswered: 0, unclosed: [] },
+      blockers: [],
+      checkoutParkFile: false,
+      hookHeartbeats: { present: false, stamps: [] },
+      marks: {},
+      now: "2026-10-09T12:00:00Z",
+      ...extra,
+    });
+
+  test("the decision scope follows a current directive over the unit cache", () => {
+    const events = [
+      ev("DECISION_RECORDED", {
+        Stage: "code-generation",
+        Unit: "u1",
+        Checkpoint: "Construction Unit Approval",
+      }),
+    ];
+    const cache = {
+      stage: "code-generation",
+      unit: "u1",
+      basis: "unit-stage" as const,
+      verified: false,
+    };
+    const marker = { marker: { kind: "run-stage", stage: "functional-design", unit: "u2" } };
+    // Measured: the engine function given the marker's stage returns false.
+    expect(
+      base(STATE("- [-] functional-design — EXECUTE"), { events, position: cache, marker })
+        .decision,
+    ).toBeUndefined();
+    // With the cache alone the decision is shown, marked unconfirmed.
+    const alone = base(STATE("- [-] functional-design — EXECUTE"), { events, position: cache });
+    expect(alone.decision?.scopeVerified).toBe(false);
+  });
+
+  test("the precondition reads the slug's FIRST row, as the engine does", () => {
+    const events = [
+      ev("STAGE_STARTED", { Stage: "functional-design" }),
+      ev("DECISION_RECORDED", { Stage: "functional-design" }),
+    ];
+    const rows = "- [x] functional-design — EXECUTE\n- [-] functional-design — EXECUTE";
+    expect(base(STATE(rows), { events }).decision).toBeUndefined();
+  });
+
+  test("a failing stage lookup or a bad compose stamp does not throw", () => {
+    const jump = ev("STAGE_JUMPED", { Stage: "x", Target: "code-generation" });
+    const boom = () => {
+      throw new Error("x");
+    };
+    expect(() =>
+      openDecisionInAttempt([ASK(), jump], "requirements-analysis", undefined, boom),
+    ).not.toThrow();
+    expect(() =>
+      base(STATE("- [-] functional-design — EXECUTE"), {
+        marks: { compose: Number.POSITIVE_INFINITY },
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe("second-review regressions — hooks-health and turn markers", () => {
+  test("every .last counts as fired, marker-suffixed ones included; empty ones carry no stamp", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-hh-"));
+    const hh = path.join(dir, ".aidlc-engine", "hooks-health");
+    fs.mkdirSync(hh, { recursive: true });
+    fs.writeFileSync(path.join(hh, "reviewer-scope.missing-record.last"), "2026-10-09T10:00:00Z");
+    fs.writeFileSync(path.join(hh, "continue-workflow.last"), "");
+    fs.writeFileSync(path.join(hh, "x.trace"), "2026-10-09T11:00:00Z");
+    const h = readHealth(dir);
+    expect(h.heartbeats).toEqual({ present: true, stamps: ["2026-10-09T10:00:00Z"] });
+    // The hook list keeps excluding the marker (unchanged).
+    expect(h.hooks.map((x) => x.name)).toEqual(["continue-workflow"]);
+  });
+
+  test("a turn marker reached through a symlink is not read", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-tm-"));
+    fs.cpSync(path.join(import.meta.dir, "..", "..", "fixtures", "reference"), root, {
+      recursive: true,
+    });
+    const rec = path.join(root, "aidlc/spaces/default/intents/260101-demo-migration/.aidlc-engine");
+    fs.mkdirSync(rec, { recursive: true });
+    const real = path.join(root, "real-turn-end");
+    fs.writeFileSync(path.join(rec, "human-turn"), "");
+    fs.writeFileSync(real, "");
+    const later = new Date(Date.now() + 60_000);
+    fs.utimesSync(real, later, later);
+    fs.symlinkSync(real, path.join(rec, "turn-end"));
+    expect(assemble(root).waits.turnEnded).toBe(false);
   });
 });
