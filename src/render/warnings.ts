@@ -39,6 +39,8 @@ export function warningTextIn(w: Warning, s: Strings): string {
       return t.rosterMismatch(w.stateVersion, w.unknownToCatalog, w.missingFromState);
     case "harness-coexist":
       return t.harnessCoexist(w.harnesses, w.chosen);
+    case "questions-unclosed-block":
+      return t.questionsUnclosedBlock(w.files);
     case "token-usage-failed":
       return t.tokenUsageFailed(w.detail);
     case "credit-assembly-failed":

@@ -217,6 +217,7 @@ function buildBlockers(
         unit: f.unit,
         heading: q.heading,
         kind: q.kind,
+        invalidTags: q.invalidTags,
         rel: f.rel,
         since,
         waitingSec: Number.isFinite(parsed)
@@ -314,7 +315,12 @@ export function assemble(
   if (ledger.events.length === 0) warnings.push({ code: "audit-empty" });
 
   const sensors = readSensorReport(recordDir, ledger);
-  const questions = readQuestions(recordDir);
+  const questions = readQuestions(recordDir, { isStage });
+  // Read as text rather than hidden, so a typo cannot make a blocker vanish — but
+  // that is a guess about what the author meant, and the page says so.
+  if (questions.unclosed.length > 0) {
+    warnings.push({ code: "questions-unclosed-block", files: questions.unclosed });
+  }
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
   const timing = buildTiming(ledger, now);

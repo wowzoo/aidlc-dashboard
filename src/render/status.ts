@@ -69,10 +69,25 @@ export function renderRunLine(m: DashboardModel, s: Strings): string {
 function askRow(b: Blocker, s: Strings, maxWait: number, parked = !b.isCurrentStage): Row {
   const where = b.unit ? `${b.unit} · ${b.stage}` : b.stage;
   const file = b.rel.split("/").pop() ?? b.rel;
-  const gate = b.kind === "confirmation" ? ` · ${s.blockers.confirmation}` : "";
+  const gate =
+    b.invalidTags !== undefined
+      ? ` · ${s.blockers.invalidTags(b.invalidTags)}`
+      : b.kind === "confirmation"
+        ? ` · ${s.blockers.confirmation}`
+        : b.kind === "loose"
+          ? ` · ${s.blockers.loose}`
+          : "";
+  const tip =
+    b.invalidTags !== undefined
+      ? s.blockers.invalidTagsTip
+      : b.kind === "confirmation"
+        ? s.blockers.confirmationTip
+        : b.kind === "loose"
+          ? s.blockers.looseTip
+          : undefined;
   const earlier = parked ? `${s.blockers.staleStage} · ` : "";
   return {
-    label: `${esc(earlier)}${esc(where)} · ${esc(b.heading)}<span class="mr-sub">${esc(gate)} · ${viewLink(
+    label: `${esc(earlier)}${esc(where)} · ${esc(b.heading || s.blockers.untitled)}<span class="mr-sub">${esc(gate)} · ${viewLink(
       b.rel,
       file,
       s.blockers.viewTip(b.rel),
@@ -81,7 +96,7 @@ function askRow(b: Blocker, s: Strings, maxWait: number, parked = !b.isCurrentSt
     pct: b.waitingSec === undefined ? undefined : share(b.waitingSec, maxWait),
     tone: parked ? "none" : "warn",
     dim: parked,
-    tip: b.kind === "confirmation" ? s.blockers.confirmationTip : undefined,
+    tip,
   };
 }
 

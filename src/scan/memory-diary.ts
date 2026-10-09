@@ -22,6 +22,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { visibleLines } from "./visible-lines";
 
 /** The four canonical diary axes, in document order. */
 export const DIARY_AXES = ["interpretations", "deviations", "tradeoffs", "openQuestions"] as const;
@@ -119,7 +120,9 @@ function questionStatus(text: string): DiaryQuestionStatus {
 export function parseDiary(text: string): DiaryEntry[] {
   const out: DiaryEntry[] = [];
   let axis: DiaryAxis | undefined;
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+  // Visible lines only (scan/visible-lines.ts): a fenced example of a diary is not
+  // the diary. An unclosed block is read as text, which is what this did before.
+  for (const line of visibleLines(text).lines) {
     const h = H2_RE.exec(line);
     if (h) {
       axis = axisFromHeading(h[1]!);

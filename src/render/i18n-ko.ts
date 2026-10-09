@@ -86,6 +86,9 @@ const warn: WarnStrings = {
   harnessCoexist: (harnesses, chosen) =>
     `harness 디렉터리 ${harnesses.join("·")} 가 공존 — 사용량 패널을 ${chosen === "claude" ? "Claude Code 토큰" : "Kiro 크레딧"}으로 자동 선택했습니다. 다른 쪽을 보려면 --usage ${chosen === "claude" ? "kiro" : "claude"} 를 지정하세요.`,
 
+  questionsUnclosedBlock: (files) =>
+    `닫히지 않은 코드 블록·주석이 있는 질문 파일 ${files.length}개 — 숨기지 않고 본문으로 읽었습니다(블로커를 감추지 않으려고). 엔진은 다르게 읽을 수 있으니 파일을 확인하세요: ${files.join(", ")}`,
+
   tokenUsageFailed: (detail) => `토큰 사용량 조립 실패 — 사용량 패널만 하락: ${detail}`,
 
   creditAssemblyFailed: (detail) => `크레딧 조립 실패 — 크레딧 패널만 하락: ${detail}`,
@@ -96,6 +99,13 @@ const blockers: BlockerStrings = {
   confirmation: "게이트 확인",
   confirmationTip:
     "승인 관문의 결정 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
+  loose: "제목 미인식",
+  looseTip:
+    "질문 제목으로 인식하지 못한 자리의 빈 [Answer]: 입니다 — 엔진의 stop hook 은 제목과 상관없이 파일 전체에서 빈 태그를 찾으므로, 런은 이것 때문에도 멈춥니다",
+  untitled: "(제목 없음)",
+  invalidTags: (tags) => `확인 무효 · [Answer]: ${tags}개`,
+  invalidTagsTip:
+    "요약 확인에는 [Answer]: 가 정확히 하나여야 합니다 — 둘 이상이면 엔진은 어떤 답도 읽지 않으므로, 하나만 남기고 지워야 진행됩니다",
   viewTip: (rel) => `${rel} 원문을 대시보드에서 보기`,
 };
 

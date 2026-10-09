@@ -8,9 +8,11 @@
 //   <prose + the option list>
 //   [Answer]: A (Approve Plan) — 사용자 승인 2026-07-30
 //
-// An UNANSWERED question is an `[Answer]:` marker with nothing but whitespace
-// after the colon. That is the engine's own convention (the stop hook's
-// pending-question carve-out reads the same shape), and it is what distinguishes
+// An UNANSWERED question is an `[Answer]:` marker with nothing but whitespace or
+// underscores after the colon. That is the engine's own convention
+// (stage-protocol.md: "blank or contains only underscores"; the stop hook's
+// pending-question carve-out reads `\[Answer\]:[ \t]*_*[ \t]*$`), and a reader
+// that took only whitespace read a `___` placeholder as an answer. It is what distinguishes
 // "asked and waiting" from "asked and answered" — verified against a real stall
 // where one unit's `[Answer]:` was blank and stop.drops corroborated with three
 // "pending-question carve-out" lines.
@@ -54,8 +56,9 @@
 // `[Answer]:` — and the engine counts its tags only under a heading that is
 // "exactly `Plan Approval`" (`aidlc-testing-posture.ts`). Plan approval is
 // human-owned even under Construction autonomy, so a blank one is a hard stop.
-// Measured on a completed 2.10 run: all three of its code-generation questions
-// files read as zero asks, and blanking one answer on a copy still showed zero
+// (Not in the 2.10.0 release: `aidlc-plan-approval-ask.ts` landed after it, and
+// run E came from that later engine.) Measured on run E: all three of its
+// code-generation questions files read as zero asks, and blanking one answer on a copy still showed zero
 // blockers on both the dashboard and the picker card.
 //
 // Two things make it unlike the other three. It is matched the way the ENGINE
@@ -79,31 +82,74 @@
 //      that question unanswered. Measured: of 194 spans exactly one holds two
 //      markers, and it is that shape — blank-then-filled, never filled-then-blank.
 //
-// WHERE WE LOOK. Questions live at two depths: `<phase>/<stage>/` for ordinary
-// stages and `construction/<unit>/<stage>/` for per-unit Construction stages, so
-// the scan walks both. Only the record tree is walked (never the whole project),
-// and the walk is bounded to the known phase dirs.
+// WHAT THE ENGINE SEES DECIDES WHAT IS ASKED (2.10/2.11). Six rules, each a shape
+// the engine read one way and this reader another:
+//
+//   - Only VISIBLE lines count (scan/visible-lines.ts): a tag or heading inside a
+//     fence, an HTML comment or a <pre> block is example text, as the engine's
+//     `visibleMarkdownLines` reads it. An unclosed one hides nothing and is
+//     reported — the alternative is a typo hiding every blocker below it.
+//   - A question heading opens a span at ANY depth (`### Q2.`), and a heading
+//     DEEPER than the span's own is a subsection that stays inside it; a heading
+//     at the same depth or shallower ends it. Closing on any `##` had a `### 선택지`
+//     under `## Q1` hide Q1's tag. ATX headings take 0–3 spaces of indent and an
+//     optional closing `##`. Numbered forms (`## 1.`, `## Question 1:`) are
+//     questions too — the engine's own question prefix (`QUESTION_PREFIX_RE`).
+//   - A leading emoji is decoration (2.11 `headingKey`), so `## ❓ Q1.` is Q1 and
+//     `## 📌 Assumption Confirmation` is that gate. The summary and feedback
+//     headings are compared exactly by the engine and stay exact here.
+//   - The three gate headings are H2 only, as the engine reads them.
+//   - A blank tag under NO recognised heading is still a blocker. The stop hook
+//     tests the whole file with one regex and never looks at headings, so the run
+//     parks on it all the same. It attaches to the heading above it (or to none),
+//     as `loose`. A filled one there stays uncounted, as before.
+//   - Plan approval reads the LATEST section's LAST tag, a subsection tag only
+//     filling an empty slot (`latestPlanApproval`, aidlc-testing-posture.ts); the
+//     summary confirmation must hold EXACTLY ONE tag or the engine reads no answer
+//     at all (`summaryConfirmationAnswer`), whatever the tags say. Every other ask
+//     keeps rule 2 below.
+//
+// The engine is not consistent with itself here, and this reader sides with the
+// readers that DECIDE: the stop hook's whole-file regex also counts a blank tag
+// inside a fence and does not anchor `[Answer]:` to the line start, while the
+// readers that grant an approval read visible lines with the tag at column 0.
+//
+// WHERE WE LOOK. stage-protocol.md: "Recursively read every
+// `<record>/**/*-questions.md`", so the walk is recursive below each known phase
+// dir (bounded in depth, dot-dirs and symlinked dirs skipped). Which stage a file
+// belongs to comes from the catalogue's `isStage` oracle when there is one — a
+// stage's own subdirectory (`<stage>/reviews/`) was read as a unit named after
+// the stage. Without one, only `construction/` has units, and there a dir
+// holding further dirs is one, as before.
 //
 // Node fs only, never throws.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { visibleLines } from "./visible-lines";
 
 /**
  * What kind of ask a heading is. `confirmation` is one of the four id-less gate
  * headings; the remedy differs (pick a fixed option / write feedback rather than
- * answer a question), so the panel says which one it is looking at.
+ * answer a question), so the panel says which one it is looking at. `loose` is a
+ * blank tag under no heading this reader recognises — the engine waits on it all
+ * the same, but the reader cannot say what it asks.
  */
-export type AskKind = "question" | "confirmation";
+export type AskKind = "question" | "confirmation" | "loose";
 
 /** One question block found in a questions artifact. */
 export interface QuestionEntry {
-  /** Heading label, e.g. "Q1 — Plan Approval". */
+  /** Heading label, e.g. "Q1 — Plan Approval". Empty for a `loose` tag above every heading. */
   heading: string;
   /** The answer text; empty string means unanswered. */
   answer: string;
   answered: boolean;
   kind: AskKind;
+  /**
+   * Set only on a summary confirmation holding more than one tag: the engine reads
+   * no answer from it at all, so it is unanswered whatever the tags say.
+   */
+  invalidTags?: number;
 }
 
 /** One questions artifact. */
@@ -119,6 +165,8 @@ export interface QuestionsFile {
   unanswered: QuestionEntry[];
   /** File mtime (ISO) — how long the ask has been outstanding. */
   mtime: string;
+  /** A fence, comment or raw HTML block was never closed and was read as text. */
+  unclosed: boolean;
 }
 
 export interface QuestionsReport {
@@ -127,37 +175,63 @@ export interface QuestionsReport {
   blocked: QuestionsFile[];
   totalQuestions: number;
   totalUnanswered: number;
+  /** `rel` of every file read with an unclosed block, so the page can say so. */
+  unclosed: string[];
 }
 
 /** The phase dirs a record can hold (mirrors PHASES in the engine's lib). */
 const PHASE_DIRS = ["initialization", "ideation", "inception", "construction", "operation"];
 
-/** Any `## ` heading — always ends the previous span, whether or not it opens one. */
-const H2_RE = /^##\s/;
+/** How deep below a phase dir the recursive walk goes. The deepest real shape is 3. */
+const MAX_DEPTH = 6;
+
+/** An ATX heading: 0–3 spaces, 1–6 `#`, then a space or end of line. */
+const ATX_RE = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
 /**
- * A `## ` heading carrying a question id: `Q1`, `[Q1]`, `F1`, `[F1]`, with an
- * optional suffix that may or may not be hyphenated (`Q1-a`, `Q6a`). The id must be
+ * A heading carrying a question id: `Q1`, `[Q1]`, `F1`, `[F1]`, with an optional
+ * suffix that may or may not be hyphenated (`Q1-a`, `Q6a`). The id must be
  * followed by a delimiter or end of line, so a prose heading that merely starts
  * with the letter (`## U1의 완료는 …`) is not an ask, and neither is one whose id is
  * only mentioned mid-sentence.
  */
-const QUESTION_HEADING_RE = /^##\s+\[?([QF]\d+(?:-?[A-Za-z0-9]+)?)\]?(?:$|[\s.:\]])/;
-/** Just the heading text, for the id-less gate headings below. */
-const H2_TITLE_RE = /^##\s+(.+?)\s*$/;
+const QUESTION_ID_RE = /^\[?([QF]\d+(?:-?[A-Za-z0-9]+)?)\]?(?:$|[\s.:\]])/;
 /**
- * Three of the four id-less headings the engine writes as questions. Matched on the
- * exact literal (lowercased) because `memory-seed/org.md` lists these H2s among the
- * tokens a stage must write "character for character" — they stay English even in
- * a Korean run, so there is no localisation to tolerate here. A suffix is NOT
- * accepted: the protocol appends *sibling* sections sharing the title, and
- * `aidlc-lib.ts` guards duplicates by that same exact name. The fourth, plan
- * approval, is matched by `isPlanApprovalTitle` below.
+ * The numbered forms the engine's own question prefix accepts (`QUESTION_PREFIX_RE`
+ * and `NUMBERED_QUESTION_HEADING_RE`, aidlc-testing-posture.ts): `1.`, `2)`,
+ * `Question 3:`, or a bare number. A delimiter must be followed by a space or end
+ * the heading, so `## 1.5 GB 한도` is prose.
  */
-const GATE_HEADINGS = new Set([
-  "consolidated summary confirmation",
-  "assumption confirmation",
-  "requested changes feedback",
-]);
+const NUMBERED_RE = /^(?:q(?:uestion)?[ \t]*)?(\d+)[ \t]*(?:[:.)-](?:[ \t]|$)|$)/i;
+/** The engine's question prefix, stripped before matching the plan approval label. */
+const QUESTION_PREFIX_RE = /^(?:(?:q(?:uestion)?[ \t]*)?\d+[ \t]*[:.)-][ \t]*)/i;
+/** A numbered heading with nothing after the number: its label is on the next line. */
+const NUMBERED_BARE_RE = /^(?:q(?:uestion)?[ \t]*)?\d+[ \t]*[.:)-]?[ \t]*$/i;
+
+/**
+ * The engine's `headingKey` (2.11 aidlc-artifact-vocabulary.ts): a run of emoji,
+ * optionally ZWJ-joined, then whitespace is decoration — and a bare
+ * text-presentation symbol (©, ™, ▶) is not. `RGI_Emoji` is what draws that line
+ * and needs the `v` flag, which `tsconfig`'s ES2023 target refuses in a literal;
+ * the runtime has it, so the pattern is built rather than approximated.
+ */
+// biome-ignore lint/complexity/useRegexLiterals: a `v`-flag literal fails the ES2023 typecheck.
+const LEADING_EMOJI_RE = new RegExp("^\\p{RGI_Emoji}(?:\\u200D?\\p{RGI_Emoji})*[ \\t]+", "v");
+function headingKey(title: string): string {
+  return title.replace(LEADING_EMOJI_RE, "").trim();
+}
+
+/**
+ * The id-less gate headings, H2 only and compared exactly the way the engine
+ * compares them: the summary and the feedback heading against the raw title, the
+ * assumption heading through `headingKey`. A suffix is NOT accepted — the protocol
+ * appends *sibling* sections sharing the title, and `aidlc-lib.ts` guards
+ * duplicates by that same exact name. They stay English even in a Korean run (the
+ * assumption heading is in `memory-seed/org.md`'s preserved-token list; the other
+ * two are literals in the stage protocol), so there is no localisation to tolerate.
+ */
+const SUMMARY_HEADING = "Consolidated Summary Confirmation";
+const FEEDBACK_HEADING = "Requested Changes Feedback";
+const ASSUMPTION_HEADING = "Assumption Confirmation";
 
 /** The engine's `isPlanApprovalLabel`: one emphasis pair and a trailing `?`/`:` ignored. */
 function isPlanApprovalTitle(title: string): boolean {
@@ -180,49 +254,177 @@ const PLAN_APPROVAL_OFF = "plan approval off";
 // a multi-word answer with a trailing comment still reads as answered.
 const ANSWER_RE = /^\[Answer\]:[ \t]*(.*)$/;
 
+/** Blank after the colon, or only underscores — still waiting. */
+function isBlank(answer: string): boolean {
+  return /^_*$/.test(answer);
+}
+
+/** How a span's tags become an answer — see the header for where each rule comes from. */
+type Role = "question" | "gate" | "summary" | "plan" | "loose";
+
+const KIND: Record<Role, AskKind> = {
+  question: "question",
+  gate: "confirmation",
+  summary: "confirmation",
+  plan: "confirmation",
+  loose: "loose",
+};
+
+/**
+ * The id a question heading names, so a later section reusing it (`### Q7 답변`)
+ * lands on the same question. `Question 1` and `Q1` are the same id.
+ */
+function questionId(title: string): string | undefined {
+  const key = headingKey(title);
+  const id = QUESTION_ID_RE.exec(key)?.[1];
+  if (id) return id.toUpperCase();
+  const n = NUMBERED_RE.exec(key)?.[1];
+  return n === undefined ? undefined : `Q${Number(n)}`;
+}
+
+/** The role a heading opens, or undefined for one this reader does not recognise. */
+function roleOf(title: string, depth: number): Role | undefined {
+  if (isPlanApprovalTitle(title.replace(QUESTION_PREFIX_RE, ""))) return "plan";
+  const key = headingKey(title);
+  if (QUESTION_ID_RE.test(key) || NUMBERED_RE.test(key)) return "question";
+  if (depth !== 2) return undefined;
+  if (title === SUMMARY_HEADING) return "summary";
+  if (title === FEEDBACK_HEADING || key === ASSUMPTION_HEADING) return "gate";
+  return undefined;
+}
+
+/** The answer a span gives, or undefined when it is not an ask. */
+function entryOf(s: {
+  heading: string;
+  role: Role;
+  markers: { value: string; sub: boolean }[];
+}): QuestionEntry | undefined {
+  const base = { heading: s.heading, kind: KIND[s.role] };
+  if (s.markers.length === 0) return undefined;
+  const unanswered = { ...base, answer: "", answered: false };
+  switch (s.role) {
+    case "plan": {
+      // Each tag overwrites the last; a subsection's only fills an empty slot.
+      let answer: string | undefined;
+      for (const m of s.markers) if (!(m.sub && answer !== undefined)) answer = m.value;
+      if (answer === undefined) return undefined;
+      // A plan built with approval off left a record, not an ask (see the header).
+      if (answer.toLowerCase() === PLAN_APPROVAL_OFF) return undefined;
+      return isBlank(answer) ? unanswered : { ...base, answer, answered: true };
+    }
+    case "summary": {
+      if (s.markers.length > 1) return { ...unanswered, invalidTags: s.markers.length };
+      const answer = s.markers[0]?.value ?? "";
+      return isBlank(answer) ? unanswered : { ...base, answer, answered: true };
+    }
+    case "loose":
+      // Only an all-blank one is an ask; a filled one stays uncounted, as before.
+      return s.markers.every((m) => isBlank(m.value)) ? unanswered : undefined;
+    default: {
+      // Rule 2: the first NON-EMPTY marker, not the first marker.
+      const answer = s.markers.find((m) => !isBlank(m.value))?.value;
+      return answer === undefined ? unanswered : { ...base, answer, answered: true };
+    }
+  }
+}
+
 /**
  * Parse one questions artifact's text. Exported for tests: this is the whole
  * answered/unanswered contract, checkable from a string.
  *
- * A span runs from a question-id heading to the next `## ` heading of any kind.
- * It becomes a question only if it holds an `[Answer]:` marker, and its answer is
- * the first non-empty marker in it — see the two rules in the header comment for
- * the real-run shapes that forced both. An `[Answer]:` outside any span (before
- * the first heading, or under a prose heading) is ignored.
+ * A recognised heading opens a span that runs to the next heading at its depth or
+ * shallower (or to the next recognised one). It becomes an ask only if it holds an
+ * `[Answer]:` marker, and how its markers become an answer depends on what kind of
+ * ask it is — see the header for the real-run and engine shapes behind each rule.
+ * A marker under no recognised heading belongs to the nearest heading above it.
  */
-export function parseQuestions(text: string): QuestionEntry[] {
-  type Span = { heading: string; markers: string[]; kind: AskKind; planApproval: boolean };
-  const spans: Span[] = [];
-  let current: Span | undefined;
+export function parseQuestionsFile(text: string): {
+  questions: QuestionEntry[];
+  unclosed: boolean;
+} {
+  type Span = {
+    heading: string;
+    depth: number;
+    role: Role;
+    markers: { value: string; sub: boolean }[];
+    inSub: boolean;
+    awaitLabel: boolean;
+    id?: string;
+  };
+  const span = (heading: string, depth: number, role: Role, awaitLabel = false): Span => ({
+    heading,
+    depth,
+    role,
+    markers: [],
+    inSub: false,
+    awaitLabel,
+  });
+  const visible = visibleLines(text);
+  let current = span("", 0, "loose");
+  const spans: Span[] = [current];
 
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
-    if (H2_RE.test(line)) {
-      const title = (H2_TITLE_RE.exec(line)?.[1] ?? "").trim();
-      const planApproval = !QUESTION_HEADING_RE.test(line) && isPlanApprovalTitle(title);
-      const kind: AskKind | undefined = QUESTION_HEADING_RE.test(line)
-        ? "question"
-        : planApproval || GATE_HEADINGS.has(title.toLowerCase())
-          ? "confirmation"
-          : undefined;
-      current = kind ? { heading: title, markers: [], kind, planApproval } : undefined;
-      if (current) spans.push(current);
+  for (const line of visible.lines) {
+    const h = ATX_RE.exec(line);
+    if (h) {
+      const depth = h[1]?.length ?? 0;
+      // A closing sequence (`## Q3 ##`) is not part of the title.
+      const title = (h[2] ?? "").replace(/(?:^|[ \t]+)#+$/, "").trim();
+      const role = roleOf(title, depth);
+      if (role === undefined && current.role !== "loose" && depth > current.depth) {
+        // A subsection of the open ask: its tags still belong to that ask.
+        current.inSub = true;
+        current.awaitLabel = false;
+        continue;
+      }
+      const awaitLabel = role === "question" && NUMBERED_BARE_RE.test(headingKey(title));
+      current = span(title, depth, role ?? "loose", awaitLabel);
+      if (role === "question") current.id = questionId(title);
+      spans.push(current);
       continue;
     }
-    if (!current) continue;
+    if (current.awaitLabel && line.trim().length > 0) {
+      // `## 1.` with the label on the next line: the engine reads that as plan
+      // approval when the label is one.
+      current.awaitLabel = false;
+      if (isPlanApprovalTitle(line)) {
+        current.role = "plan";
+        current.heading = line.trim();
+        current.id = undefined;
+      }
+    }
     const a = ANSWER_RE.exec(line);
-    if (a) current.markers.push((a[1] ?? "").trim());
+    if (a) current.markers.push({ value: (a[1] ?? "").trim(), sub: current.inSub });
   }
 
-  const out: QuestionEntry[] = [];
+  // A section reusing an earlier question's id is that question's continuation: its
+  // markers join the first one's, in document order, so rule 2 reads across both.
+  // The engine refuses two sections with one id, so this never merges two real asks.
+  const byId = new Map<string, Span>();
   for (const s of spans) {
-    if (s.markers.length === 0) continue;
-    // Blank after the colon == still waiting. This is the whole signal.
-    const answer = s.markers.find((m) => m.length > 0) ?? "";
-    // A plan built with approval off left a record, not an ask (see the header).
-    if (s.planApproval && answer.toLowerCase() === PLAN_APPROVAL_OFF) continue;
-    out.push({ heading: s.heading, answer, answered: answer.length > 0, kind: s.kind });
+    if (s.role !== "question" || s.id === undefined) continue;
+    const first = byId.get(s.id);
+    if (!first) {
+      byId.set(s.id, s);
+      continue;
+    }
+    first.markers.push(...s.markers);
+    s.markers = [];
   }
-  return out;
+
+  // Only the latest plan approval section is read; an earlier one is superseded.
+  const lastPlan = spans.findLastIndex((s) => s.role === "plan" && s.markers.length > 0);
+  const out: QuestionEntry[] = [];
+  spans.forEach((s, i) => {
+    if (s.role === "plan" && i !== lastPlan) return;
+    const e = entryOf(s);
+    if (e) out.push(e);
+  });
+  return { questions: out, unclosed: visible.unclosed };
+}
+
+/** Just the asks — see `parseQuestionsFile`. */
+export function parseQuestions(text: string): QuestionEntry[] {
+  return parseQuestionsFile(text).questions;
 }
 
 function statMtime(p: string): string {
@@ -251,91 +453,81 @@ function readFileEntry(
   } catch {
     return undefined;
   }
-  const questions = parseQuestions(text);
+  const parsed = parseQuestionsFile(text);
   return {
     rel: relParts.join("/"),
     phase,
     stage,
     unit,
-    questions,
-    unanswered: questions.filter((q) => !q.answered),
+    questions: parsed.questions,
+    unanswered: parsed.questions.filter((q) => !q.answered),
     mtime: statMtime(abs),
+    unclosed: parsed.unclosed,
   };
 }
 
-/** Questions artifacts directly inside a stage dir (`*-questions.md`). */
-function scanStageDir(
-  recordDir: string,
-  relParts: string[],
-  phase: string,
-  stage: string,
-  unit: string | undefined,
-  into: QuestionsFile[],
-): void {
-  let entries: string[];
+function entries(abs: string): fs.Dirent[] {
   try {
-    entries = fs.readdirSync(path.join(recordDir, ...relParts));
+    return fs.readdirSync(abs, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
   } catch {
-    return;
-  }
-  for (const f of entries) {
-    if (!f.endsWith("-questions.md")) continue;
-    const e = readFileEntry(recordDir, [...relParts, f], phase, stage, unit);
-    if (e) into.push(e);
+    return [];
   }
 }
 
-function isDir(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory();
-  } catch {
-    return false;
+/** Every `*-questions.md` below `dirs`, as the dir segments under the phase dir. */
+function walk(recordDir: string, phase: string, dirs: string[], out: string[][]): void {
+  if (dirs.length > MAX_DEPTH) return;
+  for (const e of entries(path.join(recordDir, phase, ...dirs))) {
+    if (e.name.startsWith(".")) continue;
+    // `isDirectory()` on a Dirent does not follow a symlink, so a link cannot loop.
+    if (e.isDirectory()) walk(recordDir, phase, [...dirs, e.name], out);
+    else if (dirs.length > 0 && e.name.endsWith("-questions.md")) out.push([...dirs, e.name]);
   }
 }
 
 /**
- * Walk the record's phase dirs for questions artifacts. Handles both
- * `<phase>/<stage>/` and `construction/<unit>/<stage>/`: under construction, a
- * child dir is treated as a unit when it itself holds stage subdirectories, and
- * as a stage otherwise (the stage-major layout writes both side by side).
- * Never throws.
+ * Which stage — and, under construction, which unit — a file belongs to, from the
+ * dir segments between the phase dir and the file. With the catalogue's oracle the
+ * first segment that is a stage decides; without it, only construction has units,
+ * and there a segment followed by another dir is one.
  */
-export function readQuestions(recordDir: string): QuestionsReport {
+function attribute(
+  phase: string,
+  dirs: string[],
+  isStage: ((slug: string) => boolean) | undefined,
+): { stage: string; unit?: string } {
+  const [first = "", second] = dirs;
+  if (isStage) {
+    if (isStage(first)) return { stage: first };
+    if (phase === "construction" && second !== undefined && isStage(second)) {
+      return { stage: second, unit: first };
+    }
+  }
+  if (phase === "construction" && second !== undefined && !isStage?.(first)) {
+    return { stage: second, unit: first };
+  }
+  return { stage: first };
+}
+
+export interface QuestionsOptions {
+  /** The catalogue's oracle, for the unit-vs-stage-subdirectory ambiguity. */
+  isStage?: (slug: string) => boolean;
+}
+
+/**
+ * Walk the record's phase dirs for questions artifacts, recursively — see WHERE WE
+ * LOOK in the header. Never throws.
+ */
+export function readQuestions(recordDir: string, opts: QuestionsOptions = {}): QuestionsReport {
   const files: QuestionsFile[] = [];
 
   for (const phase of PHASE_DIRS) {
-    const phaseAbs = path.join(recordDir, phase);
-    if (!isDir(phaseAbs)) continue;
-    let children: string[];
-    try {
-      children = fs.readdirSync(phaseAbs);
-    } catch {
-      continue;
-    }
-    for (const child of children.sort()) {
-      const childAbs = path.join(phaseAbs, child);
-      if (!isDir(childAbs)) continue;
-
-      // A unit dir holds stage dirs; a stage dir holds .md files. Distinguish by
-      // asking whether any child is itself a directory.
-      let grandchildren: string[] = [];
-      try {
-        grandchildren = fs.readdirSync(childAbs);
-      } catch {
-        // fall through: treat as a stage dir
-      }
-      const stageSubdirs = grandchildren.filter((g) => isDir(path.join(childAbs, g)));
-
-      if (stageSubdirs.length > 0) {
-        // `child` is a unit of work (construction/<unit>/<stage>/...).
-        for (const stage of stageSubdirs.sort()) {
-          scanStageDir(recordDir, [phase, child, stage], phase, stage, child, files);
-        }
-        // A unit dir can also hold loose questions artifacts; pick those up too.
-        scanStageDir(recordDir, [phase, child], phase, child, undefined, files);
-      } else {
-        scanStageDir(recordDir, [phase, child], phase, child, undefined, files);
-      }
+    const found: string[][] = [];
+    walk(recordDir, phase, [], found);
+    for (const parts of found) {
+      const { stage, unit } = attribute(phase, parts.slice(0, -1), opts.isStage);
+      const e = readFileEntry(recordDir, [phase, ...parts], phase, stage, unit);
+      if (e) files.push(e);
     }
   }
 
@@ -348,5 +540,6 @@ export function readQuestions(recordDir: string): QuestionsReport {
     blocked,
     totalQuestions: files.reduce((n, f) => n + f.questions.length, 0),
     totalUnanswered: files.reduce((n, f) => n + f.unanswered.length, 0),
+    unclosed: files.filter((f) => f.unclosed).map((f) => f.rel),
   };
 }

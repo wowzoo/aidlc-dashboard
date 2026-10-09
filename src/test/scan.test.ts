@@ -20,7 +20,7 @@ import {
 } from "../scan/matrix";
 import { parseDiary, readDiaries } from "../scan/memory-diary";
 import { type StageInfo, parseState, parseUnitProgress } from "../scan/parser";
-import { parseQuestions } from "../scan/questions";
+import { parseQuestions, parseQuestionsFile, readQuestions } from "../scan/questions";
 import { buildRework } from "../scan/rework";
 import { parseSensorDetail, readSensorReport } from "../scan/sensors";
 import {
@@ -860,8 +860,11 @@ prose only, no marker
       { heading: "Plan Approval", answer: "", answered: false, kind: "confirmation" },
     ]);
     expect(parseQuestions(text(" A. Approve Plan"))[0]?.answered).toBe(true);
-    // A suffix is still a different heading.
-    expect(parseQuestions("## Plan Approval for unit-a\n\n[Answer]:\n")).toEqual([]);
+    // A suffix is still a different heading — not plan approval, but its blank tag is
+    // still one the stop hook waits on, so it surfaces as an unrecognised ask.
+    expect(parseQuestions("## Plan Approval for unit-a\n\n[Answer]:\n")).toEqual([
+      { heading: "Plan Approval for unit-a", answer: "", answered: false, kind: "loose" },
+    ]);
   });
 
   test("plan approval is matched the way the engine matches it", () => {
@@ -884,9 +887,245 @@ prose only, no marker
     expect(parseQuestions("## Assumption Confirmation\n\n확인 절차 설명\n")).toEqual([]);
     expect(parseQuestions("## Assumption Confirmation 재확인\n\n[Answer]: x\n")).toEqual([]);
   });
+
+  // ── 2.10/2.11 input rules ────────────────────────────────────────────────────
+  // Each case below is a shape the engine treats one way and this reader used to
+  // treat another. The engine sources are cited in scan/questions.ts's header.
+
+  test("an underscores-only answer is blank, as the engine reads it", () => {
+    // stage-protocol.md: "blank or contains only underscores". The stop hook's
+    // regex is `\[Answer\]:[ \t]*_*[ \t]*$`.
+    for (const a of ["_", "___", " __ "]) {
+      expect(parseQuestions(`## Q1 — x\n\n[Answer]:${a}\n`)[0]?.answered).toBe(false);
+    }
+    // Underscores inside a word are an answer.
+    expect(parseQuestions("## Q1 — x\n\n[Answer]: __init__\n")[0]?.answered).toBe(true);
+  });
+
+  test("a tag inside a fenced block, an HTML comment or a <pre> block is invisible", () => {
+    expect(parseQuestions("## Q1 — x\n\n```md\n[Answer]:\n```\n\n[Answer]: A\n")[0]?.answer).toBe(
+      "A",
+    );
+    expect(parseQuestions("## Q1 — x\n\n~~~\n[Answer]:\n~~~\n")).toEqual([]);
+    expect(parseQuestions("## Q1 — x\n<!--\n[Answer]:\n-->\n[Answer]: B\n")[0]?.answer).toBe("B");
+    expect(parseQuestions("## Q1 — x\n<!-- [Answer]: -->\n[Answer]: C\n")[0]?.answer).toBe("C");
+    expect(parseQuestions("## Q1 — x\n<pre>\n[Answer]:\n</pre>\n[Answer]: D\n")[0]?.answer).toBe(
+      "D",
+    );
+    // A heading hidden in a fence neither opens nor closes a span.
+    const qs = parseQuestions("## Q1 — x\n````\n```\n## Q2 — y\n```\n````\n[Answer]:\n");
+    expect(qs.map((q) => [q.heading, q.answered])).toEqual([["Q1 — x", false]]);
+  });
+
+  test("an unclosed fence hides nothing and is reported", () => {
+    // CommonMark would run it to end of file and hide the blank tag; a reader that
+    // did the same would hide a blocker over a typo, so it reads on and says so.
+    const r = parseQuestionsFile("## Q1 — x\n\n```\n[Answer]:\n");
+    expect(r.questions.map((q) => q.answered)).toEqual([false]);
+    expect(r.unclosed).toBe(true);
+    expect(parseQuestionsFile("## Q1 — x\n```\n```\n[Answer]:\n").unclosed).toBe(false);
+  });
+
+  test("a question heading opens a span at any depth, and a deeper heading stays inside it", () => {
+    const qs = parseQuestions(`## Q1 — 범위
+
+### 선택지
+
+- A. 전부
+
+[Answer]:
+
+### Q2. 순서
+
+[Answer]: A
+
+   ## Q3 ##
+
+[Answer]: B
+`);
+    expect(qs.map((q) => [q.heading, q.kind, q.answered])).toEqual([
+      ["Q1 — 범위", "question", false],
+      ["Q2. 순서", "question", true],
+      ["Q3", "question", true],
+    ]);
+  });
+
+  test("numbered and `Question n` headings are questions, as the engine's prefix reads them", () => {
+    const qs = parseQuestions("## Question 1: 범위\n\n[Answer]: A\n\n## 2. 순서\n\n[Answer]:\n");
+    expect(qs.map((q) => [q.heading, q.kind, q.answered])).toEqual([
+      ["Question 1: 범위", "question", true],
+      ["2. 순서", "question", false],
+    ]);
+  });
+
+  test("a leading emoji does not hide a question id or the assumption heading", () => {
+    // 2.11 `headingKey`: a run of emoji then whitespace is decoration.
+    const qs = parseQuestions(
+      "## ❓ Q1. 범위\n\n[Answer]:\n\n## 📌 Assumption Confirmation\n\n[Answer]:\n",
+    );
+    expect(qs.map((q) => [q.heading, q.kind])).toEqual([
+      ["❓ Q1. 범위", "question"],
+      ["📌 Assumption Confirmation", "confirmation"],
+    ]);
+  });
+
+  test("a blank tag under no recognised heading is still a blocker", () => {
+    // The stop hook reads the whole file, so a blank tag anywhere parks the run.
+    expect(parseQuestions("## 배경\n\n[Answer]:\n")).toEqual([
+      { heading: "배경", answer: "", answered: false, kind: "loose" },
+    ]);
+    expect(parseQuestions("[Answer]:\n")).toEqual([
+      { heading: "", answer: "", answered: false, kind: "loose" },
+    ]);
+    // A gate heading is H2 only, so an H3 one is unrecognised — but still waited on.
+    expect(parseQuestions("### Assumption Confirmation\n\n[Answer]:\n")[0]?.kind).toBe("loose");
+    // The summary heading is compared exactly by the engine, emoji included.
+    expect(parseQuestions("## 📌 Consolidated Summary Confirmation\n\n[Answer]:\n")[0]?.kind).toBe(
+      "loose",
+    );
+    // A filled one under no recognised heading is not an ask, as before.
+    expect(parseQuestions("## 배경\n\n[Answer]: x\n")).toEqual([]);
+  });
+
+  test("plan approval reads the LATEST section's LAST tag", () => {
+    // aidlc-testing-posture.ts `latestPlanApproval`: each section resets, and a
+    // later tag overwrites an earlier one.
+    const again = parseQuestions(
+      "## Plan Approval\n\n[Answer]: A. Approve Plan\n\n## Plan Approval\n\n[Answer]:\n",
+    );
+    expect(again.map((q) => q.answered)).toEqual([false]);
+    expect(
+      parseQuestions("## Plan Approval\n\n[Answer]:\n[Answer]: A. Approve Plan\n")[0]?.answered,
+    ).toBe(true);
+    expect(
+      parseQuestions("## Plan Approval\n\n[Answer]: A. Approve Plan\n[Answer]:\n")[0]?.answered,
+    ).toBe(false);
+    // A tag in a subsection only fills a slot the section left empty.
+    expect(
+      parseQuestions("## Plan Approval\n\n[Answer]:\n\n### 메모\n\n[Answer]: A. Approve Plan\n")[0]
+        ?.answered,
+    ).toBe(false);
+    // The engine strips a question prefix before matching the label.
+    expect(parseQuestions("## Q1: Plan Approval\n\n[Answer]:\n")[0]?.kind).toBe("confirmation");
+  });
+
+  test("a later section reusing a question's id answers it, as a later marker would", () => {
+    // Real shape: the engine's blank placeholders under `### Q7.` / `### Q8.`, then
+    // the human's answers under `### Q7 답변` / `### Q8 답변`. The engine forbids two
+    // sections with one id, so the second is the first one's answer, not a new ask.
+    const qs = parseQuestions(`## 학습 의례
+
+### Q7. 보존할 후보
+
+[Answer]:
+
+### Q8. 더 남길 것
+
+[Answer]:
+
+### Q7 답변
+
+[Answer]: A~G 전부
+
+## Question 1: 범위
+
+[Answer]:
+
+## Q1 — 범위 (답)
+
+[Answer]: B
+`);
+    expect(qs.map((q) => [q.heading, q.answered, q.answer])).toEqual([
+      ["Q7. 보존할 후보", true, "A~G 전부"],
+      ["Q8. 더 남길 것", false, ""],
+      ["Question 1: 범위", true, "B"],
+    ]);
+  });
+
+  test("a summary confirmation must hold exactly one tag", () => {
+    // `summaryConfirmationAnswer` returns null unless there is exactly one, so two
+    // tags are not a confirmation the engine will accept, whatever they say.
+    const qs = parseQuestions(
+      "## Consolidated Summary Confirmation\n\n[Answer]:\n[Answer]: Looks correct\n",
+    );
+    expect(qs).toEqual([
+      {
+        heading: "Consolidated Summary Confirmation",
+        answer: "",
+        answered: false,
+        kind: "confirmation",
+        invalidTags: 2,
+      },
+    ]);
+  });
+});
+
+describe("questions files on disk", () => {
+  function tree(files: Record<string, string>): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-q-"));
+    for (const [rel, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), body);
+    }
+    return dir;
+  }
+  const BLANK = "## Q1 — x\n\n[Answer]:\n";
+  const where = (r: ReturnType<typeof readQuestions>) =>
+    r.files.map((f) => [f.rel, f.stage, f.unit ?? null]).sort();
+
+  test("a questions file under a stage's subdirectory belongs to that stage", () => {
+    // stage-protocol.md: "Recursively read every `<record>/**/*-questions.md`".
+    const dir = tree({
+      "inception/requirements-analysis/reviews/r1-questions.md": BLANK,
+      "inception/requirements-analysis/a/b/deep-questions.md": BLANK,
+      "construction/unit-a/code-generation/code-generation-questions.md": BLANK,
+      "construction/build-and-test/reviews/r2-questions.md": BLANK,
+    });
+    const isStage = (s: string) =>
+      ["requirements-analysis", "code-generation", "build-and-test"].includes(s);
+    expect(where(readQuestions(dir, { isStage }))).toEqual([
+      ["construction/build-and-test/reviews/r2-questions.md", "build-and-test", null],
+      [
+        "construction/unit-a/code-generation/code-generation-questions.md",
+        "code-generation",
+        "unit-a",
+      ],
+      ["inception/requirements-analysis/a/b/deep-questions.md", "requirements-analysis", null],
+      ["inception/requirements-analysis/reviews/r1-questions.md", "requirements-analysis", null],
+    ]);
+  });
+
+  test("without a catalogue, only construction has units", () => {
+    const dir = tree({
+      "inception/requirements-analysis/reviews/r1-questions.md": BLANK,
+      "construction/unit-a/code-generation/code-generation-questions.md": BLANK,
+    });
+    expect(where(readQuestions(dir))).toEqual([
+      [
+        "construction/unit-a/code-generation/code-generation-questions.md",
+        "code-generation",
+        "unit-a",
+      ],
+      ["inception/requirements-analysis/reviews/r1-questions.md", "requirements-analysis", null],
+    ]);
+  });
+
+  test("a file with an unclosed block is named in the report", () => {
+    const dir = tree({
+      "inception/user-stories/user-stories-questions.md": "## Q1 — x\n```\n[Answer]:\n",
+    });
+    const r = readQuestions(dir);
+    expect(r.unclosed).toEqual(["inception/user-stories/user-stories-questions.md"]);
+    expect(r.totalUnanswered).toBe(1);
+  });
 });
 
 describe("memory diary", () => {
+  test("a diary quoted in a fence is not the diary", () => {
+    const e = parseDiary("## Deviations\n\n```md\n## Tradeoffs\n- quoted\n```\n\n- real\n");
+    expect(e.map((x) => [x.axis, x.text])).toEqual([["deviations", "real"]]);
+  });
+
   test("counts bullets per axis and strips the timestamp", () => {
     const e = parseDiary(`# Diary
 
@@ -1686,6 +1925,14 @@ describe("rework", () => {
 });
 
 describe("deferral ledger", () => {
+  test("a section left in an HTML comment is not the ledger", () => {
+    const parsed = parseDeferralSections(
+      "<!--\n## Assumptions & Open Questions\n\n- `[assumption]` 지난 판의 전제\n-->\n",
+    );
+    expect(parsed.sections).toBe(0);
+    expect(parsed.assumptions).toEqual([]);
+  });
+
   const STRUCTURED = `# Requirements
 
 ## Functional Requirements

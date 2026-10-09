@@ -118,6 +118,15 @@ describe("warningText reproduces the pre-restructure copy exactly", () => {
     );
   });
 
+  test("an unclosed block names every file it was read in", () => {
+    const text = warningText({
+      code: "questions-unclosed-block",
+      files: ["a/x-questions.md", "b/y-questions.md"],
+    });
+    expect(text).toContain("a/x-questions.md, b/y-questions.md");
+    expect(text).toContain("2개");
+  });
+
   test("the two usage-assembly failures carry the thrown message", () => {
     expect(warningText({ code: "token-usage-failed", detail: "boom" })).toBe(
       "토큰 사용량 조립 실패 — 사용량 패널만 하락: boom",
@@ -148,6 +157,7 @@ describe("every code has copy", () => {
     "unit-progress-missing": { code: "unit-progress-missing" },
     "roster-mismatch": { code: "roster-mismatch", unknownToCatalog: [], missingFromState: [] },
     "harness-coexist": { code: "harness-coexist", harnesses: [".kiro"], chosen: "kiro" },
+    "questions-unclosed-block": { code: "questions-unclosed-block", files: ["a-questions.md"] },
     "token-usage-failed": { code: "token-usage-failed", detail: "x" },
     "credit-assembly-failed": { code: "credit-assembly-failed", detail: "x" },
   };

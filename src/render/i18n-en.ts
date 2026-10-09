@@ -93,6 +93,9 @@ const warn: WarnStrings = {
   harnessCoexist: (harnesses, chosen) =>
     `Harness directories ${harnesses.join(" and ")} both exist — the usage panel was set to ${chosen === "claude" ? "Claude Code tokens" : "Kiro credit"} automatically. To see the other one, pass --usage ${chosen === "claude" ? "kiro" : "claude"}.`,
 
+  questionsUnclosedBlock: (files) =>
+    `${plural(files.length, "questions file")} with a code block or comment that is never closed — read as text rather than hidden, so no blocker is hidden by it. The engine may read it differently; check the file: ${files.join(", ")}`,
+
   tokenUsageFailed: (detail) =>
     `Token usage assembly failed — only the usage panel is degraded: ${detail}`,
 
@@ -105,6 +108,13 @@ const blockers: BlockerStrings = {
   confirmation: "gate confirmation",
   confirmationTip:
     "An approval-gate decision — the run proceeds only once you pick one of the engine's options or state what should change",
+  loose: "unrecognised heading",
+  looseTip:
+    "A blank [Answer]: under no heading this dashboard reads as a question — the engine's stop hook looks for blank tags across the whole file regardless of headings, so the run stops on this one too",
+  untitled: "(no heading)",
+  invalidTags: (tags) => `confirmation invalid · ${tags} [Answer]: tags`,
+  invalidTagsTip:
+    "A summary confirmation must hold exactly one [Answer]: — with more, the engine reads no answer at all, so keep one and delete the rest to proceed",
   viewTip: (rel) => `Read ${rel} in the dashboard`,
 };
 

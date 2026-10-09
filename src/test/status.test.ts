@@ -187,6 +187,30 @@ describe("Run Health card — markup", () => {
     expect(html).toContain(b.heading);
   });
 
+  test("an unrecognised-heading ask and an invalid confirmation each say what they are", () => {
+    const b = base.blockers[0]!;
+    const html = renderRunHealth(
+      {
+        ...base,
+        blockers: [
+          { ...b, kind: "loose", heading: "" },
+          {
+            ...b,
+            kind: "confirmation",
+            heading: "Consolidated Summary Confirmation",
+            invalidTags: 2,
+          },
+        ],
+      },
+      ko,
+    );
+    expect(html).toContain(ko.blockers.untitled);
+    expect(html).toContain(ko.blockers.loose);
+    expect(html).toContain(ko.blockers.invalidTags(2));
+    // The invalid one says why it is invalid, not just that it is a gate.
+    expect(html).toContain(ko.blockers.invalidTagsTip);
+  });
+
   test("an open gate with no question still counts as something awaiting you", () => {
     const m: DashboardModel = {
       ...base,

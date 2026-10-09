@@ -109,6 +109,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { StageStatus } from "./parser";
+import { visibleLines } from "./visible-lines";
 
 /** Where the decision an item was deferred to actually sits. */
 export type OwnerStatus =
@@ -269,7 +270,9 @@ function tidy(s: string): string {
  */
 export function parseDeferralSections(text: string): ParsedSection {
   const out: ParsedSection = { rows: [], assumptions: [], sections: 0, declaredNone: false };
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  // Visible lines only (scan/visible-lines.ts): a section quoted in a fence or left in
+  // a comment is not the engine's ledger. An unclosed block is read as text, as before.
+  const lines = visibleLines(text).lines;
 
   for (let i = 0; i < lines.length; i++) {
     const head = SECTION_RE.exec(lines[i] ?? "");

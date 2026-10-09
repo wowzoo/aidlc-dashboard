@@ -97,8 +97,11 @@ export interface Blocker {
   unit?: string;
   /** Question heading, e.g. "Q1 — Plan Approval". */
   heading: string;
-  /** `confirmation` for a gate heading with no `Q<n>` id — see scan/questions.ts. */
+  /** `confirmation` for a gate heading with no `Q<n>` id, `loose` for a blank tag
+   *  under no recognised heading — see scan/questions.ts. */
   kind: AskKind;
+  /** A summary confirmation holding this many tags — the engine reads no answer from it. */
+  invalidTags?: number;
   /** Record-relative path of the questions artifact. */
   rel: string;
   /** When the artifact was last written — how long the ask has been open. */
@@ -194,6 +197,8 @@ export type Warning =
       missingFromState: string[];
     }
   | { code: "harness-coexist"; harnesses: string[]; chosen: "kiro" | "claude" }
+  /** Questions files with a fence/comment/raw block never closed, read as text. */
+  | { code: "questions-unclosed-block"; files: string[] }
   | { code: "token-usage-failed"; detail: string }
   | { code: "credit-assembly-failed"; detail: string };
 

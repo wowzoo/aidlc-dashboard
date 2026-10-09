@@ -165,6 +165,7 @@ export interface WarnStrings {
     missingFromState: string[],
   ): string;
   harnessCoexist(harnesses: string[], chosen: "kiro" | "claude"): string;
+  questionsUnclosedBlock(files: string[]): string;
   tokenUsageFailed(detail: string): string;
   creditAssemblyFailed(detail: string): string;
 }
@@ -174,6 +175,14 @@ export interface BlockerStrings {
   readonly staleStage: string;
   readonly confirmation: string;
   readonly confirmationTip: string;
+  /** A blank tag under no heading the reader recognises — the run waits on it all the same. */
+  readonly loose: string;
+  readonly looseTip: string;
+  /** The heading slot of a `loose` tag that sits above every heading. */
+  readonly untitled: string;
+  /** A summary confirmation holding `tags` tags: the engine reads no answer from it. */
+  invalidTags(tags: number): string;
+  readonly invalidTagsTip: string;
   /** The path in a blocker row is a LINK now. It used to be plain text, so the one panel
    *  whose whole job is "something is waiting on you" named the file and left the reader
    *  to go find it. */
