@@ -105,7 +105,7 @@ export type WorkspaceSummary =
    *  sentences: `none` is an empty or absent space, `ambiguous` is several live records with
    *  no active-intent cursor, `archived` is only archived records — the split `NoRunError`
    *  carries (scan/resolve.ts). */
-  | { kind: "no-run"; reason: NoRunKind }
+  | { kind: "no-run"; reason: NoRunKind; archived?: number }
   /** The state file resolved and then could not be read. */
   | { kind: "unreadable" };
 
@@ -115,6 +115,8 @@ export type WorkspaceSummary =
  */
 export function readWorkspaceSummary(root: string): WorkspaceSummary {
   const resolved = resolveState(root);
+  if (resolved.kind === "archived")
+    return { kind: "no-run", reason: "archived", archived: resolved.count };
   if (resolved.kind !== "ok") return { kind: "no-run", reason: resolved.kind };
 
   const statePath = path.join(root, resolved.rel);

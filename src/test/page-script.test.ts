@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 /** Load the page with its script running and `fetch` answered by `body`. */
-async function load(body: () => string): Promise<Window> {
+async function load(body: () => string, bodyStatus = 200): Promise<Window> {
   const w = new Window({
     url: "http://127.0.0.1/",
     settings: {
@@ -46,7 +46,9 @@ async function load(body: () => string): Promise<Window> {
   const fetches: string[] = [];
   (w as unknown as { fetch: unknown }).fetch = async (url: string) => {
     fetches.push(url);
-    return new w.Response(url.startsWith("/api/body") ? body() : "{}", { status: 200 });
+    return url.startsWith("/api/body")
+      ? new w.Response(body(), { status: bodyStatus })
+      : new w.Response("{}", { status: 200 });
   };
   (w as unknown as { fetches: string[] }).fetches = fetches;
   // pollMs 0: no timer — the test drives the one refresh path through the button.
@@ -120,5 +122,33 @@ describe("poll swap in a real DOM", () => {
     expect(checked(w, "mc-health")).toBe("2");
     expect(checked(w, "mc-unresolved")).toBe("0");
     expect(checked(w, "mc-kpi")).toBe("0");
+  });
+});
+
+describe("a body that is gone reloads the page", () => {
+  /** Click reload and wait until the refresh settled one way or the other. */
+  async function settle(w: Window, reloaded: () => boolean): Promise<void> {
+    (w.document.getElementById("reload-btn") as unknown as { click(): void }).click();
+    const state = w.document.getElementById("poll-state");
+    for (let i = 0; i < 100 && !reloaded() && !state?.classList.contains("err"); i++) {
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  }
+
+  test("404 — the run is gone (e.g. its last intent archived): reload for the server's own page", async () => {
+    const w = await load(() => "<p>not found</p>", 404);
+    let reloads = 0;
+    Object.defineProperty(w.location, "reload", { value: () => reloads++, configurable: true });
+    await settle(w, () => reloads > 0);
+    expect(reloads).toBe(1);
+  });
+
+  test("500 — still a failed refresh, not a reload", async () => {
+    const w = await load(() => "boom", 500);
+    let reloads = 0;
+    Object.defineProperty(w.location, "reload", { value: () => reloads++, configurable: true });
+    await settle(w, () => reloads > 0);
+    expect(reloads).toBe(0);
+    expect(w.document.getElementById("poll-state")?.classList.contains("err")).toBe(true);
   });
 });

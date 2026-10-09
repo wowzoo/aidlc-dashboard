@@ -133,7 +133,8 @@ describe("archived-only, on every surface", () => {
   });
 
   test("the picker card carries the reason, not a blank 'no run'", () => {
-    expect(readWorkspaceSummary(root)).toEqual({ kind: "no-run", reason: "archived" });
+    expect(readWorkspaceSummary(root)).toEqual({ kind: "no-run", reason: "archived", archived: 1 });
+    expect(strings("ko").picker.summaryNoRunArchived("1")).toContain("1개");
   });
 });
 
@@ -182,5 +183,43 @@ describe("the state's Plan is said beside the scope", () => {
         ),
     );
     expect(renderBody(assemble(root), "ko")).toContain("계획: tailored plan");
+  });
+});
+
+describe("second-review regressions — malformed registry rows", () => {
+  test("a wrong-typed uuid cannot throw from resolution", () => {
+    // Before: `uuid.replace` on a number threw out of resolveState (a 500 page).
+    for (const record of ["demo-abcd1234", "demo-other"]) {
+      const root = workspace({
+        records: [record],
+        registry: [{ slug: "demo", uuid: 42, status: "archived" }],
+      });
+      expect(resolveState(root)).toEqual({ kind: "ok", rel: rel(record) });
+    }
+  });
+
+  test("identity cannot read a malformed dirName as absent when the resolver did not", () => {
+    const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-res-bad-"));
+    fs.cpSync(FIXTURE, root, { recursive: true });
+    const intents = path.join(root, "aidlc", "spaces", "default", "intents");
+    fs.renameSync(
+      path.join(intents, "260101-demo-migration"),
+      path.join(intents, "demo-migration-abcd1234"),
+    );
+    fs.writeFileSync(path.join(intents, "active-intent"), "demo-migration-abcd1234");
+    fs.writeFileSync(
+      path.join(intents, "intents.json"),
+      JSON.stringify([
+        {
+          slug: "demo-migration",
+          uuid: "019fa168-8d45-7aef-a383-0000abcd1234",
+          dirName: 42,
+          status: "archived",
+        },
+      ]),
+    );
+    expect(resolveState(root).kind).toBe("ok");
+    expect(assemble(root).identity.status).toBeUndefined();
   });
 });

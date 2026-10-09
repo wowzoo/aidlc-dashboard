@@ -131,12 +131,12 @@ function emptyCredit(window: TrendWindow, collecting = false): CreditViewModel {
 }
 
 /** The sentence for each no-run reason — the server and the terminal say the same thing. */
-export function noRunText(t: Strings["cli"], kind: NoRunKind, root: string): string {
+export function noRunText(t: Strings["cli"], kind: NoRunKind, root: string, archived = 0): string {
   switch (kind) {
     case "ambiguous":
       return t.intentAmbiguous(root);
     case "archived":
-      return t.intentArchived(root);
+      return t.intentArchived(root, archived);
     default:
       return t.noWorkflow(root);
   }
@@ -153,8 +153,10 @@ export class NoRunError extends Error {
   constructor(
     readonly kind: NoRunKind,
     readonly root: string,
+    /** How many archived records were set aside, for `archived`. */
+    readonly archived = 0,
   ) {
-    super(noRunText(strings(DEFAULT_LOCALE).cli, kind, root));
+    super(noRunText(strings(DEFAULT_LOCALE).cli, kind, root, archived));
     this.name = "NoRunError";
   }
 }
@@ -184,11 +186,9 @@ function readRegistry(
       const r = e as Record<string, unknown>;
       // The engine's join rule: a stored dirName, else the legacy `<slug>-<id8>` shape.
       if (typeof r.slug !== "string") continue;
-      const row = {
-        slug: r.slug,
-        uuid: typeof r.uuid === "string" ? r.uuid : undefined,
-        dirName: typeof r.dirName === "string" ? r.dirName : undefined,
-      };
+      // The raw values, as scan/resolve.ts sees them — coercing a wrong-typed dirName
+      // to "absent" let identity join a row the resolver had not.
+      const row = { slug: r.slug, uuid: r.uuid, dirName: r.dirName };
       if (!recordDirMatches(row, record)) continue;
       return {
         slug: typeof r.slug === "string" ? r.slug : undefined,
@@ -327,7 +327,9 @@ export function assemble(
   usageCtx?: UsageContext,
 ): DashboardModel {
   const resolved = resolveState(root);
-  if (resolved.kind !== "ok") throw new NoRunError(resolved.kind, root);
+  if (resolved.kind !== "ok") {
+    throw new NoRunError(resolved.kind, root, resolved.kind === "archived" ? resolved.count : 0);
+  }
 
   const now = isoNow();
   const warnings: Warning[] = [];

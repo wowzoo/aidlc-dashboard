@@ -696,6 +696,13 @@ const SCRIPT = (pollMs: number, s: Strings) => {
         if (!creditRes.ok && creditRes.status !== 503) throw new Error(creditRes.status);
       }
       var res = await fetch('/api/body' + window.location.search, { cache: 'no-store' });
+      // 404 means the run itself is gone (its last live intent archived, the record
+      // removed): reload so the server's own no-run page says why, instead of keeping
+      // the old run on screen under a generic "refresh failed".
+      if (res.status === 404) {
+        window.location.reload();
+        return;
+      }
       if (!res.ok) throw new Error(res.status);
       var html = await res.text();
       // Preserve which <details> the reader had open across the swap.

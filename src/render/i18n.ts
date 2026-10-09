@@ -649,7 +649,7 @@ export interface PickerStrings {
   readonly summaryBlockersLabel: string;
   readonly summaryNoRunNone: string;
   readonly summaryNoRunAmbiguous: string;
-  readonly summaryNoRunArchived: string;
+  summaryNoRunArchived(count: string): string;
   readonly summaryUnreadable: string;
   readonly summaryFailed: string;
   /** Names the source and its date — the card mixes two freshnesses, so neither is silent. */
@@ -805,8 +805,8 @@ export interface CliStrings {
   readonly harnessNotFound: string;
   startupSummary(audit: number, langDefault: string): string;
   intentAmbiguous(root: string): string;
-  /** Only archived intents, and no cursor naming one. */
-  intentArchived(root: string): string;
+  /** Only archived intents (`count` of them), and no cursor naming one. */
+  intentArchived(root: string, count: number): string;
   noWorkflow(root: string): string;
 }
 

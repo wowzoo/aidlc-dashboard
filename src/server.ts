@@ -127,11 +127,19 @@ function html(
  * different sentences (`NoRunError` keeps them apart for exactly that reason), and the
  * caller has no way to recover the distinction once it is flattened.
  */
-type RecordDirResult = { ok: true; recordDir: string } | { ok: false; kind: NoRunKind };
+type RecordDirResult =
+  | { ok: true; recordDir: string }
+  | { ok: false; kind: NoRunKind; archived: number };
 
 function activeRecordDir(root: string): RecordDirResult {
   const resolved = resolveState(root);
-  if (resolved.kind !== "ok") return { ok: false, kind: resolved.kind };
+  if (resolved.kind !== "ok") {
+    return {
+      ok: false,
+      kind: resolved.kind,
+      archived: resolved.kind === "archived" ? resolved.count : 0,
+    };
+  }
   return { ok: true, recordDir: path.dirname(path.join(root, resolved.rel)) };
 }
 
@@ -468,7 +476,7 @@ export async function handle(
         const rel = url.searchParams.get("rel");
         if (!rel) return json({ error: s.cli.needValue("rel") }, 400);
         const record = activeRecordDir(activeRoot);
-        if (!record.ok) throw new NoRunError(record.kind, activeRoot);
+        if (!record.ok) throw new NoRunError(record.kind, activeRoot, record.archived);
         const res = openArtifact(record.recordDir, rel, s);
         if (!res.ok)
           return json(
@@ -529,7 +537,7 @@ export async function handle(
         const rel = url.searchParams.get("rel");
         if (!rel) return html(errorPage(activeRoot, s.cli.needValue("rel"), locale), 400);
         const record = activeRecordDir(activeRoot);
-        if (!record.ok) throw new NoRunError(record.kind, activeRoot);
+        if (!record.ok) throw new NoRunError(record.kind, activeRoot, record.archived);
         const result = readArtifactSource(record.recordDir, rel);
         return html(
           renderViewPage(result, rel, locale),
@@ -557,7 +565,7 @@ export async function handle(
     if (err instanceof NoRunError) {
       // Re-said in the reader's language from the FACTS the error carries, not from its
       // own `message` — that one was built with the default catalogue for the terminal.
-      const said = noRunText(s.cli, err.kind, err.root);
+      const said = noRunText(s.cli, err.kind, err.root, err.archived);
       return html(errorPage(root, said, locale), 404);
     }
     const message = err instanceof Error ? err.message : String(err);

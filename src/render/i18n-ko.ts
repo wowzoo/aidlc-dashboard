@@ -615,7 +615,7 @@ const picker: PickerStrings = {
   summaryBlockersLabel: "병목",
   summaryNoRunNone: "실행 기록 없음",
   summaryNoRunAmbiguous: "인텐트 여러 개 · 활성 커서 없음",
-  summaryNoRunArchived: "보관된 인텐트만 있음",
+  summaryNoRunArchived: (count) => `보관된 인텐트 ${count}개뿐 · 활성 없음`,
   summaryUnreadable: "state.md 읽기 불가",
   summaryFailed: "조회 실패",
   summaryProgressTip: (done, total, asOf) =>
@@ -740,8 +740,8 @@ const cli: CliStrings = {
   harnessNotFound: "미검출",
   startupSummary: (audit, langDefault) => `audit ${audit}건 · lang ${langDefault} 기본`,
   intentAmbiguous: (root) => `intent 가 여럿인데 active-intent 커서 없음: ${root}`,
-  intentArchived: (root) =>
-    `보관(archived)된 intent 만 있음 — 엔진도 이를 활성 intent 로 고르지 않습니다. 새 작업을 시작하거나, 보관된 것을 보려면 active-intent 커서로 지정하세요: ${root}`,
+  intentArchived: (root, count) =>
+    `보관(archived)된 intent ${count}개만 있음 — 엔진도 이를 활성 intent 로 고르지 않습니다. 새 작업을 시작하거나, 보관된 것을 보려면 active-intent 커서로 지정하세요: ${root}`,
   noWorkflow: (root) => `AI-DLC 워크플로 미검출: ${root}`,
 };
 

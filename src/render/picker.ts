@@ -428,7 +428,7 @@ export function renderPicker(
   const summaryTextJson = JSON.stringify({
     noRunNone: t.summaryNoRunNone,
     noRunAmbiguous: t.summaryNoRunAmbiguous,
-    noRunArchived: t.summaryNoRunArchived,
+    noRunArchived: t.summaryNoRunArchived("{n}"),
     unreadable: t.summaryUnreadable,
     failed: t.summaryFailed,
     progressTip: t.summaryProgressTip("{done}", "{total}", "{asOf}"),
@@ -557,7 +557,7 @@ function fillSummary(slot, data) {
       data.reason === "ambiguous"
         ? SUMMARY_TEXT.noRunAmbiguous
         : data.reason === "archived"
-          ? SUMMARY_TEXT.noRunArchived
+          ? SUMMARY_TEXT.noRunArchived.replace("{n}", data.archived)
           : SUMMARY_TEXT.noRunNone;
     return;
   }

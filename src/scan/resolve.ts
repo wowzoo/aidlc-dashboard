@@ -7,24 +7,35 @@
 // and which one is "active" is decided by two cursors, not by globbing — a
 // workspace can hold several intents at once, so a glob would pick an arbitrary
 // (possibly wrong) workflow. The resolution rule here is a transcript of the
-// engine's own (2.11 aidlc-lib.ts `activeIntent` / `readActiveIntentCursor` /
-// `listIntentDirs` / `recordDirMatches`, aidlc-runtime-paths.ts `knownActiveSpace`),
-// so the panel resolves the SAME intent the engine considers active:
+// engine's `activeIntent` fallback (2.11 aidlc-lib.ts `activeIntent` /
+// `readActiveIntentCursor` / `listIntentDirs` / `recordDirMatches`,
+// aidlc-runtime-paths.ts `knownActiveSpace`).
+//
+// THAT IS THE FALLBACK, NOT EVERY SELECTION. The engine's `resolveWorkflowSelection`
+// first honours a delegated worktree, an explicit selector and the conversation's own
+// session binding (which can name another space, or `intent: null` with no fallback).
+// A workspace root does not say which conversation is asking, so this reader shows
+// the intent a conversation with none of those would get — the workspace's cursor
+// and records. Two conversations bound to different intents cannot both be shown
+// from a root alone. The rules:
 //
 //   1. The space is the `aidlc/active-space` cursor only when it is a valid space
 //      name (`^[a-z][a-z0-9-]*$`) naming a real `spaces/<name>/` dir; anything else
 //      is `default`. A cursor holding `../x` or a typo used to send the reader to a
 //      space that does not exist and report no run.
 //   2. An `active-intent` cursor naming a record that has a state file wins — even an
-//      archived one, which the engine then explains rather than guessing.
+//      archived one (the engine's `next` then reads `Status: Archived` and says how to
+//      unarchive; that explanation is the engine's, not this reader's).
 //   3. Otherwise ARCHIVED records never resolve implicitly. A space whose only record
 //      was archived has no active intent, and archived records do not make the live
 //      one ambiguous. This is the common case, not an edge: the cursor is gitignored,
 //      so a fresh clone never has one, and a reader that skipped this rule put the
 //      retired record on screen as the run. A record `intents.json` does not list has
 //      no status, so it stays live work.
-//   4. One live record wins; none → `archived` when archived records were set aside,
-//      else `none`; several → `ambiguous`.
+//   4. One live record wins; several → `ambiguous`. With none, `archived` (and how many
+//      were set aside) when archived records exist, else `none` — a distinction this
+//      reader adds: `activeIntent` returns null for both, and `intent list` is where the
+//      engine itself says "N archived".
 //
 // Node fs only — no vscode import — so it stays unit-testable headless. Never throws.
 
@@ -96,13 +107,13 @@ function listIntentDirs(intentsDir: string): string[] {
   return entries.filter((name) => hasState(path.join(intentsDir, name))).sort();
 }
 
-/** The fields of an `intents.json` row this reader uses. */
+/** The fields of an `intents.json` row this reader uses — as written, types unchecked. */
 export interface RegistryRow {
-  uuid: string;
+  uuid?: unknown;
   slug: string;
-  dirName?: string;
-  status?: string;
-  scope?: string;
+  dirName?: unknown;
+  status?: unknown;
+  scope?: unknown;
 }
 
 /** `intents.json`, or [] when absent or malformed — the engine's `readIntentRegistry`. */
@@ -127,14 +138,19 @@ export function readIntentRegistry(intentsDir: string): RegistryRow[] {
  * of the uuid's own hex digits.
  */
 export function recordDirMatches(
-  entry: { slug: string; uuid?: string; dirName?: string },
+  entry: { slug: string; uuid?: unknown; dirName?: unknown },
   dirName: string,
 ): boolean {
   if (entry.dirName) return entry.dirName === dirName;
   if (!dirName.startsWith(`${entry.slug}-`)) return false;
   const suffix = dirName.slice(entry.slug.length + 1);
-  const hex = (entry.uuid ?? "").replace(/-/g, "");
-  return /^[0-9a-f]+$/.test(suffix) && hex.slice(-suffix.length) === suffix;
+  // Wrong-typed fields are compared as they are, never coerced to "absent": the engine
+  // short-circuits on the hex test first, and a numeric uuid must not throw here.
+  return (
+    /^[0-9a-f]+$/.test(suffix) &&
+    typeof entry.uuid === "string" &&
+    entry.uuid.replace(/-/g, "").slice(-suffix.length) === suffix
+  );
 }
 
 /** `isArchivedIntent`: the status, trimmed and lowercased, is `archived`. */
