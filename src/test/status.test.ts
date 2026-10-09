@@ -121,6 +121,23 @@ describe("status — readings", () => {
     expect(st.checks).toEqual({ state: "passed", passed: 2 });
   });
 
+  // A blocking gate refuses a budget override like a failure.
+  test("a budget override alone never reads as passed", () => {
+    const st = buildStatus(
+      withSensorRow({
+        fired: 1,
+        passed: 0,
+        failed: 0,
+        superseded: 0,
+        budgetOverride: 1,
+        unevaluated: 0,
+        unverifiedStanding: 1,
+        pending: 0,
+      }),
+    );
+    expect(st.checks).toEqual({ state: "unverified", unverified: 1, passed: 0 });
+  });
+
   test("a failure a later verified pass retired is not a standing failure", () => {
     const st = buildStatus(
       withSensorRow({ fired: 2, passed: 1, failed: 1, superseded: 1, pending: 0 }),
@@ -128,7 +145,7 @@ describe("status — readings", () => {
     expect(st.checks).toEqual({ state: "passed", passed: 1 });
   });
 
-  test("a check that ran nothing is not a pass", () => {
+  test("a check without a verified result is not a pass", () => {
     const st = buildStatus(
       withSensorRow({
         fired: 2,
@@ -136,11 +153,11 @@ describe("status — readings", () => {
         failed: 0,
         superseded: 0,
         unevaluated: 1,
-        unevaluatedStanding: 1,
+        unverifiedStanding: 1,
         pending: 0,
       }),
     );
-    expect(st.checks).toEqual({ state: "unevaluated", unevaluated: 1, passed: 1 });
+    expect(st.checks).toEqual({ state: "unverified", unverified: 1, passed: 1 });
   });
 
   test("an open gate with no unanswered question is still something awaiting the human", () => {
@@ -192,18 +209,18 @@ describe("Run Health card — markup", () => {
     expect(html).toContain("검사 실패");
   });
 
-  test("a check that ran nothing says so in warning tone, never as passed", () => {
+  test("a check without a verified result says so in warning tone, never as passed", () => {
     const m = withSensorRow({
       fired: 1,
       passed: 0,
       failed: 0,
       superseded: 0,
       unevaluated: 1,
-      unevaluatedStanding: 1,
+      unverifiedStanding: 1,
       pending: 0,
     });
     const html = renderRunHealth({ ...m, sensors: { ...m.sensors, failures: [] } }, ko);
-    expect(html).toContain(ko.status.checksUnevaluated(1));
+    expect(html).toContain(ko.status.checksUnverified(1));
     expect(html).toContain('<b class="mc-n warn">?</b>');
     expect(html).not.toContain("검사 통과");
   });

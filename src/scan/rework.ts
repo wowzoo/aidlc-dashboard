@@ -21,14 +21,24 @@
 // last rejection the rework is still open: `settled` is false and the span is measured
 // to the stage's last event, which the screen marks provisional rather than dropping.
 //
-// "AFTER" IS LEDGER ORDER, NOT A LATER TIMESTAMP. The approve-time revision backstop
-// writes `GATE_REJECTED` (`Recovered: true`), `STAGE_REVISING` and the re-entered
+// "AFTER" MEANS DEFINITELY AFTER. The approve-time revision backstop writes
+// `GATE_REJECTED` (`Recovered: true`), `STAGE_REVISING` and the re-entered
 // `STAGE_AWAITING_APPROVAL` in the same second as the `GATE_APPROVED` that follows
-// (`tools/aidlc-state.ts approve`), so a strict `ts >` comparison left every backfilled
-// rejection unsettled for good.
+// (`tools/aidlc-state.ts approve`), so a strict `ts >` left every backfilled rejection
+// unsettled for good. Within one shard the append order decides; across shards only a
+// later second does, because the merged order of two clones' same-second rows is a
+// sort, not causality — the engine's `attemptEventDefinitelyBefore` reading.
 //
-// A UNIT GATE IS ITS OWN RECORD. Unit-end and team gate rows carry `Unit`; keyed by
-// stage alone, unit A's rejection was "settled" by unit B's approval.
+// AN APPROVAL SETTLES WHAT IT COVERS, which is not "the same stage". A rejection carrying
+// `Unit` is that unit's record (unit B's approval does not settle unit A), and an
+// approval covers it when its `Stage` or `Gate Stages` names the stage and its `Unit` —
+// or the swarm checkpoint's `Units` list (`tools/aidlc-swarm-checkpoints.ts`, one approval
+// for a batch the rejection wrote per unit) — names the unit. An approval with neither
+// is the stage's own gate and covers every unit: the late stage approval after a
+// `Reopen: change` under unit-major, and each stage an `Approves Together` reply
+// approved, which the engine writes as its own no-unit row. A unit-end checkpoint names
+// its last stage in `Stage` and all of them in `Gate Stages`, so an earlier stage's
+// rejection is covered there too.
 //
 // A REOPEN IS NOT A REJECTION. 2.11 writes `GATE_REJECTED` with `Reopen: jump|redo|change`
 // when the person re-enters a per-unit stage (`tools/aidlc-jump.ts`): `jump` is
@@ -86,16 +96,44 @@ const MAX_FEEDBACK = 6;
  * Build the rework report from a merged ledger. Pure over the events, so a test can
  * drive it from a synthetic list.
  */
+/** A `Gate Stages` / `Units` list, as the writers join it (`", "`). */
+function list(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+/** Does approval `a` settle a rejection recorded for `stage` (and `unit`, when set)? */
+function covers(a: AuditEvent, stage: string, unit: string | undefined): boolean {
+  if (a.stage !== stage && !list(a.fields["Gate Stages"]).includes(stage)) return false;
+  const own = a.fields.Unit || undefined;
+  const batch = list(a.fields.Units);
+  if (own === undefined && batch.length === 0) return true;
+  return unit !== undefined && (own === unit || batch.includes(unit));
+}
+
+/** Row `b` (index `j`) is definitely after row `a` (index `i`) — see the header. */
+function definitelyAfter(a: AuditEvent, i: number, b: AuditEvent, j: number): boolean {
+  return a.shard === b.shard ? j > i : b.ts > a.ts;
+}
+
+/**
+ * Build the rework report from a merged ledger. Pure over the events, so a test can
+ * drive it from a synthetic list.
+ */
 export function buildRework(ledger: AuditLedger): ReworkReport {
   const submissions = new Map<string, number>();
   const rejections = new Map<string, { at: string; index: number }[]>();
   const revisions = new Map<string, number>();
   const revisionHigh = new Map<string, number>();
-  const approvals = new Map<string, number[]>(); // key → approval ledger indices
+  const approvals: number[] = []; // ledger indices of every GATE_APPROVED
   const feedback = new Map<string, { at: string; text: string }[]>();
   const lastSeen = new Map<string, string>(); // key → last timestamp of any event
   const units = new Map<string, { stage: string; unit?: string }>();
   let reopened = 0;
+  const keyOf = (stage: string, unit: string | undefined): string =>
+    unit === undefined ? stage : `${stage}\0${unit}`;
   const bump = (m: Map<string, number>, k: string): void => {
     m.set(k, (m.get(k) ?? 0) + 1);
   };
@@ -116,16 +154,15 @@ export function buildRework(ledger: AuditLedger): ReworkReport {
     const stage = e.stage;
     if (!stage) return;
     const unit = e.fields.Unit || undefined;
-    const key = unit === undefined ? stage : `${stage}\0${unit}`;
+    const key = keyOf(stage, unit);
     if (!units.has(key)) units.set(key, { stage, unit });
-    lastSeen.set(key, e.ts);
-    if (unit !== undefined) lastSeen.set(stage, e.ts);
+    // An unsettled unit record is measured to that unit's last event, Context-attributed
+    // writes included — they carry no `Unit` field.
+    lastSeen.set(stage, e.ts);
+    if (unit ?? e.unit) lastSeen.set(keyOf(stage, unit ?? e.unit), e.ts);
     if (e.event === "STAGE_AWAITING_APPROVAL") bump(submissions, key);
-    else if (e.event === "GATE_APPROVED") {
-      const list = approvals.get(key);
-      if (list) list.push(index);
-      else approvals.set(key, [index]);
-    } else if (e.event === "GATE_REJECTED") {
+    else if (e.event === "GATE_APPROVED") approvals.push(index);
+    else if (e.event === "GATE_REJECTED") {
       const list = rejections.get(key);
       if (list) list.push({ at: e.ts, index });
       else rejections.set(key, [{ at: e.ts, index }]);
@@ -150,7 +187,11 @@ export function buildRework(ledger: AuditLedger): ReworkReport {
     const { stage, unit } = units.get(key)!;
     const first = rejected[0]!.at;
     const last = rejected[rejected.length - 1]!;
-    const after = (approvals.get(key) ?? []).filter((index) => index > last.index);
+    const lastRow = ledger.events[last.index]!;
+    const after = approvals.filter((index) => {
+      const a = ledger.events[index]!;
+      return covers(a, stage, unit) && definitelyAfter(lastRow, last.index, a, index);
+    });
     const settled = after.length > 0;
     const end = settled
       ? ledger.events[after[after.length - 1]!]!.ts

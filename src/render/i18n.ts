@@ -266,8 +266,8 @@ export interface StatusStrings {
   checksInFlight(pending: number): string;
   checksFailed(failed: number): string;
   checksPassed(passed: number): string;
-  checksUnevaluated(n: number): string;
-  readonly checksUnevaluatedTip: string;
+  checksUnverified(n: number): string;
+  readonly checksUnverifiedTip: string;
   /** Names the stage the checks are for — Current Stage, which can differ from the run line. */
   checksSource(stage: string): string;
   readonly checksFailedTip: string;

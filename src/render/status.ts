@@ -376,13 +376,13 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
       }
       count = { text: String(r.failed), tone: "bad" };
       break;
-    case "unevaluated":
+    case "unverified":
       rows.push({
-        label: esc(x.checksUnevaluated(r.unevaluated)),
+        label: esc(x.checksUnverified(r.unverified)),
         value: "",
         pct: 100,
         tone: "warn",
-        tip: x.checksUnevaluatedTip,
+        tip: x.checksUnverifiedTip,
       });
       count = { text: "?", tone: "warn" };
       break;

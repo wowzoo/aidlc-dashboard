@@ -67,6 +67,10 @@ describe("assemble on the fixture workspace", () => {
     const shards = new Set(m.recentEvents.map((e) => e.shard));
     expect(shards.size).toBe(2);
     expect(m.totalEvents).toBe(34); // 31 in the main shard + 3 in the second
+    // The fixture's review is a 2.11 pair (Request Id, Iteration, fingerprint): its five
+    // minutes are delegated, and the subagent row in between does not cut it short.
+    const cg = m.timing.stages.find((t) => t.stage === "code-generation");
+    expect(cg?.delegatedSec).toBe(300);
     // The second shard's events are later, so they sort last overall.
     expect(m.recentEvents[0]?.ts).toBe("2026-01-02T09:58:00Z");
   });

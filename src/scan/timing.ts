@@ -419,54 +419,77 @@ function secs(a: string, b: string): number {
  * WHAT PAIRS WITH WHAT is the engine's own correlation, because "the next close in the
  * shard" was not one. The 2.11.0 ledger has two delegations:
  *
- *   REVIEW_REQUESTED → REVIEW_COMPLETED   by `Request Id` — the completion must echo it
- *                                         (`completionCarriesVerifiedReview`). A retry
- *                                         re-sends the SAME id and a replacement mints a
- *                                         new one, so the window opens at the LAST request
- *                                         the completion answers: what ran before a retry
- *                                         is not known to have been the reviewer.
+ *   REVIEW_REQUESTED → REVIEW_COMPLETED
+ *     as `reviewAttemptAccounting` (`tools/aidlc-lib.ts`) pairs them: one pending request
+ *     per (Stage, Reviewer, Unit, Workflow, Iteration), each new request replacing it — a
+ *     retry re-sends the id, a replacement mints one — and a completion closes it only
+ *     when it answers THAT request: the same `Request Id`, or for a legacy request with
+ *     none, no id on the completion either; and `Request Fingerprint` (else `Artifact
+ *     Fingerprint`) equal to the request's `Artifact Fingerprint`, as
+ *     `reviewCompletionMatchesRequest` requires. So the window opens at the last request
+ *     the completion answers. Not transcribed: the verdict and review-record checks, which
+ *     decide whether the review COUNTS, not when it ran.
  *   MERGE_DISPATCH_INVOKED → _RETURNED | _FALLBACK
- *                                         by `Bolt slug`, the first unconsumed terminal at
- *                                         or after it — the doctor's pairing; the format
- *                                         documents no correlation tag.
+ *     by `Bolt slug` plus, on a pinned Unit merge, `Pinned OID` + `Attempt Generation` +
+ *     `Pin Transaction` — the identity `requireMergeDispatchDecision` (`tools/aidlc-unit.ts`)
+ *     matches on, taking the terminal after the LAST invocation. A row without the pin
+ *     fields pairs the doctor's way: first unconsumed terminal for the slug.
+ *
+ * Neither is limited to one shard — the engine's readers are not, and dropping a copied
+ * shard's duplicates (scan/audit.ts) can leave a request in the original file and its
+ * completion only in the copy.
  *
  * `SUBAGENT_COMPLETED` closed windows before this, and `SUBAGENT_DISPATCHED`, bare
  * `MERGE_DISPATCH` and `GATE_OPENED` were read as opens — none of the three exists in the
- * 2.11.0 engine, and a subagent completion carries no request it answers. On a run whose
- * Claude Code hook writes one per subagent, the first of them closed a review window
- * long before its `REVIEW_COMPLETED`.
- *
- * Same shard, as before: the reviewer writes in the clone that asked.
+ * 2.11.0 engine, and a subagent completion carries no request it answers. On run E the
+ * first of 227 such rows cut each review short: 0.40h delegated against 1.05h paired.
  */
 function delegationGaps(events: readonly AuditEvent[]): Set<number> {
   const marked = new Set<number>();
   const mark = (from: number, to: number): void => {
     for (let g = from; g < to; g++) marked.add(g);
   };
-  const reviews = new Map<string, number>(); // shard \0 request id → last request index
-  const merges = new Map<string, number[]>(); // shard \0 bolt slug → open invocations
+  const field = (e: AuditEvent, name: string): string => e.fields[name] ?? "";
+  const reviews = new Map<string, number>(); // review scope + iteration → pending request
+  const merges = new Map<string, number[]>(); // slug [+ pin identity] → open invocations
   events.forEach((e, i) => {
     if (e.event === "REVIEW_REQUESTED" || e.event === "REVIEW_COMPLETED") {
-      const id = e.fields["Request Id"];
-      if (!id) return;
-      const key = `${e.shard}\0${id}`;
-      if (e.event === "REVIEW_REQUESTED") reviews.set(key, i);
-      else {
-        const from = reviews.get(key);
-        if (from === undefined) return;
-        mark(from, i);
-        reviews.delete(key);
+      const iteration = field(e, "Iteration");
+      if (!/^[1-9][0-9]*$/.test(iteration)) return;
+      const key = ["Stage", "Reviewer", "Unit", "Workflow"].map((f) => field(e, f)).join("\0");
+      const scope = `${key}\0${iteration}`;
+      if (e.event === "REVIEW_REQUESTED") {
+        reviews.set(scope, i);
+        return;
       }
+      const from = reviews.get(scope);
+      if (from === undefined) return;
+      const request = events[from]!;
+      const requestId = request.fields["Request Id"];
+      const sameRequest =
+        requestId === undefined
+          ? e.fields["Request Id"] === undefined
+          : e.fields["Request Id"] === requestId;
+      const fingerprint = e.fields["Request Fingerprint"] ?? e.fields["Artifact Fingerprint"];
+      if (!sameRequest || fingerprint === undefined) return;
+      if (fingerprint !== request.fields["Artifact Fingerprint"]) return;
+      mark(from, i);
+      reviews.delete(scope);
     } else if (e.event === "MERGE_DISPATCH_INVOKED" || MERGE_DISPATCH_END.has(e.event)) {
-      const slug = e.fields["Bolt slug"];
+      const slug = field(e, "Bolt slug");
       if (!slug) return;
-      const key = `${e.shard}\0${slug}`;
+      const pin = ["Pinned OID", "Attempt Generation", "Pin Transaction"].map((f) => field(e, f));
+      const pinned = pin.every((v) => v !== "");
+      const key = pinned ? `${slug}\0${pin.join("\0")}` : slug;
       const open = merges.get(key) ?? [];
-      if (e.event === "MERGE_DISPATCH_INVOKED") merges.set(key, [...open, i]);
-      else {
-        const from = open.shift();
-        if (from !== undefined) mark(from, i);
+      if (e.event === "MERGE_DISPATCH_INVOKED") {
+        // A pinned merge reads the terminal after its LAST invocation, so a re-invocation
+        // replaces the open one; an unpinned one queues, as the doctor pairs them.
+        merges.set(key, pinned ? [i] : [...open, i]);
+        return;
       }
+      const from = open.shift();
+      if (from !== undefined) mark(from, i);
     }
   });
   return marked;

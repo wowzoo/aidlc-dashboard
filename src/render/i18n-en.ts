@@ -209,9 +209,9 @@ const status: StatusStrings = {
   checksFailed: (failed) => `✗ ${plural(failed, "check failure")} recorded`,
   checksPassed: (passed) => `✓ ${plural(passed, "check")} passed`,
   checksSource: (stage) => `sensors · ${stage} (Current Stage) · audit log`,
-  checksUnevaluated: (n) => `? ${plural(n, "check")} ran nothing`,
-  checksUnevaluatedTip:
-    "A pass carrying a Note (tool unavailable, script error): the sensor evaluated nothing, and a blocking gate refuses it like a failure. Not counted as passed",
+  checksUnverified: (n) => `? ${plural(n, "check")} without a verified result`,
+  checksUnverifiedTip:
+    "A pass carrying a Note (tool unavailable, script error, findings that could not be written) or a budget override, with no later verified pass of the same output. A blocking gate refuses both like a failure, so neither is counted as passed",
   checksFailedTip:
     "Sensor failures recorded in the current stage that no later verified pass of the same output has retired. The gate re-runs its sensors, so this is what was recorded, not a verdict ahead of it",
 };

@@ -204,6 +204,7 @@
 **Stage**: code-generation
 **Reviewer**: code-reviewer
 **Iteration**: 1
+**Artifact Fingerprint**: sha256:1111111111111111111111111111111111111111111111111111111111111111
 **Request Id**: review:0123456789abcdef0123456789abcdef
 
 ---
@@ -220,7 +221,10 @@
 **Event**: REVIEW_COMPLETED
 **Stage**: code-generation
 **Reviewer**: code-reviewer
-**Verdict**: approve
+**Iteration**: 1
+**Verdict**: READY
+**Request Fingerprint**: sha256:1111111111111111111111111111111111111111111111111111111111111111
+**Artifact Fingerprint**: sha256:1111111111111111111111111111111111111111111111111111111111111111
 **Request Id**: review:0123456789abcdef0123456789abcdef
 
 ---

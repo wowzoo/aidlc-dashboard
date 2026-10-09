@@ -37,20 +37,29 @@
 // recompiled at stage transitions, so for the in-flight stage — the one being
 // looked at — it is empty while audit already holds hundreds of firings.
 //
-// A PASS WITH A `Note` EVALUATED NOTHING. `tool-unavailable` or `script-error: …`
-// (`tools/aidlc-sensor.ts`) rides on `SENSOR_PASSED`, and `audit-format.md` says a
-// blocking gate refuses it like a failure. Counting it as a pass put a green "checks
-// passed" on a stage whose checker never ran, so it is its own count, `unevaluated`.
+// A PASS WITH A `Note` IS NOT A VERIFIED RESULT. `tool-unavailable` or
+// `script-error: …` rides on `SENSOR_PASSED` (`tools/aidlc-sensor.ts`) — including
+// `detail-write-failed`, a sensor that DID find something and could not write it down —
+// and `audit-format.md` says a blocking gate refuses it like a failure, as it refuses a
+// budget override. Counting it as a pass put a green "checks passed" on a stage with no
+// verified result, so it is its own count, `unevaluated`, and the card reads it (and a
+// standing budget override) as `unverifiedStanding`.
 //
-// A VERIFIED PASS RETIRES EARLIER FAILURES OF THE SAME OUTPUT. On a pass with no Note
-// the engine deletes that sensor's older detail files for the same output path in the
-// stage (`pruneSupersededDetailFiles`) — "without this the directory keeps showing a
-// failure that no longer exists". The audit keeps the failure row, so a reader that
-// stopped there showed the failure as current AND, its body now gone, as "recorded on
-// another clone". A failure followed by such a pass is `supersededAt` instead. The
-// engine compares realpaths; a reader of a copied tree compares the recorded spelling
-// (separators normalised), so a second spelling of one output keeps the failure shown,
-// which is the side to err on.
+// A VERIFIED PASS CAN RETIRE AN EARLIER FAILURE — and the detail file says whether it
+// did. On a pass with no Note the engine deletes that sensor's detail files for the same
+// output in the stage that were last written BEFORE the pass started
+// (`pruneSupersededDetailFiles`, cutoff `startedAt`). The audit keeps the failure row, so
+// a reader that stopped there showed a retired failure as current and, body gone, as
+// "recorded on another clone" — 2 of run E's 3 failures, on a single-clone run. So a
+// failure is `supersededAt` only when all of these hold:
+//   - its body is ABSENT — a body still on disk is a failure the engine still shows
+//     (a pass that ran while it was being written keeps it, and the prune is best-effort);
+//   - a verified pass of the same (stage, sensor id, output) in the SAME shard — the clone
+//     whose detail dir that pass pruned — STARTED after it: its `SENSOR_FIRED` row comes
+//     after the failure's terminal row, which is after the failure's file was written;
+//   - and the time given is the FIRST such pass, the one that deleted it.
+// Outputs compare by recorded spelling (separators normalised) where the engine compares
+// realpaths, so a second spelling of one output keeps the failure shown.
 //
 // Node fs only, never throws.
 
@@ -85,8 +94,8 @@ export interface SensorFailure {
   /** Detail-file basename, or undefined when no body was found on disk. */
   detailFile?: string;
   /**
-   * When a later verified pass of the same sensor on the same output in the same stage
-   * retired this failure — the pass that made the engine delete its detail file.
+   * The verified pass that retired this failure and deleted its detail file — see the
+   * header for the three conditions. Never set while the body is still on disk.
    */
   supersededAt?: string;
 }
@@ -99,8 +108,11 @@ export interface SensorStageSummary {
   passed: number;
   /** `SENSOR_PASSED` with a `Note`: the sensor ran nothing (tool missing, script error). */
   unevaluated: number;
-  /** Of `unevaluated`, those no later verified pass of the same output answered. */
-  unevaluatedStanding: number;
+  /**
+   * Noted passes and budget overrides that no later verified pass of the same output in
+   * the same shard answered — what the gate would refuse, as last recorded.
+   */
+  unverifiedStanding: number;
   failed: number;
   /** Failures a later verified pass retired; a subset of `failed`. */
   superseded: number;
@@ -274,7 +286,7 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
         fired: 0,
         passed: 0,
         unevaluated: 0,
-        unevaluatedStanding: 0,
+        unverifiedStanding: 0,
         failed: 0,
         superseded: 0,
         budgetOverride: 0,
@@ -287,29 +299,40 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
   };
 
   // Terminal events per fire id, so a FIRED with no terminal counts as pending. A
-  // noted pass is told apart here, and each output's LAST verified pass is kept for the
-  // failures it retires.
+  // noted pass is told apart here; every verified pass is kept, with the index of the
+  // `SENSOR_FIRED` row that started it, for the failures it may have retired.
   const terminal = new Map<string, string>();
-  const lastVerifiedPass = new Map<string, { index: number; ts: string }>();
-  const notedPasses: { index: number; stage: string; key?: string }[] = [];
+  const firedAt = new Map<string, number>(); // fire id → index of its SENSOR_FIRED
+  const verified: { start: number; ts: string; shard: string; key: string }[] = [];
+  const unverified: { index: number; shard: string; stage: string; key?: string }[] = [];
   ledger.events.forEach((e, index) => {
+    const fid = e.fields["Fire id"];
+    if (e.event === "SENSOR_FIRED") {
+      if (fid && !firedAt.has(fid)) firedAt.set(fid, index);
+      return;
+    }
     if (
-      e.event === "SENSOR_PASSED" ||
-      e.event === "SENSOR_FAILED" ||
-      e.event === "SENSOR_BUDGET_OVERRIDE"
+      e.event !== "SENSOR_PASSED" &&
+      e.event !== "SENSOR_FAILED" &&
+      e.event !== "SENSOR_BUDGET_OVERRIDE"
     ) {
-      const noted = e.event === "SENSOR_PASSED" && Object.hasOwn(e.fields, "Note");
-      const fid = e.fields["Fire id"];
-      if (fid) terminal.set(fid, noted ? "SENSOR_PASSED+Note" : e.event);
-      const key = e.event === "SENSOR_PASSED" ? outputKey(e) : undefined;
-      if (noted) notedPasses.push({ index, stage: e.stage ?? "(unattributed)", key });
-      else if (key) lastVerifiedPass.set(key, { index, ts: e.ts });
+      return;
+    }
+    const noted = e.event === "SENSOR_PASSED" && Object.hasOwn(e.fields, "Note");
+    if (fid) terminal.set(fid, noted ? "SENSOR_PASSED+Note" : e.event);
+    const key = outputKey(e);
+    if (noted || e.event === "SENSOR_BUDGET_OVERRIDE") {
+      unverified.push({ index, shard: e.shard, stage: e.stage ?? "(unattributed)", key });
+    } else if (e.event === "SENSOR_PASSED" && key) {
+      const start = fid ? firedAt.get(fid) : undefined;
+      if (start !== undefined) verified.push({ start, ts: e.ts, shard: e.shard, key });
     }
   });
-  const answered = (key: string | undefined, index: number): string | undefined => {
-    const pass = key ? lastVerifiedPass.get(key) : undefined;
-    return pass && pass.index > index ? pass.ts : undefined;
-  };
+  /** The first verified pass of `key` in `shard` that started after ledger row `index`. */
+  const retiredBy = (key: string | undefined, shard: string, index: number): string | undefined =>
+    key === undefined
+      ? undefined
+      : verified.find((p) => p.key === key && p.shard === shard && p.start > index)?.ts;
 
   const failures: SensorFailure[] = [];
   for (const [index, e] of ledger.events.entries()) {
@@ -333,7 +356,7 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
     const fireId = e.fields["Fire id"] ?? "";
     const body = fireId ? bodies.get(fireId) : undefined;
     if (body) claimed.add(fireId);
-    const supersededAt = answered(outputKey(e), index);
+    const supersededAt = body ? undefined : retiredBy(outputKey(e), e.shard, index);
     if (supersededAt) stageOf(e.stage ?? body?.stage ?? "(unattributed)").superseded++;
     const countRaw = e.fields["Findings count"];
     failures.push({
@@ -352,8 +375,9 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
   }
 
   failures.reverse(); // ledger is ascending; failures read newest-first
-  for (const p of notedPasses)
-    if (!answered(p.key, p.index)) stageOf(p.stage).unevaluatedStanding++;
+  for (const u of unverified) {
+    if (!retiredBy(u.key, u.shard, u.index)) stageOf(u.stage).unverifiedStanding++;
+  }
 
   const stages = [...perStage.values()];
   return {

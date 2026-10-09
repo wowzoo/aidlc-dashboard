@@ -87,8 +87,11 @@ export type ChecksReading =
    * now": the engine re-fires sensors live at the gate, which no record shows ahead.
    */
   | { state: "failed"; failed: number; passed: number }
-  /** No standing failure, but a sensor ran nothing — a pass carrying a `Note`. */
-  | { state: "unevaluated"; unevaluated: number; passed: number }
+  /**
+   * No standing failure, but no verified result either: a pass carrying a `Note`, or a
+   * budget override, that no later verified pass answered. A blocking gate refuses both.
+   */
+  | { state: "unverified"; unverified: number; passed: number }
   | { state: "passed"; passed: number };
 
 export interface StatusStrip {
@@ -161,8 +164,8 @@ function readChecks(m: StatusInput): ChecksReading {
     return { state: "in-flight", pending: row.pending, failed, passed: row.passed };
   }
   if (failed > 0) return { state: "failed", failed, passed: row.passed };
-  if (row.unevaluatedStanding > 0) {
-    return { state: "unevaluated", unevaluated: row.unevaluatedStanding, passed: row.passed };
+  if (row.unverifiedStanding > 0) {
+    return { state: "unverified", unverified: row.unverifiedStanding, passed: row.passed };
   }
   return { state: "passed", passed: row.passed };
 }

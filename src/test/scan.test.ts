@@ -1472,7 +1472,7 @@ describe("sensor detail", () => {
       shards: ["s.md"],
     });
 
-  // A noted pass ran nothing; the gate refuses it like a failure.
+  // A noted pass has no verified result; the gate refuses it like a failure.
   test("a pass carrying a Note is unevaluated, not passed", () => {
     const r = report([
       sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
@@ -1484,14 +1484,23 @@ describe("sensor detail", () => {
     expect(st.passed).toBe(1);
     expect(st.unevaluated).toBe(1);
     // The verified pass of the same output came later, so nothing is left standing.
-    expect(st.unevaluatedStanding).toBe(0);
+    expect(st.unverifiedStanding).toBe(0);
     expect(r.totalPassed).toBe(1);
     expect(r.totalUnevaluated).toBe(1);
   });
 
+  test("a budget override with no later verified pass stands as unverified", () => {
+    const r = report([
+      sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
+      sensorEv("2026-01-01T00:00:01Z", "SENSOR_BUDGET_OVERRIDE", "f1"),
+    ]);
+    expect(r.stages[0]?.budgetOverride).toBe(1);
+    expect(r.stages[0]?.unverifiedStanding).toBe(1);
+  });
+
   // The engine deletes the failure's detail file on that pass; the body is gone on
   // purpose, so it is neither "on another clone" nor a standing failure.
-  test("a later verified pass of the same output retires a failure; a noted one does not", () => {
+  test("a verified pass started after a body-less failure retires it; a noted one does not", () => {
     const r = report([
       sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
       sensorEv("2026-01-01T00:00:01Z", "SENSOR_FAILED", "f1"),
@@ -1504,6 +1513,9 @@ describe("sensor detail", () => {
         "Output path": "/w/src/b.ts",
         Note: "script-error: exit-2",
       }),
+      // A second verified pass: the time given is the first, the one that deleted it.
+      sensorEv("2026-01-01T00:00:08Z", "SENSOR_FIRED", "f5"),
+      sensorEv("2026-01-01T00:00:09Z", "SENSOR_PASSED", "f5"),
     ]);
     const a = r.failures.find((f) => f.fireId === "f1")!;
     const b = r.failures.find((f) => f.fireId === "f2")!;
@@ -1511,6 +1523,56 @@ describe("sensor detail", () => {
     expect(b.supersededAt).toBeUndefined();
     expect(r.stages[0]?.superseded).toBe(1);
     expect(r.failuresWithoutBody).toBe(1); // b only
+  });
+
+  // The prune's cutoff is the pass's START: a failure written while that pass ran keeps
+  // its file, so the engine still shows it.
+  test("a pass that started before the failure was recorded does not retire it", () => {
+    const r = report([
+      sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
+      sensorEv("2026-01-01T00:00:01Z", "SENSOR_FIRED", "f2"),
+      sensorEv("2026-01-01T00:00:02Z", "SENSOR_FAILED", "f1"),
+      sensorEv("2026-01-01T00:00:03Z", "SENSOR_PASSED", "f2"),
+    ]);
+    expect(r.failures[0]?.supersededAt).toBeUndefined();
+    expect(r.stages[0]?.superseded).toBe(0);
+  });
+
+  // A pass prunes its own clone's detail dir; another clone's pass deletes nothing here.
+  test("a pass in another shard does not retire a failure", () => {
+    const r = report([
+      sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
+      sensorEv("2026-01-01T00:00:01Z", "SENSOR_FAILED", "f1"),
+      { ...sensorEv("2026-01-01T00:00:02Z", "SENSOR_FIRED", "f2"), shard: "other.md" },
+      { ...sensorEv("2026-01-01T00:00:03Z", "SENSOR_PASSED", "f2"), shard: "other.md" },
+    ]);
+    expect(r.failures[0]?.supersededAt).toBeUndefined();
+  });
+
+  test("a failure whose body is still on disk is never called retired", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-sens-kept-"));
+    try {
+      const stageDir = path.join(dir, ".aidlc-engine", "sensors", "code-generation");
+      fs.mkdirSync(stageDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(stageDir, "type-check-f1.md"),
+        "**Fire id**: f1\n**Pass**: false\n**Output path**: /w/src/a.ts\n",
+      );
+      const r = readSensorReport(dir, {
+        events: [
+          sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
+          sensorEv("2026-01-01T00:00:01Z", "SENSOR_FAILED", "f1"),
+          sensorEv("2026-01-01T00:00:02Z", "SENSOR_FIRED", "f2"),
+          sensorEv("2026-01-01T00:00:03Z", "SENSOR_PASSED", "f2"),
+        ],
+        counts: new Map(),
+        shards: ["s.md"],
+      });
+      expect(r.failures[0]?.detailFile).toBe("type-check-f1.md");
+      expect(r.failures[0]?.supersededAt).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1595,6 +1657,24 @@ describe("gap classification", () => {
     fields,
     shard: "s",
   });
+  // A 2.11 review pair: one scope, one iteration, the completion echoing the request.
+  const review = { Stage: "cg", Reviewer: "code-reviewer", Iteration: "1" };
+  const req = (ts: string, id: string | undefined, extra: Record<string, string> = {}) =>
+    evf(ts, "REVIEW_REQUESTED", {
+      ...review,
+      "Artifact Fingerprint": "fp-1",
+      ...(id ? { "Request Id": id } : {}),
+      ...extra,
+    });
+  const done = (ts: string, id: string | undefined, extra: Record<string, string> = {}) =>
+    evf(ts, "REVIEW_COMPLETED", {
+      ...review,
+      Verdict: "READY",
+      "Request Fingerprint": "fp-1",
+      "Artifact Fingerprint": "fp-1",
+      ...(id ? { "Request Id": id } : {}),
+      ...extra,
+    });
 
   test("gate → HUMAN_TURN is IDLE", () => {
     const g = classifyGaps([
@@ -1680,8 +1760,8 @@ describe("gap classification", () => {
 
   test("delegation counts as AGENT and inside WORK", () => {
     const g = classifyGaps([
-      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
-      evf("2026-01-01T00:10:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
+      req("2026-01-01T00:00:00Z", "review:a"),
+      done("2026-01-01T00:10:00Z", "review:a"),
     ]);
     expect(g.agentSec).toBe(600);
     expect(g.workSec).toBe(600);
@@ -1794,10 +1874,10 @@ describe("gap classification", () => {
   // closed on `ARTIFACT_UPDATED`, so an adjacency test saw 0.31h of a real 14.4h.
   test("delegation spans the whole open→close window, not just the adjacent pair", () => {
     const g = classifyGaps([
-      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      req("2026-01-01T00:00:00Z", "review:a"),
       ev("2026-01-01T00:20:00Z", "ARTIFACT_UPDATED"),
       ev("2026-01-01T00:40:00Z", "ARTIFACT_UPDATED"),
-      evf("2026-01-01T01:00:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
+      done("2026-01-01T01:00:00Z", "review:a"),
       // After the close, an equally long gap is NOT delegation.
       ev("2026-01-01T01:20:00Z", "ARTIFACT_UPDATED"),
     ]);
@@ -1810,10 +1890,10 @@ describe("gap classification", () => {
   // request it answers; closing on the first one cut a review window to its first minute.
   test("a subagent completion does not close a review: only its own Request Id does", () => {
     const g = classifyGaps([
-      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      req("2026-01-01T00:00:00Z", "review:a"),
       ev("2026-01-01T00:01:00Z", "SUBAGENT_COMPLETED"),
-      evf("2026-01-01T00:20:00Z", "REVIEW_COMPLETED", { "Request Id": "review:other" }),
-      evf("2026-01-01T00:40:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
+      done("2026-01-01T00:20:00Z", "review:other"),
+      done("2026-01-01T00:40:00Z", "review:a"),
     ]);
     expect(g.delegatedSec).toBe(2400);
     expect(g.unknownSec).toBe(0);
@@ -1821,15 +1901,69 @@ describe("gap classification", () => {
 
   test("a retried request opens the window at the last request its completion answers", () => {
     const g = classifyGaps([
-      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      req("2026-01-01T00:00:00Z", "review:a"),
       ev("2026-01-01T00:30:00Z", "SESSION_STARTED"),
-      evf("2026-01-01T00:31:00Z", "REVIEW_REQUESTED", {
-        "Request Id": "review:a",
-        Retry: "pending-request",
-      }),
-      evf("2026-01-01T00:41:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
+      req("2026-01-01T00:31:00Z", "review:a", { Retry: "pending-request" }),
+      done("2026-01-01T00:41:00Z", "review:a"),
     ]);
     expect(g.delegatedSec).toBe(600);
+  });
+
+  // A replacement takes the iteration's pass: the replaced id's late completion answers
+  // nothing, as `reviewAttemptAccounting` keeps one pending request per iteration.
+  test("a replaced request's late completion closes nothing", () => {
+    const g = classifyGaps([
+      req("2026-01-01T00:00:00Z", "review:a"),
+      req("2026-01-01T00:02:00Z", "review:b", { "Replaces Request Id": "review:a" }),
+      done("2026-01-01T00:20:00Z", "review:a"),
+      done("2026-01-01T00:40:00Z", "review:b"),
+    ]);
+    expect(g.delegatedSec).toBe(38 * 60);
+  });
+
+  // Dropping a copied shard's duplicates can leave the request in the original file and
+  // its completion only in the copy; the engine's matcher has no shard limit.
+  test("a review pairs across shards", () => {
+    const g = classifyGaps([
+      req("2026-01-01T00:00:00Z", "review:a"),
+      { ...done("2026-01-01T00:10:00Z", "review:a"), shard: "copy" },
+    ]);
+    expect(g.delegatedSec).toBe(600);
+  });
+
+  test("a legacy request with no id pairs with an id-less completion of its fingerprint", () => {
+    const g = classifyGaps([
+      req("2026-01-01T00:00:00Z", undefined),
+      done("2026-01-01T00:05:00Z", undefined, { "Request Fingerprint": "fp-other" }),
+      done("2026-01-01T00:10:00Z", undefined),
+    ]);
+    expect(g.delegatedSec).toBe(600);
+  });
+
+  test("another reviewer's or iteration's completion does not close the request", () => {
+    const g = classifyGaps([
+      req("2026-01-01T00:00:00Z", "review:a"),
+      done("2026-01-01T00:10:00Z", "review:a", { Reviewer: "security-reviewer" }),
+      done("2026-01-01T00:20:00Z", "review:a", { Iteration: "2" }),
+    ]);
+    expect(g.delegatedSec).toBe(0);
+  });
+
+  // A pinned Unit merge is read by its pin identity (`requireMergeDispatchDecision`),
+  // so a terminal for pin B cannot close pin A's invocation.
+  test("a pinned merge terminal pairs only with its own pin", () => {
+    const pin = (id: string) => ({
+      "Bolt slug": "u1",
+      "Pinned OID": "f".repeat(40),
+      "Attempt Generation": "1",
+      "Pin Transaction": id,
+    });
+    const g = classifyGaps([
+      evf("2026-01-01T00:00:00Z", "MERGE_DISPATCH_INVOKED", pin("pin-a")),
+      evf("2026-01-01T00:10:00Z", "MERGE_DISPATCH_INVOKED", pin("pin-b")),
+      evf("2026-01-01T00:15:00Z", "MERGE_DISPATCH_RETURNED", pin("pin-b")),
+    ]);
+    expect(g.delegatedSec).toBe(300);
   });
 
   test("merge dispatch pairs by Bolt slug with the first terminal after it", () => {
@@ -1866,7 +2000,7 @@ describe("gap classification", () => {
 
   test("an unclosed delegation marks nothing, so a dangling open cannot swallow the run", () => {
     const g = classifyGaps([
-      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      req("2026-01-01T00:00:00Z", "review:a"),
       ev("2026-01-01T00:20:00Z", "ARTIFACT_UPDATED"),
       ev("2026-01-01T00:40:00Z", "ARTIFACT_UPDATED"),
     ]);
@@ -2251,6 +2385,58 @@ describe("rework", () => {
     expect(r.stages[0]?.unit).toBe("A");
     expect(r.stages[0]?.settled).toBe(false);
     expect(r.stages[0]?.reworkSec).toBe(7200);
+  });
+
+  // The swarm writes one rejection per unit and ONE approval naming the batch.
+  test("a swarm batch approval settles each unit its Units list names", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "cg", { Unit: "A", Units: "A, B" }),
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "cg", { Unit: "B", Units: "A, B" }),
+        at("2026-01-01T01:00:00Z", "GATE_APPROVED", "cg", { Units: "A, B", "Batch number": "1" }),
+      ]),
+    );
+    expect(r.stages.map((st) => [st.unit, st.settled])).toEqual([
+      ["A", true],
+      ["B", true],
+    ]);
+  });
+
+  test("the stage's own approval settles a unit's Request Changes reopen", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "fd", { Unit: "A", Reopen: "change" }),
+        at("2026-01-01T02:00:00Z", "GATE_APPROVED", "fd"),
+      ]),
+    );
+    expect(r.stages[0]?.settled).toBe(true);
+    expect(r.stages[0]?.reworkSec).toBe(7200);
+  });
+
+  // A unit-end checkpoint names its last stage in Stage and every stage in Gate Stages.
+  test("a checkpoint approval covers each stage its Gate Stages names", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "fd", { Unit: "A", Reopen: "change" }),
+        at("2026-01-01T01:00:00Z", "GATE_APPROVED", "cg", {
+          Unit: "A",
+          "Gate Stages": "fd, cg",
+          "Gate Scope": "unit-end",
+        }),
+      ]),
+    );
+    expect(r.stages[0]?.settled).toBe(true);
+  });
+
+  // Two clones' same-second rows are ordered by a sort, not by causality.
+  test("another shard's approval in the same second does not prove settlement", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "x"),
+        { ...at("2026-01-01T00:00:00Z", "GATE_APPROVED", "x"), shard: "z.md" },
+      ]),
+    );
+    expect(r.stages[0]?.settled).toBe(false);
   });
 
   test("a reopen on request is not a rejection; a Request Changes reopen is", () => {

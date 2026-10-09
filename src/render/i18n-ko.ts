@@ -197,9 +197,9 @@ const status: StatusStrings = {
   checksFailed: (failed) => `✗ 검사 실패 ${failed}건 기록`,
   checksPassed: (passed) => `✓ 검사 통과 ${passed}건`,
   checksSource: (stage) => `sensor · ${stage} (Current Stage) · 감사 로그`,
-  checksUnevaluated: (n) => `? 아무것도 검사하지 못한 검사 ${n}건`,
-  checksUnevaluatedTip:
-    "Note 가 붙은 통과(도구 없음, 스크립트 오류)입니다. sensor 가 아무것도 평가하지 않았고, 차단 관문은 이를 실패처럼 거부합니다. 통과로 세지 않습니다",
+  checksUnverified: (n) => `? 검증된 결과가 없는 검사 ${n}건`,
+  checksUnverifiedTip:
+    "Note 가 붙은 통과(도구 없음, 스크립트 오류, 결과를 기록하지 못함) 또는 예산 초과 처리로, 이후 같은 출력에 대한 검증된 통과가 없는 것입니다. 차단 관문은 둘 다 실패처럼 거부하므로 통과로 세지 않습니다",
   checksFailedTip:
     "현재 stage 에서 기록된 sensor 실패 중, 같은 출력에 대한 이후의 검증된 통과로 해소되지 않은 것입니다. 관문은 sensor 를 다시 실행하므로, 관문의 판정을 미리 말하는 것이 아니라 기록된 내용입니다",
 };
