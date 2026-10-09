@@ -450,6 +450,9 @@ describe("waits", () => {
       events,
       questions,
       checkoutParkFile: false,
+      hookHeartbeats: [],
+      marks: {},
+      now: "2026-10-09T12:00:00Z",
     });
 
   test("the gate is the state row's claim; the audit only says since when", () => {
@@ -620,6 +623,9 @@ describe("second-review regressions", () => {
       events: [],
       questions: empty,
       checkoutParkFile: false,
+      hookHeartbeats: [],
+      marks: {},
+      now: "2026-10-09T12:00:00Z",
       ...extra,
     });
   const ROW = "- [-] code-generation — EXECUTE";

@@ -181,6 +181,25 @@ const status: StatusStrings = {
   humanCheckoutPark: "Unit park marker in this checkout — applicability unverified",
   humanCheckoutParkTip:
     "aidlc/.aidlc-unit-parked exists. Whether it applies to the intent shown is decided by a scope stamp this dashboard does not check, so it is not counted",
+  humanDecision: (checkpoint, decision) =>
+    `Decision pending — ${[checkpoint, decision].filter(Boolean).join(": ") || "unnamed decision"}`,
+  humanDecisionSource: "audit log · DECISION_RECORDED",
+  humanDecisionTip:
+    "A decision opened through the audit log rather than a questions file (a learnings selection, anything to add, a unit or batch approval). The engine waits for your answer until a receipt closes it",
+  humanCompose: "Compose proposal awaiting approval",
+  humanComposeTip:
+    "aidlc/.aidlc-compose-pending was updated within the last 24 hours. The run continues once you approve, edit or reject the proposed composition",
+  humanTurnEnded: "The engine ended its turn — the next message is yours",
+  humanTurnEndedTip:
+    "The engine's last directive was a question or a stopping print (.aidlc-engine/turn-end is newer than human-turn). A question to answer shows as the engine-question row above; this row is not counted",
+  humanHooksStale: (hb, ev) =>
+    `⚠ Hooks look stopped — last fired ${hb} ago, last stage/gate record ${ev} ago`,
+  humanHooksNever: "⚠ No hook has fired — but stage/gate records exist",
+  humanHooksTip:
+    "The newest hook heartbeat is more than five minutes behind the newest STAGE_/GATE_ record (the engine's hookLiveness comparison). 2.11 refuses a plan approval in this state; check the harness's hook registration",
+  humanAutonomous: "Autonomous mode — questions and decisions do not hold the run",
+  humanAutonomousTip:
+    "Construction Autonomy Mode is autonomous. Only a unit-major plan approval stops the run; other questions, decisions and compose proposals let it keep going",
   humanEngineOnly: (file) => `Blank tag only the engine waits on · ${file}`,
   humanEngineOnlyTip:
     "The stop hook lets the turn end when the raw text of the running stage's questions file holds a blank [Answer]:. This dashboard reads that spot as answered (an example in a code block, a placeholder answered in another section), so it is not counted — but the engine may stop here",

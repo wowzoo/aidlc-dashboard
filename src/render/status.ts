@@ -156,6 +156,24 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
       tip: x.humanEngineAskTip,
     });
   }
+  if (w?.decision) {
+    rows.push({
+      label: `${esc(x.humanDecision(w.decision.checkpoint, w.decision.decision))}${sub(x.humanDecisionSource)}`,
+      value: age(w.decision.since),
+      pct: 100,
+      tone: "warn",
+      tip: x.humanDecisionTip,
+    });
+  }
+  if (w?.compose) {
+    rows.push({
+      label: esc(x.humanCompose),
+      value: age(w.compose.since),
+      pct: 100,
+      tone: "warn",
+      tip: x.humanComposeTip,
+    });
+  }
   if (h?.awaitingGate) {
     rows.push({
       label: `${esc(x.humanGate(h.awaitingGate))}${sub(x.humanGateSource)}`,
@@ -203,13 +221,42 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
       tip: x.humanEngineOnlyTip,
     });
   }
+  if (w?.turnEnded && !w.engineAsk) {
+    rows.push({ label: esc(x.humanTurnEnded), value: "", tone: "none", tip: x.humanTurnEndedTip });
+  }
+  if (w?.hooks.state === "stale" || w?.hooks.state === "never") {
+    rows.push({
+      label: esc(
+        w.hooks.state === "stale"
+          ? x.humanHooksStale(age(w.hooks.heartbeat), age(w.hooks.event))
+          : x.humanHooksNever,
+      ),
+      value: "",
+      tone: "warn",
+      tip: x.humanHooksTip,
+    });
+  }
+  if (w?.autonomous) {
+    rows.push({
+      label: esc(x.humanAutonomous),
+      value: "",
+      tone: "none",
+      tip: x.humanAutonomousTip,
+    });
+  }
   // An open gate is usually answered IN the current-stage questions file, so adding it
   // to their count would report one approval twice. It counts on its own only when no
-  // current ask carries it — the same rule the status chip used. A park, a paused unit
-  // and an engine ask each hold the run on their own and count once each; revising
-  // and engine-only rows are shown, not counted (see model/waits.ts).
+  // current ask carries it — the same rule the status chip used. A park, a paused unit,
+  // an engine ask, an open decision and a compose gate each hold the run on their own
+  // and count once each; revising, engine-only, turn-ended, hook and autonomy rows are
+  // shown, not counted (see model/waits.ts).
   const current = h?.current ?? 0;
-  const holds = (w?.parked ? 1 : 0) + (w?.unitPaused ? 1 : 0) + (w?.engineAsk ? 1 : 0);
+  const holds =
+    (w?.parked ? 1 : 0) +
+    (w?.unitPaused ? 1 : 0) +
+    (w?.engineAsk ? 1 : 0) +
+    (w?.decision ? 1 : 0) +
+    (w?.compose ? 1 : 0);
   const open = (current > 0 ? current : h?.awaitingGate ? 1 : 0) + holds;
   return {
     label: s.cards.answersTab,

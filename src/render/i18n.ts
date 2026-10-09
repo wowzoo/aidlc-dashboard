@@ -239,6 +239,20 @@ export interface StatusStrings {
   readonly humanTeamGateUnreadTip: string;
   readonly humanCheckoutPark: string;
   readonly humanCheckoutParkTip: string;
+  /** `checkpoint` / `decision` are the audit's own fields, either may be absent. */
+  humanDecision(checkpoint: string | undefined, decision: string | undefined): string;
+  readonly humanDecisionSource: string;
+  readonly humanDecisionTip: string;
+  readonly humanCompose: string;
+  readonly humanComposeTip: string;
+  readonly humanTurnEnded: string;
+  readonly humanTurnEndedTip: string;
+  /** Both ages already formatted. */
+  humanHooksStale(heartbeatAge: string, eventAge: string): string;
+  readonly humanHooksNever: string;
+  readonly humanHooksTip: string;
+  readonly humanAutonomous: string;
+  readonly humanAutonomousTip: string;
   readonly humanNone: string;
   readonly humanSource: string;
   readonly checksNone: string;

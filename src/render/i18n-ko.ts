@@ -169,6 +169,25 @@ const status: StatusStrings = {
   humanCheckoutPark: "이 checkout 에 유닛 park 표시 — 적용 범위 미확인",
   humanCheckoutParkTip:
     "aidlc/.aidlc-unit-parked 가 있습니다. 이 park 가 지금 보는 intent 에 적용되는지는 scope stamp 로 정해지는데 이 대시보드는 그것을 확인하지 않아, 대기 건수에 넣지 않았습니다",
+  humanDecision: (checkpoint, decision) =>
+    `결정 대기 — ${[checkpoint, decision].filter(Boolean).join(": ") || "이름 없는 결정"}`,
+  humanDecisionSource: "감사 로그 · DECISION_RECORDED",
+  humanDecisionTip:
+    "질문 파일 없이 감사 로그로 연 결정입니다(학습 항목 선택, 추가할 것, 유닛·배치 승인 등). 엔진은 이것을 닫는 기록이 남을 때까지 사람의 답을 기다립니다",
+  humanCompose: "작업 묶음(compose) 승인 대기",
+  humanComposeTip:
+    "aidlc/.aidlc-compose-pending 이 24시간 안에 갱신됐습니다. 엔진이 제안한 작업 묶음을 승인·수정·거절해야 진행합니다",
+  humanTurnEnded: "엔진이 턴을 끝냄 — 다음 말은 사람 차례",
+  humanTurnEndedTip:
+    "엔진의 마지막 지시가 질문이나 멈춤 안내였습니다(.aidlc-engine/turn-end 가 human-turn 보다 새로움). 답할 질문이 있으면 위의 엔진 질문 행에 나오며, 이 행 자체는 대기 건수에 넣지 않습니다",
+  humanHooksStale: (hb, ev) =>
+    `⚠ hook 이 멈춘 듯함 — 마지막 발화 ${hb} 전, 마지막 stage·게이트 기록 ${ev} 전`,
+  humanHooksNever: "⚠ hook 발화 기록 없음 — stage·게이트 기록은 있음",
+  humanHooksTip:
+    "가장 최근 hook 발화가 가장 최근 STAGE_/GATE_ 기록보다 5분 넘게 뒤처졌습니다(엔진 hookLiveness 와 같은 비교). 2.11 은 이 상태에서 계획 승인을 거부하니, 하네스의 hook 등록을 확인하세요",
+  humanAutonomous: "자율 모드 — 질문·결정이 런을 붙잡지 않음",
+  humanAutonomousTip:
+    "Construction Autonomy Mode 가 autonomous 입니다. 이 모드에서는 unit-major 의 계획 승인만 런을 멈추고, 나머지 질문·결정·작업 묶음 제안은 run 이 계속 진행합니다",
   humanEngineOnly: (file) => `엔진만 대기로 보는 빈 태그 · ${file}`,
   humanEngineOnlyTip:
     "stop hook 은 진행 중 stage 의 질문 파일 원문에서 빈 [Answer]: 를 찾으면 턴 종료를 허용합니다. 이 대시보드가 답한 것으로 읽은 자리(코드 블록 속 예시, 다른 절에서 답한 자리 등)이므로 답변 대기로 세지 않지만, 엔진이 여기서 멈출 수 있습니다",

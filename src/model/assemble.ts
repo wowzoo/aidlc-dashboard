@@ -24,6 +24,7 @@ import { DEFAULT_LOCALE } from "../render/locale";
 import { type StageArtifact, listStageArtifacts } from "../scan/artifacts";
 import { type AuditLedger, readAuditLedger } from "../scan/audit";
 import { readDeferrals } from "../scan/deferrals";
+import { ENGINE_DIR } from "../scan/engine-dir";
 import { readHealth } from "../scan/hooks-health";
 import { type StateCompat, readUnitLifecycle, scanConstructionMatrix } from "../scan/matrix";
 import { readDiaries } from "../scan/memory-diary";
@@ -181,6 +182,16 @@ function readRegistry(
     // Malformed registry: identity falls back to the dir name.
   }
   return {};
+}
+
+/** A file's mtime in ms, or undefined when it is absent or not a regular file. */
+function mtimeMs(p: string): number | undefined {
+  try {
+    const st = fs.statSync(p);
+    return st.isFile() ? st.mtimeMs : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Gate ledger from the audit + the revision count state.md tracks. */
@@ -360,6 +371,14 @@ export function assemble(
     guard: health.stopGuard
       ? { signature: health.stopGuard.signature, stateDigest: stateDigest(stateText) }
       : undefined,
+    hookHeartbeats: health.hooks.map((h) => h.lastFired),
+    marks: {
+      turnEnd: mtimeMs(path.join(recordDir, ENGINE_DIR, "turn-end")),
+      humanTurn: mtimeMs(path.join(recordDir, ENGINE_DIR, "human-turn")),
+      compose: mtimeMs(path.join(root, "aidlc", ".aidlc-compose-pending")),
+    },
+    now,
+    stageIndex: catalog ? (s) => catalog?.stages.findIndex((x) => x.slug === s) ?? -1 : undefined,
   });
   const timing = buildTiming(ledger, now);
 

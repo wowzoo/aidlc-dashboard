@@ -43,10 +43,28 @@
 //     proves is that the hook may let the turn end there, not that a person owes an
 //     answer. The hook reads them only while the Current Stage row is `[-]` — except
 //     for a team unit-major directive, where it skips that row check.
+//   - OPEN DECISION: an ask opened through the audit (`DECISION_RECORDED`) that no
+//     receipt has closed — learnings, "Anything to add?", a Construction Unit or
+//     Swarm Batch Approval (scan/decision-wait.ts). Read under the stop hook's own
+//     preconditions (`isPendingDecisionStop`): not under autonomy; the Current Stage
+//     row `[-]` unless a team unit-major directive; a stage running ahead of Current
+//     Stage read in attempt mode first.
+//   - COMPOSE: `aidlc/.aidlc-compose-pending` younger than 24 hours, not under
+//     autonomy (`isPendingComposeStop`) — the composer's approve/edit/reject gate,
+//     which has no checkbox of its own.
+//   - TURN ENDED: `.aidlc-engine/turn-end` newer than `human-turn` (`turnEndIsOpen`,
+//     2.11): the engine's last word was a question or a print the agent stops after.
+//     Shown, not counted — it says the next message is the person's, not that a
+//     question is owed; the question, when there is one, is the engine ask above.
+//   - HOOKS: the newest hook heartbeat against the newest STAGE_/GATE_ row
+//     (`hookLiveness`): more than five minutes behind is stale, none at all is never
+//     fired. 2.11 refuses a plan approval in that state, so it is said next to the
+//     asks, not counted among them.
 //
 // Read-only, never throws.
 
 import type { AuditEvent } from "../scan/audit";
+import { type OpenDecision, openDecision, openDecisionInAttempt } from "../scan/decision-wait";
 import { pendingGate } from "../scan/gate-wait";
 import type { AidlcState } from "../scan/parser";
 import type { QuestionsReport } from "../scan/questions";
@@ -75,7 +93,18 @@ export interface Waits {
   engineOnly: string[];
   /** `Construction Autonomy Mode: autonomous` — the stop hook's cap and rules differ. */
   autonomous: boolean;
+  decision?: OpenDecision;
+  /** The compose marker's mtime, when it is fresh. */
+  compose?: { since: string };
+  turnEnded: boolean;
+  hooks: HookLiveness;
 }
+
+/** `hookLiveness`, reduced to the verdict and the two times it compares. */
+export type HookLiveness =
+  | { state: "live" | "unknown" }
+  | { state: "stale"; heartbeat: string; event: string }
+  | { state: "never"; event: string };
 
 export interface WaitsInput {
   state: AidlcState;
@@ -86,6 +115,44 @@ export interface WaitsInput {
   checkoutParkFile: boolean;
   /** The block-count signature, and the digest of the current state. */
   guard?: { signature: string; stateDigest: string };
+  /** Each hook's last heartbeat (`<hook>.last`), undefined for one that never fired. */
+  hookHeartbeats: (string | undefined)[];
+  /** mtimes (ms) of the engine's turn markers and the compose marker, when present. */
+  marks: { turnEnd?: number; humanTurn?: number; compose?: number };
+  /** The read clock, ISO. */
+  now: string;
+  /** Catalogue stage order, for `stageJumpReaches`. */
+  stageIndex?: (slug: string) => number;
+}
+
+/** The engine's `HOOK_HEARTBEAT_STALE_SLACK_MS`. */
+const HOOK_STALE_MS = 5 * 60 * 1000;
+/** The engine's `COMPOSE_MARKER_TTL_MS`. */
+const COMPOSE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function hookLiveness(heartbeats: (string | undefined)[], events: AuditEvent[]): HookLiveness {
+  const newest = (xs: string[]) =>
+    xs.reduce<string | undefined>(
+      (m, x) => (m === undefined || Date.parse(x) > Date.parse(m) ? x : m),
+      undefined,
+    );
+  const event = newest(
+    events
+      .filter(
+        (e) =>
+          (e.event.startsWith("STAGE_") || e.event.startsWith("GATE_")) &&
+          Number.isFinite(Date.parse(e.ts)),
+      )
+      .map((e) => e.ts),
+  );
+  const fired = heartbeats.filter((h): h is string => h !== undefined);
+  if (!event) return { state: "unknown" };
+  if (fired.length === 0) return { state: "never", event };
+  const heartbeat = newest(fired.filter((h) => Number.isFinite(Date.parse(h))));
+  if (!heartbeat) return { state: "unknown" };
+  return Date.parse(event) - Date.parse(heartbeat) > HOOK_STALE_MS
+    ? { state: "stale", heartbeat, event }
+    : { state: "live" };
 }
 
 function rowStatuses(state: AidlcState, slug: string): string[] {
@@ -180,8 +247,48 @@ export function buildWaits(w: WaitsInput): Waits {
     /^[0-9a-f]{64}$/.test(sigDigest) &&
     sigDigest !== w.guard.stateDigest;
 
+  // Open decision, under `isPendingDecisionStop`'s own preconditions.
+  let decision: OpenDecision | undefined;
+  if (!autonomous) {
+    if (teamUnitMajor && position.stage) {
+      decision = openDecisionInAttempt(w.events, position.stage, position.unit, w.stageIndex);
+    } else if (current && rows.includes("active")) {
+      const ahead = position.stage;
+      if (ahead && ahead !== current)
+        decision = openDecisionInAttempt(w.events, ahead, undefined, w.stageIndex);
+      decision ??= openDecision(w.events, current);
+    }
+  }
+  // A plan approval asked through a decision also has its section in the file, which
+  // the blocker list already counts while it is blank.
+  if (
+    decision &&
+    /plan approval/i.test(decision.checkpoint ?? "") &&
+    w.questions.files.some(
+      (f) =>
+        f.stage === decision?.stage &&
+        f.unanswered.some((q) => q.kind === "confirmation" && /plan approval/i.test(q.heading)),
+    )
+  ) {
+    decision = undefined;
+  }
+
+  const nowMs = Date.parse(w.now);
+  const compose =
+    !autonomous && w.marks.compose !== undefined && nowMs - w.marks.compose <= COMPOSE_TTL_MS
+      ? { since: new Date(w.marks.compose).toISOString().replace(/\.\d{3}Z$/, "Z") }
+      : undefined;
+  const turnEnded =
+    w.marks.turnEnd !== undefined &&
+    w.marks.humanTurn !== undefined &&
+    w.marks.turnEnd > w.marks.humanTurn;
+
   return {
     position,
+    decision,
+    compose,
+    turnEnded,
+    hooks: hookLiveness(w.hookHeartbeats, w.events),
     gate,
     revising,
     parked,
