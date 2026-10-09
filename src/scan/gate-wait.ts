@@ -16,8 +16,7 @@
 //     shard's last effect is taken, and if the shards disagree the gate is clear
 //     ("fail closed" — the engine will not claim a wait it cannot order).
 //
-// 2.10's version lacked the `STAGE_SKIPPED` clear; a skipped stage has no gate left
-// to answer on either generation, so this reader applies it to both.
+// The 2.11.0 rules, applied to every tree (the dashboard reads 2.11 only).
 //
 // The stage is read from the block's own `**Stage**` field, as the engine reads it,
 // not from `Context` attribution.

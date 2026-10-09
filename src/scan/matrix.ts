@@ -81,14 +81,9 @@ export type StateCompat = "verified" | "unknown" | "incompatible";
  * outstanding: the engine's own record that this unit does not run the stage.
  */
 /**
- * WHY a receipt could not be checked. Carried rather than collapsed, because the four
- * causes do not agree on what the ENGINE would say — and that is a different question
- * from what this reader can prove:
+ * WHY a receipt could not be checked — each cause is one the engine could settle either
+ * way, and the audit alone cannot say which:
  *
- *   no-run-floor        the engine's verdict is KNOWN and it is "uncovered": a row with no
- *                       `Run floor` fails its exact-match test, and the engine will re-fan
- *                       the unit. What is unknown is only whether the work is actually
- *                       done. So this one must NOT be labelled "not incomplete".
  *   team-claim          the claim FILE decides (`eventMatchesClaimAttempt`); the engine
  *                       could settle it or not, and neither is derivable here.
  *   wave-fingerprint    an artifact fingerprint decides; same.

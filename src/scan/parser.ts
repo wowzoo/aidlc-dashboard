@@ -231,8 +231,8 @@ export interface AidlcState {
   /**
    * The engine's `## Runtime State` cache of where the run is held (2.11 aidlc-state.ts):
    * the active unit and the stage it is on — under unit-major NOT `Current Stage`, which
-   * stays on the first per-unit stage — and a park. Present only when written; 2.10
-   * writes no `Unit Stage` or `Parked By`. See scan/run-position.ts.
+   * stays on the first per-unit stage — and a park. Present only when written. See
+   * scan/run-position.ts.
    */
   runtime: RuntimeFields;
   /** The parsed `## Unit Progress` table, when the state carries one. */
@@ -395,9 +395,10 @@ export function parseStages(
     const slug = m[2]!;
     // The engine reads the ACTION after the em dash (`parseStateStageSuffixes`:
     // `— (EXECUTE|SKIP)\b`), not the word anywhere on the line — `— EXECUTE: do not SKIP
-    // the review` is an executed stage. A row with no suffix keeps the old reading.
-    const suffix = /—\s*(EXECUTE|SKIP)\b/.exec(line)?.[1];
-    const isSkipMarker = suffix ? suffix === "SKIP" : /\bSKIP\b/.test(line);
+    // the review` is an executed stage. A row with no suffix has no plan action for the
+    // engine either (it falls back to the scope's default, which this reader does not
+    // have), so it is read as executing.
+    const isSkipMarker = /—\s*(EXECUTE|SKIP)\b/.exec(line)?.[1] === "SKIP";
     byPhase.get(current)?.push({
       slug,
       display: stageDisplay(slug, catalogName),

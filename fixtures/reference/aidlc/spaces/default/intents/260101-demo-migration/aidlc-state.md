@@ -5,7 +5,7 @@
 - **Project Type**: Brownfield
 - **Scope**: demo-migration
 - **Start Date**: 2026-01-01T00:00:00Z
-- **State Version**: 7
+- **State Version**: 8
 - **Active Agent**: aidlc-developer-agent
 - **Worktree Path**:
 - **Bolt Refs**:

@@ -9,7 +9,7 @@ import * as path from "node:path";
 import { parseAuditShard, parseContext } from "../scan/audit";
 import type { AuditEvent } from "../scan/audit";
 import { parseDeferralSections, readDeferrals, resolveOwner } from "../scan/deferrals";
-import { engineReadDir, engineTransientDir } from "../scan/engine-dir";
+import { engineReadDir } from "../scan/engine-dir";
 import { parseDrops, readHealth } from "../scan/hooks-health";
 import {
   type BoltDag,
@@ -453,7 +453,7 @@ describe("construction matrix", () => {
       E(event, ts, { ...o, fields: { "Run floor": FLOOR, ...(o.fields ?? {}) } });
     const st = (evs: LifecycleEvent[], unit = "api", opts = {}) =>
       readUnitLifecycle(evs, opts).state(unit, S).state;
-    /** Why a cell is unverifiable — only `no-run-floor` has a known engine verdict. */
+    /** Why a cell is unverifiable. */
     const why = (evs: LifecycleEvent[], unit = "api", opts = {}) =>
       readUnitLifecycle(evs, opts).state(unit, S).reason;
 
@@ -492,16 +492,14 @@ describe("construction matrix", () => {
     });
 
     test("each unverifiable cause is carried, because they disagree on the ENGINE's verdict", () => {
-      // Only `no-run-floor` has a known engine answer — the exact-match test fails, so the
-      // engine re-fans the unit. The other three could settle or not, and neither is
-      // derivable here. One blanket "cannot check — not incomplete" label was wrong for the
-      // first case, which is why the cause travels with the cell.
+      // A completion with no `Run floor` (a ledger from before the field) fails the
+      // engine's exact match and is not current — read as the engine reads it, not held
+      // back as a can't-tell. The causes below are the ones the engine could settle.
       const noFloor = [
         E("STAGE_STARTED", T),
         E("UNIT_COMPLETED", "2026-01-01T01:00:00Z", { unit: "api" }),
       ];
-      expect(st(noFloor)).toBe("unverifiable");
-      expect(why(noFloor)).toBe("no-run-floor");
+      expect(st(noFloor)).toBe("unsettled");
 
       expect(
         why([E("STAGE_STARTED", T), U("UNIT_COMPLETED", T, { unit: "api" })], "api", {
@@ -1421,15 +1419,22 @@ describe("engine dir (2.9+)", () => {
     }
   });
 
-  test("transient state falls back only for a record no 2.9+ engine has touched", () => {
+  test("the stop counter is read at the 2.11 path only", () => {
+    // `stopHookDir` returns `.aidlc-engine/stop-hook` unconditionally; the old
+    // `.aidlc-stop-hook` is not read, even for a record with no `.aidlc-engine`.
     const record = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-edir-"));
     try {
-      const legacy = path.join(record, ".aidlc-stop-hook");
-      expect(engineTransientDir(record, "stop-hook", ".aidlc-stop-hook")).toBe(legacy);
-      fs.mkdirSync(path.join(record, ".aidlc-engine"));
-      expect(engineTransientDir(record, "stop-hook", ".aidlc-stop-hook")).toBe(
-        path.join(record, ".aidlc-engine", "stop-hook"),
-      );
+      const write = (dir: string) => {
+        fs.mkdirSync(path.join(record, dir), { recursive: true });
+        fs.writeFileSync(
+          path.join(record, dir, "block-count.json"),
+          JSON.stringify({ signature: "s", count: 3 }),
+        );
+      };
+      write(".aidlc-stop-hook");
+      expect(readHealth(record).stopGuard).toBeUndefined();
+      write(".aidlc-engine/stop-hook");
+      expect(readHealth(record).stopGuard).toEqual({ signature: "s", count: 3 });
     } finally {
       fs.rmSync(record, { recursive: true, force: true });
     }

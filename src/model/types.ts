@@ -198,6 +198,9 @@ export type Warning =
       missingFromState: string[];
     }
   | { code: "harness-coexist"; harnesses: string[]; chosen: "kiro" | "claude" }
+  /** The harness is not the engine generation this dashboard reads (2.11.x). `found`
+   *  absent = the harness carries no `aidlc-stamp.json`. */
+  | { code: "engine-version-unsupported"; harnessDir: string; found?: string; supported: string }
   /** Questions files with a fence/comment/raw block never closed, read as text. */
   | { code: "questions-unclosed-block"; files: string[] }
   | { code: "token-usage-failed"; detail: string }

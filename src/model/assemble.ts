@@ -39,7 +39,13 @@ import {
   stateDigest,
 } from "../scan/run-position";
 import { readSensorReport } from "../scan/sensors";
-import { type StageCatalog, harnessDirsWithCatalog, readStageCatalog } from "../scan/stage-catalog";
+import {
+  SUPPORTED_ENGINE,
+  type StageCatalog,
+  harnessDirsWithCatalog,
+  readStageCatalog,
+  supportedEngine,
+} from "../scan/stage-catalog";
 import { buildTiming } from "../scan/timing";
 import { buildProvenance, graphLastEvent } from "./freshness";
 import type {
@@ -396,6 +402,15 @@ export function assemble(
     );
   }
   const isStage = catalog ? (s: string) => catalog?.bySlug.has(s) : undefined;
+  // One engine generation, said out loud when the tree is another (see stage-catalog.ts).
+  if (catalog && !supportedEngine(catalog.frameworkVersion)) {
+    warnings.push({
+      code: "engine-version-unsupported",
+      harnessDir: catalog.harnessDir,
+      ...(catalog.frameworkVersion ? { found: catalog.frameworkVersion } : {}),
+      supported: SUPPORTED_ENGINE,
+    });
+  }
 
   let stateText: string;
   try {

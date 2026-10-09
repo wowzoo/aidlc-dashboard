@@ -23,17 +23,17 @@
 //     never revives legacy data behind it;
 //   - an unreadable parent also pins the new path, for the same reason.
 //
-// Pre-2.9 trees (the reference fixture among them) keep reading through the fallback.
+// This fallback is kept because the 2.11.0 engine itself still reads through it; it is
+// not a courtesy to older trees (this dashboard reads 2.11 only).
 //
 // THE FALLBACK IS NOT FOR EVERY DIR. The engine gives read-only fallbacks to
 // persistent evidence only — sensors, hook health, summary authorizations, source
 // review — and says everything else "is transient or derived and is rebuilt at the
-// new path without a fallback" (`aidlc-lib.ts`, above `engineDir`). The stop
-// hook's no-progress counter is one of those: `stopHookDir` returns the new path
-// unconditionally. Falling back for it would hand a 2.9+ record a counter last
-// written by the previous engine as if it were current, so `engineTransientDir`
-// reads the legacy name only for a record with no `.aidlc-engine` at all — a record
-// no 2.9+ engine has touched, whose counter is still that engine's own.
+// new path without a fallback" (`aidlc-lib.ts`, above `engineDir`). The stop hook's
+// no-progress counter is one of those: `stopHookDir` returns the new path
+// unconditionally, so this reader reads it there and nowhere else. (A fallback to the
+// old `.aidlc-stop-hook` for records no 2.9+ engine had touched was dropped with the
+// rest of the pre-2.11 support.)
 //
 // Node fs only, never throws.
 
@@ -58,22 +58,6 @@ export function engineReadDir(recordDir: string, sub: string, legacyName: string
     const engine = lstat(path.join(recordDir, ENGINE_DIR));
     if (engine !== undefined && !engine.isDirectory()) return current;
     return lstat(current) === undefined && fs.existsSync(legacy) ? legacy : current;
-  } catch {
-    return current;
-  }
-}
-
-/**
- * The directory to read transient state `sub` from: the new path whenever the
- * record has an `.aidlc-engine` entry of any kind, the legacy name only when it has
- * none. See the header for why this differs from `engineReadDir`.
- */
-export function engineTransientDir(recordDir: string, sub: string, legacyName: string): string {
-  const current = path.join(recordDir, ENGINE_DIR, sub);
-  try {
-    return lstat(path.join(recordDir, ENGINE_DIR)) === undefined
-      ? path.join(recordDir, legacyName)
-      : current;
   } catch {
     return current;
   }

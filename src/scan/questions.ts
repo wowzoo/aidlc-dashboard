@@ -56,8 +56,7 @@
 // `[Answer]:` — and the engine counts its tags only under a heading that is
 // "exactly `Plan Approval`" (`aidlc-testing-posture.ts`). Plan approval is
 // human-owned even under Construction autonomy, so a blank one is a hard stop.
-// (Not in the 2.10.0 release: `aidlc-plan-approval-ask.ts` landed after it, and
-// run E came from that later engine.) Measured on run E: all three of its
+// Measured on run E: all three of its
 // code-generation questions files read as zero asks, and blanking one answer on a copy still showed zero
 // blockers on both the dashboard and the picker card.
 //
@@ -82,7 +81,7 @@
 //      that question unanswered. Measured: of 194 spans exactly one holds two
 //      markers, and it is that shape — blank-then-filled, never filled-then-blank.
 //
-// WHAT THE ENGINE SEES DECIDES WHAT IS ASKED (2.10/2.11). Six rules, each a shape
+// WHAT THE ENGINE SEES DECIDES WHAT IS ASKED (2.11). Six rules, each a shape
 // the engine read one way and this reader another:
 //
 //   - Only VISIBLE lines count (scan/visible-lines.ts): a tag or heading inside a

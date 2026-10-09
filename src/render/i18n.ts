@@ -165,6 +165,11 @@ export interface WarnStrings {
     missingFromState: string[],
   ): string;
   harnessCoexist(harnesses: string[], chosen: "kiro" | "claude"): string;
+  engineVersionUnsupported(
+    harnessDir: string,
+    found: string | undefined,
+    supported: string,
+  ): string;
   questionsUnclosedBlock(files: string[]): string;
   tokenUsageFailed(detail: string): string;
   creditAssemblyFailed(detail: string): string;
@@ -229,7 +234,7 @@ export interface StatusStrings {
   readonly humanStateSource: string;
   humanUnitPaused(unit: string, reason: string): string;
   humanUnitNext(next: string): string;
-  /** `askType` absent = 2.10's untyped ask. */
+  /** `askType` absent = a marker that carried none. */
   humanEngineAsk(askType: string | undefined, where: string): string;
   readonly humanEngineAskSource: string;
   readonly humanEngineAskTip: string;
@@ -289,8 +294,7 @@ export interface OverviewStrings {
   readonly noUnits: string;
   readonly noUnitsPill: string;
 
-  // Cell tooltips. `unverified` is per CAUSE because only `no-run-floor` has a known
-  // engine verdict — see the ReceiptReason note in scan/matrix.ts.
+  // Cell tooltips. `unverified` is per CAUSE — see the ReceiptReason note in scan/matrix.ts.
   tipPartial(missing: string[]): string;
   tipComplete(present: string[]): string;
   tipUnsettled(present: string[]): string;
@@ -304,7 +308,6 @@ export interface OverviewStrings {
   // and only the words live here.
   readonly legendBase: string;
   readonly legendUnsettled: string;
-  readonly legendUnverifiedNoFloor: string;
   readonly legendUnverified: string;
   readonly legendNa: string;
   readonly legendSkipped: string;

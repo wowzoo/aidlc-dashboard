@@ -13,7 +13,7 @@
 //
 //   1. `Unit Stage` + `Active Unit` (2.11 state, `## Runtime State`). The engine
 //      writes both on every unit start/resume/pause and removes them on complete;
-//      its statusline reads them first. 2.10 never writes `Unit Stage`.
+//      its statusline reads them first.
 //   2. `.aidlc-engine/active-directive.json` — the directive the engine last handed
 //      out — but ONLY when its `state_sha256` equals the digest of the state file
 //      as it is now, which is the engine's own acceptance test
@@ -25,9 +25,7 @@
 // THE DIGEST is a transcription of the engine's `stateDigest` /
 // `projectStateForDigest` (aidlc-lib.ts): drop empty lines, the `## Unit Progress`
 // table rows and a fixed list of cache/breadcrumb fields; read `Change Control` as
-// `Guard Policy`; sha256 over the rest joined by LF. 2.10 and 2.11 project
-// identically except that 2.11 also ignores `Unit Stage`, a field 2.10 never
-// writes — so one function serves both generations. Checked against the 2.11.0
+// `Guard Policy`; sha256 over the rest joined by LF. Checked against the 2.11.0
 // function on a sample state (the test pins the value it returned).
 //
 // Read-only and never throws: a missing or malformed marker is "no marker", with
@@ -38,7 +36,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { ENGINE_DIR } from "./engine-dir";
 
-/** `STATE_DIGEST_IGNORED_FIELDS`, 2.11.0 aidlc-lib.ts — the 2.10 list minus nothing it writes. */
+/** `STATE_DIGEST_IGNORED_FIELDS`, 2.11.0 aidlc-lib.ts. */
 const DIGEST_IGNORED = new Set([
   "Last Updated",
   "Active Agent",
@@ -91,7 +89,7 @@ export interface DirectiveMarker {
   kind: string;
   stage: string;
   unit?: string;
-  /** Set on an `ask` directive (2.11 lists ten; 2.10 had four). */
+  /** Set on an `ask` directive — one of the ten 2.11 `ask_type`s. */
   askType?: string;
   delivery?: string;
   /**

@@ -45,14 +45,13 @@
 // WHAT THE AUDIT CANNOT SAY stays `unverifiable`, never guessed: team ownership (the
 // engine also matches each row's `Attempt Generation` against a claim file outside the
 // audit), a wave-mode completion (held only while an artifact fingerprint matches), a
-// pre-2.5.0 ledger with no `Run floor` field at all (the engine fails closed; a red
-// "not done" on every older tree would be a fabricated blocker), and a cross-shard tie
-// on events built without block positions.
+// and a cross-shard tie on events built without block positions. A ledger from before
+// the `Run floor` field is read as the engine reads it: no row is current.
 //
-// GENERATIONS. This cluster is byte-identical in the 2.10.1 preview and 2.11.0. The
-// 2.10.0 release reset every stage on any jump and had no policy flooring or
-// UNIT_SKIPPED; this reader applies the newer rules to every tree, as a stated
-// policy, the same way the decision reader does.
+// GENERATION. This reads 2.11.0 — the dashboard's one supported engine. A tree from an
+// older engine is read by these same rules, under the page's version warning; the
+// 2.10.0 release's own rules (every jump reset every stage, no policy flooring, no
+// UNIT_SKIPPED) are not reproduced.
 
 import { createHash } from "node:crypto";
 import type { AuditEvent } from "./audit";
@@ -68,7 +67,7 @@ export interface ReceiptRow {
 }
 
 /** Why a receipt cannot be read from the audit alone. */
-export type ReceiptReason = "team-claim" | "wave-fingerprint" | "ambiguous-floor" | "no-run-floor";
+export type ReceiptReason = "team-claim" | "wave-fingerprint" | "ambiguous-floor";
 
 export type ReceiptVerdict =
   | { state: "settled" | "unsettled"; reason?: undefined }
@@ -476,9 +475,9 @@ export function readUnitReceipts(
     for (const unit of units) {
       const mine = lifecycle.filter((r) => r.f.Unit === unit);
       const matched = mine.some((r) => r.f["Run floor"] === floorOf(unit));
-      if (!matched && mine.some((r) => r.f["Run floor"] === undefined)) {
-        set(unit, { state: "unverifiable", reason: "no-run-floor" });
-      } else if (!matched && !hasPositions && floorOf(unit).startsWith("AMBIGUOUS:")) {
+      // A row with no `Run floor` (a ledger from before the field) fails the exact match
+      // and is simply not current, as the engine reads it — no special case.
+      if (!matched && !hasPositions && floorOf(unit).startsWith("AMBIGUOUS:")) {
         // Built without block positions, the AMBIGUOUS digest cannot be rebuilt.
         set(unit, { state: "unverifiable", reason: "ambiguous-floor" });
       } else if (skipped.has(unit)) {

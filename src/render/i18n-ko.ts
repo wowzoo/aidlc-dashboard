@@ -27,15 +27,8 @@ import type {
   ViewerStrings,
   WarnStrings,
 } from "./i18n";
-/**
- * What each `unverified` cause means. Split per cause because only ONE of them has a known
- * engine verdict: a row with no `Run floor` fails the engine's exact-match test, so the
- * engine WILL re-run that unit — calling that "not incomplete" would be the same kind of
- * over-claim this cell state exists to avoid.
- */
+/** What each `unverified` cause means — each one the engine could settle either way. */
 const RECEIPT_REASON_KO: Record<ReceiptReason, string> = {
-  "no-run-floor":
-    "산출물은 다 있지만 완료 수령증에 `Run floor` 가 없습니다 — 엔진은 이 유닛을 미완으로 보고 다시 실행합니다. 실제 작업이 끝났는지는 감사 기록만으로 알 수 없습니다(필드 도입 전 원장)",
   "team-claim":
     "산출물은 다 있고, 완료 수령증은 claim 파일이 판정합니다 (team 소유) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다. 위의 유닛 진행 표가 권위 있는 값입니다",
   "wave-fingerprint":
@@ -85,6 +78,9 @@ const warn: WarnStrings = {
 
   harnessCoexist: (harnesses, chosen) =>
     `harness 디렉터리 ${harnesses.join("·")} 가 공존 — 사용량 패널을 ${chosen === "claude" ? "Claude Code 토큰" : "Kiro 크레딧"}으로 자동 선택했습니다. 다른 쪽을 보려면 --usage ${chosen === "claude" ? "kiro" : "claude"} 를 지정하세요.`,
+
+  engineVersionUnsupported: (harnessDir, found, supported) =>
+    `${found ? `엔진 ${found}` : "엔진 버전 표시(aidlc-stamp.json) 없음"} (${harnessDir}) — 이 대시보드는 AI-DLC ${supported}.x 기준으로만 읽습니다. 다른 버전의 기록은 ${supported} 규칙으로 읽으므로 일부 패널이 비거나 틀릴 수 있습니다.`,
 
   questionsUnclosedBlock: (files) =>
     `닫히지 않은 코드 블록·주석이 있는 질문 파일 ${files.length}개 — 숨기지 않고 본문으로 읽었습니다(블로커를 감추지 않으려고). 엔진은 다르게 읽을 수 있으니 파일을 확인하세요: ${files.join(", ")}`,
@@ -241,8 +237,6 @@ const overview: OverviewStrings = {
     "█ 완료(수령증을 쓰는 stage 는 수령증 확인, 아니면 산출물 기준) · ▨ 착수했으나 산출물 미완(칸에 마우스를 올리면 무엇이 빠졌는지 표시) · · 미착수",
   legendUnsettled:
     " · ▩ 산출물은 다 있으나 완료 수령증(UNIT_COMPLETED) 없음 — 엔진도 이 유닛을 미완으로 봅니다",
-  legendUnverifiedNoFloor:
-    " · ▤ 완료 수령증을 감사 기록만으로 확인할 수 없음 (칸에 마우스를 올려 이유 확인) — 그중 `Run floor` 가 없는 칸은 엔진이 미완으로 보고 다시 실행합니다",
   legendUnverified:
     " · ▤ 완료 수령증을 감사 기록만으로 확인할 수 없음 — 미완이라고 판정된 것은 아닙니다 (칸에 마우스를 올려 이유 확인)",
   legendNa: " · – 이 유닛 kind 에 계약된 산출물 없음(계 열의 괄호는 그 수)",

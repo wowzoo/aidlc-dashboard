@@ -110,12 +110,11 @@ export function defaultStopCap(autonomous: boolean): number {
 
 /**
  * The stage part of a stop-guard signature — everything before the FIRST `::`.
- * The engine has written two shapes: `<stage>::<audit line count>` before 2.9 and
- * `<stage>::<state sha256>::<directive fingerprint>` in 2.10
- * (`hooks/aidlc-continue-workflow.ts`). Cutting at the last `::` read the 2.10 shape
- * as the stage `<stage>::<sha>`, which never equals the current stage, so a run
- * blocked right now drew as a green "cleared, last block in an earlier stage".
- * A stage slug never contains `::`, so the first separator is right for both.
+ * The 2.11 shape is `<Current Stage>::<state sha256>::<directive fingerprint>`
+ * (`hooks/aidlc-continue-workflow.ts`); cutting at the LAST `::` read it as the stage
+ * `<stage>::<sha>`, which never equals the current stage, so a run blocked right now
+ * drew as a green "cleared, last block in an earlier stage". A stage slug never
+ * contains `::`, so the first separator is the stage.
  */
 function signatureStage(signature: string): string {
   const cut = signature.indexOf("::");

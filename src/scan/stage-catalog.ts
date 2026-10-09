@@ -158,6 +158,8 @@ export interface StageCatalog {
    * enforce, and a spelling change degrades to silence instead of a false claim.
    */
   stateVersion?: string;
+  /** The harness's engine version (`aidlc-stamp.json`), when it declares one. */
+  frameworkVersion?: string;
 }
 
 /** `export const CURRENT_STATE_VERSION = "8"` in the harness's own lib. */
@@ -245,7 +247,39 @@ export function readStageCatalog(root: string, harnessDir?: string): StageCatalo
       const v = readHarnessStateVersion(root, harness);
       return v ? { stateVersion: v } : {};
     })(),
+    ...(() => {
+      const f = readFrameworkVersion(root, harness);
+      return f ? { frameworkVersion: f } : {};
+    })(),
   };
+}
+
+/**
+ * `frameworkVersion` from `<harness>/tools/data/aidlc-stamp.json` — the engine's own
+ * projection identity (`{schemaVersion, frameworkVersion, distribution, harnessDir}`).
+ * Undefined when the stamp is absent or unreadable.
+ */
+function readFrameworkVersion(root: string, harness: string): string | undefined {
+  try {
+    const j: unknown = JSON.parse(
+      fs.readFileSync(path.join(root, harness, "tools", "data", "aidlc-stamp.json"), "utf-8"),
+    );
+    const v = (j as { frameworkVersion?: unknown })?.frameworkVersion;
+    return typeof v === "string" && v.length > 0 ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The engine generation this dashboard reads: 2.11.x. Every rule it transcribes is the
+ * 2.11.0 engine's; an older tree is read by the same rules, under a warning, rather than
+ * by a second set of rules nobody can check any more.
+ */
+export const SUPPORTED_ENGINE = "2.11";
+
+export function supportedEngine(frameworkVersion: string | undefined): boolean {
+  return frameworkVersion !== undefined && /^2\.11(?:\.|$)/.test(frameworkVersion);
 }
 
 /** Keep an artifact when it is kind-agnostic, or when it lists this unit's kind. */

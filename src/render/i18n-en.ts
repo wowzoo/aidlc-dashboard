@@ -34,15 +34,8 @@ import type {
   ViewerStrings,
   WarnStrings,
 } from "./i18n";
-/**
- * What each `unverified` cause means. Split per cause because only ONE of them has a known
- * engine verdict: a row with no `Run floor` fails the engine's exact-match test, so the
- * engine WILL re-run that unit — calling that "not incomplete" would be the same kind of
- * over-claim this cell state exists to avoid.
- */
+/** What each `unverified` cause means — each one the engine could settle either way. */
 const RECEIPT_REASON_EN: Record<ReceiptReason, string> = {
-  "no-run-floor":
-    "Every artifact is present, but the completion receipt carries no `Run floor` — the engine treats this unit as uncovered and will run it again. Whether the work actually finished cannot be told from the audit ledger alone (a ledger written before the field existed)",
   "team-claim":
     "Every artifact is present, and the completion receipt is settled by the claim file (team ownership) — the audit ledger alone cannot say whether the engine considers this done. The Unit Progress table above is the authority",
   "wave-fingerprint":
@@ -92,6 +85,9 @@ const warn: WarnStrings = {
 
   harnessCoexist: (harnesses, chosen) =>
     `Harness directories ${harnesses.join(" and ")} both exist — the usage panel was set to ${chosen === "claude" ? "Claude Code tokens" : "Kiro credit"} automatically. To see the other one, pass --usage ${chosen === "claude" ? "kiro" : "claude"}.`,
+
+  engineVersionUnsupported: (harnessDir, found, supported) =>
+    `${found ? `Engine ${found}` : "No engine version stamp (aidlc-stamp.json)"} (${harnessDir}) — this dashboard reads AI-DLC ${supported}.x only. A record from another version is read by the ${supported} rules, so some panels may be empty or wrong.`,
 
   questionsUnclosedBlock: (files) =>
     `${plural(files.length, "questions file")} with a code block or comment that is never closed — read as text rather than hidden, so no blocker is hidden by it. The engine may read it differently; check the file: ${files.join(", ")}`,
@@ -254,8 +250,6 @@ const overview: OverviewStrings = {
     "\u2588 complete (receipt confirmed where the stage uses receipts, else by artifacts) · \u25a8 started, artifacts incomplete (hover a cell to see what is missing) · · not started",
   legendUnsettled:
     " · \u25a9 every artifact present but no completion receipt (UNIT_COMPLETED) — the engine treats this unit as uncovered too",
-  legendUnverifiedNoFloor:
-    " · \u25a4 the completion receipt cannot be checked from the audit ledger alone (hover a cell for the reason) — where a `Run floor` is missing, the engine treats the unit as uncovered and will run it again",
   legendUnverified:
     " · \u25a4 the completion receipt cannot be checked from the audit ledger alone — this is NOT a verdict that the work is incomplete (hover a cell for the reason)",
   legendNa:

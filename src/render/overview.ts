@@ -187,7 +187,7 @@ export function cellTip(
             // red cell over every gap in this reader's reproduction of the engine. But the
             // four causes do not agree on the ENGINE's verdict, so each says its own thing:
             // with no `Run floor` the engine's answer is known and it is "uncovered".
-            s.overview.tipUnverified(reason ?? "no-run-floor", present)
+            s.overview.tipUnverified(reason ?? "ambiguous-floor", present)
           : state === "skipped"
             ? s.overview.tipSkipped(skipReason ?? "")
             : state === "n/a"
@@ -229,23 +229,12 @@ function matrixTable(mx: ConstructionMatrix, s: Strings): string {
   const anySkipped = mx.stages.some((st) => st.skipped > 0);
   const anyUnsettled = mx.stages.some((st) => st.unsettled > 0);
   const anyUnverified = mx.stages.some((st) => st.unverified > 0);
-  const anyNoFloor = mx.stages.some((st) =>
-    st.cells.some((c) => c.receiptReason === "no-run-floor"),
-  );
   // The composition is logic and stays here; the fragments are catalogue entries.
   const note = mx.contractAware
     ? `<p class="note">${esc(s.overview.legendBase)}${
         anyUnsettled ? esc(s.overview.legendUnsettled) : ""
       }${
-        anyUnverified
-          ? // The blanket "does not mean incomplete" was wrong for one of the four causes:
-            // with no `Run floor` the engine's verdict IS "uncovered". So the legend names
-            // what is unknown — the engine's own answer, where it is unknown — rather than
-            // asserting the work is fine.
-            anyNoFloor
-            ? esc(s.overview.legendUnverifiedNoFloor)
-            : esc(s.overview.legendUnverified)
-          : ""
+        anyUnverified ? esc(s.overview.legendUnverified) : ""
       }${anyNa ? esc(s.overview.legendNa) : ""}${anySkipped ? esc(s.overview.legendSkipped) : ""}</p>${
         mx.stateCompat === "verified"
           ? ""

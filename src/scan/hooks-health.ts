@@ -35,7 +35,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { engineReadDir, engineTransientDir } from "./engine-dir";
+import { ENGINE_DIR, engineReadDir } from "./engine-dir";
 
 /** `<hook><suffix>.last` files that are a hook's own markers, not heartbeats. */
 const MARKER_SUFFIXES = [".missing-record"];
@@ -58,7 +58,7 @@ export interface HookStatus {
 
 /** The stop hook's no-progress guard. */
 export interface StopGuard {
-  /** `<current stage>::<audit line count>` — changes whenever work advanced. */
+  /** `<Current Stage>::<state digest>::<directive fingerprint>` — see model/status.ts. */
   signature: string;
   /** Consecutive blocks with NO progress. 0 = healthy; rising = stuck. */
   count: number;
@@ -166,7 +166,8 @@ export function readHealth(recordDir: string): HealthReport {
 
   let stopGuard: StopGuard | undefined;
   const guardRaw = readText(
-    path.join(engineTransientDir(recordDir, "stop-hook", ".aidlc-stop-hook"), "block-count.json"),
+    // `stopHookDir`: the 2.11 engine keeps the counter here and only here.
+    path.join(recordDir, ENGINE_DIR, "stop-hook", "block-count.json"),
   );
   if (guardRaw) {
     try {

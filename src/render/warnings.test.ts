@@ -158,6 +158,11 @@ describe("every code has copy", () => {
     "roster-mismatch": { code: "roster-mismatch", unknownToCatalog: [], missingFromState: [] },
     "harness-coexist": { code: "harness-coexist", harnesses: [".kiro"], chosen: "kiro" },
     "questions-unclosed-block": { code: "questions-unclosed-block", files: ["a-questions.md"] },
+    "engine-version-unsupported": {
+      code: "engine-version-unsupported",
+      harnessDir: ".kiro",
+      supported: "2.11",
+    },
     "token-usage-failed": { code: "token-usage-failed", detail: "x" },
     "credit-assembly-failed": { code: "credit-assembly-failed", detail: "x" },
   };

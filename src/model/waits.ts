@@ -79,14 +79,14 @@ export interface Waits {
   revising?: string;
   parked?: { stage: string; since: string; byPerson: boolean };
   unitPaused?: { unit: string; stage?: string; reason: string; nextAction: string };
-  /** `askType` is absent on 2.10's untyped ask. */
+  /** `askType` absent = a marker that carried none (2.11 always writes one). */
   engineAsk?: { askType?: string; stage: string; unit?: string };
   /** `aidlc/.aidlc-unit-parked` exists in this checkout — applicability unchecked. */
   checkoutPark: boolean;
   /** Team ownership with a unit position: the unit's gate is not read here. */
   teamGateUnread: boolean;
   /**
-   * The stop-hook record names the state it blocked on (2.10+ signatures) and that
+   * The stop-hook record names the state it blocked on (the signature's digest) and that
    * state is not the current one — the count is history, whatever its size.
    */
   guardRecordStale: boolean;
@@ -248,8 +248,8 @@ export function buildWaits(w: WaitsInput): Waits {
           .map((f) => f.rel)
       : [];
 
-  // 2.10+ signatures are `<stage>::<state digest>::<directive fingerprint>`; a pre-2.9
-  // one (`<stage>::<audit lines>`) carries no digest, so it cannot be dated this way.
+  // The 2.11 signature is `<stage>::<state digest>::<directive fingerprint>`; one in any
+  // other shape carries no digest to compare, so it is not dated this way.
   const sigDigest = w.guard?.signature.split("::")[1];
   const guardRecordStale =
     !!w.guard &&

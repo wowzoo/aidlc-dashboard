@@ -29,6 +29,9 @@ import { readWorkspaceSummary } from "../scan/summary";
 import { MAX_VIEW_BYTES, readArtifactSource } from "../scan/view-file";
 
 const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+/** The fixture's stop-guard signature, in the 2.11 shape: stage, state digest, directive. */
+const FIXTURE_GUARD =
+  "code-generation::439410860bf8adf28c121a3eee7e83135b1209ee1a02d4f71487c39d11ba9ef1::29ced7bcefb33d16ead9fd1bc563c9287d5479431dd947570757e7d30203db4d";
 
 /** Warning CODES, which is what these tests assert on. They used to substring-match the
  *  Korean sentence, so rewording broke the suite while a wrong code passed silently. */
@@ -216,7 +219,7 @@ describe("assemble on the fixture workspace", () => {
     const adapter = m.health.hooks.find((h) => h.name === "kiro-adapter")!;
     expect(adapter.lastFired).toBeUndefined(); // dropped but never fired
     expect(adapter.degradedDrops).toBe(1);
-    expect(m.health.stopGuard).toEqual({ signature: "code-generation::19", count: 1 });
+    expect(m.health.stopGuard).toEqual({ signature: FIXTURE_GUARD, count: 1 });
   });
 
   test("treats the 2-shard fixture as a handover, not parallel development", () => {
@@ -375,7 +378,7 @@ describe("render", () => {
       const withFields = (extra: string, tail = "") => {
         fs.writeFileSync(
           sp(),
-          base.replace("- **State Version**: 7", `- **State Version**: 7${extra}`) + tail,
+          base.replace("- **State Version**: 8", `- **State Version**: 8${extra}`) + tail,
         );
         return assemble(root);
       };
@@ -421,7 +424,7 @@ describe("render", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-vm-"));
     try {
       fs.cpSync(FIXTURE, root, { recursive: true });
-      // The fixture's state says 7 and its harness declares nothing, so it is silent.
+      // The fixture's state says 8 and its harness declares nothing, so it is silent.
       expect(assemble(root).matrix?.contractAware).toBe(true);
       fs.writeFileSync(
         path.join(root, ".kiro/tools/aidlc-lib.ts"),
@@ -429,7 +432,7 @@ describe("render", () => {
       );
       const m = assemble(root);
       const warn = m.warnings.find((w) => w.code === "state-version-mismatch");
-      expect(warn).toMatchObject({ stateVersion: "7", harnessVersion: "9" });
+      expect(warn).toMatchObject({ stateVersion: "8", harnessVersion: "9" });
       expect(m.matrix?.contractAware).toBe(false);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -449,7 +452,7 @@ describe("render", () => {
       );
       fs.writeFileSync(
         sp,
-        fs.readFileSync(sp, "utf-8").replace("- **State Version**: 7", "- **State Version**: "),
+        fs.readFileSync(sp, "utf-8").replace("- **State Version**: 8", "- **State Version**: "),
       );
       const m = assemble(root);
       expect(codes(m)).toContain("state-version-unreadable");
@@ -485,7 +488,7 @@ describe("render", () => {
       );
       const after = assemble(root);
       const warn = after.warnings.find((w) => w.code === "roster-mismatch");
-      expect(warn).toMatchObject({ unknownToCatalog: ["application-design"], stateVersion: "7" });
+      expect(warn).toMatchObject({ unknownToCatalog: ["application-design"], stateVersion: "8" });
       // And the matrix stops claiming contract-awareness rather than judging cells
       // against a contract from a different graph generation.
       expect(after.matrix?.contractAware).toBe(false);
@@ -603,11 +606,11 @@ describe("degradation", () => {
   });
 });
 
-// AI-DLC 2.9+ writes its record bookkeeping under `.aidlc-engine/`, and 2.10 runs
-// carry two shapes the reference fixture predates. Each test rebuilds the fixture in
-// the newer shape and asserts the page says what the pre-2.9 fixture already says —
-// a reader that missed the new shape did not fail, it reported less, silently.
-describe("2.9+ record layout", () => {
+// The 2.11 record keeps its bookkeeping under `.aidlc-engine/` — the reference fixture
+// is in that shape. The engine (2.11 `engineReadDirFor`) still reads two persistent
+// dirs through their pre-2.9 names when the new one is ABSENT; these tests pin that the
+// dashboard reads the same directory the engine does, nothing more.
+describe("2.11 record layout", () => {
   const RECORD = "aidlc/spaces/default/intents/260101-demo-migration";
 
   function copyFixture(): { dir: string; record: string } {
@@ -617,51 +620,24 @@ describe("2.9+ record layout", () => {
     return { dir, record: path.join(dir, RECORD) };
   }
 
-  /** Move the three legacy dirs to where 2.9.0 put them. */
-  function relocate(record: string): void {
-    const engine = path.join(record, ".aidlc-engine");
-    fs.mkdirSync(engine);
-    for (const [legacy, sub] of [
-      [".aidlc-hooks-health", "hooks-health"],
-      [".aidlc-stop-hook", "stop-hook"],
-      [".aidlc-sensors", "sensors"],
-    ] as const) {
-      fs.renameSync(path.join(record, legacy), path.join(engine, sub));
-    }
-  }
-
   test("hooks, the stop guard and sensor bodies are read from .aidlc-engine/", () => {
-    const { dir, record } = copyFixture();
-    try {
-      const legacy = assemble(dir);
-      relocate(record);
-      const m = assemble(dir);
-      // Same seven hooks, same guard, same body as the legacy layout.
-      expect(m.health.hooks.map((h) => h.name)).toEqual(legacy.health.hooks.map((h) => h.name));
-      expect(m.health.hooks.length).toBe(7);
-      expect(m.health.stopGuard).toEqual({ signature: "code-generation::19", count: 1 });
-      expect(m.sensors.failuresWithoutBody).toBe(0);
-      expect(m.sensors.failures[0]?.errors.length).toBe(2);
-      expect(m.provenance["hooks-health"].asOf).toBe(legacy.provenance["hooks-health"].asOf);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    const m = assemble(FIXTURE);
+    expect(m.health.hooks.length).toBe(7);
+    expect(m.health.stopGuard).toEqual({ signature: FIXTURE_GUARD, count: 1 });
+    expect(m.sensors.failuresWithoutBody).toBe(0);
+    expect(m.sensors.failures[0]?.errors.length).toBe(2);
   });
 
   test("a new engine dir wins over a stale legacy one, as the engine reads it", () => {
-    // `engineReadDirFor` revives legacy data only when the new entry is ABSENT. A
-    // record mid-migration holds both, and the old heartbeats must not mask the new.
+    // `engineReadDirFor` revives legacy data only when the new entry is ABSENT.
     const { dir, record } = copyFixture();
     try {
-      const health = path.join(record, ".aidlc-engine", "hooks-health");
-      fs.mkdirSync(health, { recursive: true });
-      fs.writeFileSync(path.join(health, "session-start.last"), "2026-02-01T00:00:00Z");
+      const legacy = path.join(record, ".aidlc-hooks-health");
+      fs.mkdirSync(legacy);
+      fs.writeFileSync(path.join(legacy, "legacy-only.last"), "2026-02-01T00:00:00Z");
       const m = assemble(dir);
-      expect(m.health.hooks.map((h) => h.name)).toEqual(["session-start"]);
-      // The stop counter is transient: the engine rebuilds it at the new path and
-      // never reads the old one, so once `.aidlc-engine/` exists the legacy count
-      // (1 in the fixture) is the previous engine's, not a current block.
-      expect(m.health.stopGuard).toBeUndefined();
+      expect(m.health.hooks.some((h) => h.name === "legacy-only")).toBe(false);
+      expect(m.health.hooks.length).toBe(7);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -671,7 +647,9 @@ describe("2.9+ record layout", () => {
     // Same rule for the second persistent dir: present-but-empty is not absent.
     const { dir, record } = copyFixture();
     try {
-      fs.mkdirSync(path.join(record, ".aidlc-engine", "sensors"), { recursive: true });
+      const engineSensors = path.join(record, ".aidlc-engine", "sensors");
+      fs.renameSync(engineSensors, path.join(record, ".aidlc-sensors"));
+      fs.mkdirSync(engineSensors);
       const m = assemble(dir);
       expect(m.sensors.totalFailed).toBe(1);
       expect(m.sensors.failuresWithoutBody).toBe(1);
@@ -685,7 +663,6 @@ describe("2.9+ record layout", () => {
     // it adds a row that never fires and lends its stamp to the last-activity time.
     const { dir, record } = copyFixture();
     try {
-      relocate(record);
       const health = path.join(record, ".aidlc-engine", "hooks-health");
       fs.writeFileSync(
         path.join(health, "reviewer-scope.missing-record.last"),
@@ -1638,6 +1615,40 @@ describe("usage kind survives a broken catalogue", () => {
       expect(assemble(dir, undefined, { window: "30d" }).usage.kind).toBe("claude");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("one engine generation", () => {
+  test("a 2.11 stamp reads clean; another version, or none, is said on the page", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-gen-"));
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const stamp = path.join(root, ".kiro", "tools", "data", "aidlc-stamp.json");
+      const versionWarning = () =>
+        assemble(root).warnings.find((w) => w.code === "engine-version-unsupported");
+      expect(versionWarning()).toBeUndefined();
+      fs.writeFileSync(stamp, JSON.stringify({ schemaVersion: 1, frameworkVersion: "2.11.3" }));
+      expect(versionWarning()).toBeUndefined();
+      fs.writeFileSync(
+        stamp,
+        JSON.stringify({ schemaVersion: 1, frameworkVersion: "2.10.1-preview.20261007.1" }),
+      );
+      expect(versionWarning()).toEqual({
+        code: "engine-version-unsupported",
+        harnessDir: ".kiro",
+        found: "2.10.1-preview.20261007.1",
+        supported: "2.11",
+      });
+      fs.rmSync(stamp);
+      expect(versionWarning()).toEqual({
+        code: "engine-version-unsupported",
+        harnessDir: ".kiro",
+        supported: "2.11",
+      });
+      expect(renderBody(assemble(root), "ko")).toContain("2.11.x 기준으로만 읽습니다");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });
