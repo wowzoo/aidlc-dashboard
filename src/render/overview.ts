@@ -24,7 +24,12 @@ export const STAGE_GLYPH: Record<StageStatus, string> = {
 };
 
 function hero(state: AidlcState, identity: DashboardModel["identity"], s: Strings): string {
-  const meta = [identity.scope ?? state.scope, state.projectType, identity.status]
+  const meta = [
+    identity.scope ?? state.scope,
+    state.plan ? s.overview.planLabel(state.plan) : "",
+    state.projectType,
+    identity.status,
+  ]
     .filter((x) => x && x.length > 0)
     .join(" · ");
   const now = state.complete

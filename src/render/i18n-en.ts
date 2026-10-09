@@ -219,6 +219,7 @@ const status: StatusStrings = {
 
 const overview: OverviewStrings = {
   sectionProgress: "Progress",
+  planLabel: (name) => `plan: ${name}`,
   sectionUnitProgress: "Unit progress (state.md, authoritative)",
   sectionMatrix: "Construction unit matrix",
   runComplete: "complete",
@@ -644,6 +645,7 @@ const picker: PickerStrings = {
   summaryBlockersLabel: "blockers",
   summaryNoRunNone: "no run recorded",
   summaryNoRunAmbiguous: "several intents · no active cursor",
+  summaryNoRunArchived: "only archived intents",
   summaryUnreadable: "cannot read state.md",
   summaryFailed: "could not load",
   summaryProgressTip: (done, total, asOf) =>
@@ -769,6 +771,8 @@ const cli: CliStrings = {
   harnessNotFound: "not found",
   startupSummary: (audit, langDefault) => `audit ${audit} · lang ${langDefault} by default`,
   intentAmbiguous: (root) => `Several intents but no active-intent cursor: ${root}`,
+  intentArchived: (root) =>
+    `Only archived intents — the engine does not pick one as the active intent either. Start new work, or point the active-intent cursor at an archived one to read it: ${root}`,
   noWorkflow: (root) => `No AI-DLC workflow found: ${root}`,
 };
 

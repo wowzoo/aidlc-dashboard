@@ -269,6 +269,8 @@ export interface StatusStrings {
 
 export interface OverviewStrings {
   readonly sectionProgress: string;
+  /** The state's `Plan` — a plan composed for this work, beside the scope. */
+  planLabel(name: string): string;
   readonly sectionUnitProgress: string;
   readonly sectionMatrix: string;
   readonly runComplete: string;
@@ -647,6 +649,7 @@ export interface PickerStrings {
   readonly summaryBlockersLabel: string;
   readonly summaryNoRunNone: string;
   readonly summaryNoRunAmbiguous: string;
+  readonly summaryNoRunArchived: string;
   readonly summaryUnreadable: string;
   readonly summaryFailed: string;
   /** Names the source and its date — the card mixes two freshnesses, so neither is silent. */
@@ -802,6 +805,8 @@ export interface CliStrings {
   readonly harnessNotFound: string;
   startupSummary(audit: number, langDefault: string): string;
   intentAmbiguous(root: string): string;
+  /** Only archived intents, and no cursor naming one. */
+  intentArchived(root: string): string;
   noWorkflow(root: string): string;
 }
 

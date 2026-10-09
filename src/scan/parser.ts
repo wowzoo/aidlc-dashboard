@@ -236,6 +236,12 @@ export interface AidlcState {
   /** The parsed `## Unit Progress` table, when the state carries one. */
   unitProgress?: UnitProgress;
   scope: string;
+  /**
+   * `Plan` — present only when a plan was composed for this piece of work (its name as
+   * the gate showed it, or `tailored plan`); the stage list then differs from the
+   * scope's defaults, which is why the page says so. Empty when absent.
+   */
+  plan: string;
   lifecyclePhase: string;
   currentStage: string;
   currentStageDisplay: string;
@@ -559,6 +565,7 @@ export function parseState(
   const unitProgress = parseUnitProgress(text);
   const hasUnitProgress = unitProgress !== undefined;
   const scope = extractField(text, "Scope");
+  const plan = extractField(text, "Plan");
   const lifecyclePhase = extractField(text, "Lifecycle Phase");
   const currentStage = extractField(text, "Current Stage");
   const nextStage = extractField(text, "Next Stage");
@@ -634,6 +641,7 @@ export function parseState(
     runtime: readRuntimeFields(text),
     ...(unitProgress ? { unitProgress } : {}),
     scope,
+    plan,
     lifecyclePhase,
     currentStage,
     currentStageDisplay: stageDisplay(currentStage, catalogName),

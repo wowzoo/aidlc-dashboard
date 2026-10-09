@@ -428,6 +428,7 @@ export function renderPicker(
   const summaryTextJson = JSON.stringify({
     noRunNone: t.summaryNoRunNone,
     noRunAmbiguous: t.summaryNoRunAmbiguous,
+    noRunArchived: t.summaryNoRunArchived,
     unreadable: t.summaryUnreadable,
     failed: t.summaryFailed,
     progressTip: t.summaryProgressTip("{done}", "{total}", "{asOf}"),
@@ -553,7 +554,11 @@ function fillSummary(slot, data) {
   const state = slot.querySelector(".ws-state");
   if (data.kind === "no-run") {
     state.textContent =
-      data.reason === "ambiguous" ? SUMMARY_TEXT.noRunAmbiguous : SUMMARY_TEXT.noRunNone;
+      data.reason === "ambiguous"
+        ? SUMMARY_TEXT.noRunAmbiguous
+        : data.reason === "archived"
+          ? SUMMARY_TEXT.noRunArchived
+          : SUMMARY_TEXT.noRunNone;
     return;
   }
   if (data.kind !== "ok") {

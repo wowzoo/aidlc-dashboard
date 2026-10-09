@@ -19,7 +19,7 @@ import {
   type CreditViewModel,
   assembleCredit,
 } from "../credit/view/credit-model";
-import { strings } from "../render/i18n";
+import { type Strings, strings } from "../render/i18n";
 import { DEFAULT_LOCALE } from "../render/locale";
 import { type StageArtifact, listStageArtifacts } from "../scan/artifacts";
 import { type AuditLedger, readAuditLedger } from "../scan/audit";
@@ -30,7 +30,7 @@ import { type StateCompat, readUnitLifecycle, scanConstructionMatrix } from "../
 import { readDiaries } from "../scan/memory-diary";
 import { type StageStatus, parseState } from "../scan/parser";
 import { readQuestions } from "../scan/questions";
-import { resolveState } from "../scan/resolve";
+import { type NoRunKind, recordDirMatches, resolveState } from "../scan/resolve";
 import { buildRework } from "../scan/rework";
 import {
   type RunPosition,
@@ -130,6 +130,18 @@ function emptyCredit(window: TrendWindow, collecting = false): CreditViewModel {
   };
 }
 
+/** The sentence for each no-run reason — the server and the terminal say the same thing. */
+export function noRunText(t: Strings["cli"], kind: NoRunKind, root: string): string {
+  switch (kind) {
+    case "ambiguous":
+      return t.intentAmbiguous(root);
+    case "archived":
+      return t.intentArchived(root);
+    default:
+      return t.noWorkflow(root);
+  }
+}
+
 /** Thrown only when there is no run to show at all. */
 export class NoRunError extends Error {
   /**
@@ -139,11 +151,10 @@ export class NoRunError extends Error {
    * showing this string (`errorPage`); `message` is what reaches the terminal.
    */
   constructor(
-    readonly kind: "none" | "ambiguous",
+    readonly kind: NoRunKind,
     readonly root: string,
   ) {
-    const t = strings(DEFAULT_LOCALE).cli;
-    super(kind === "ambiguous" ? t.intentAmbiguous(root) : t.noWorkflow(root));
+    super(noRunText(strings(DEFAULT_LOCALE).cli, kind, root));
     this.name = "NoRunError";
   }
 }
@@ -171,7 +182,14 @@ function readRegistry(
     for (const e of doc) {
       if (typeof e !== "object" || e === null) continue;
       const r = e as Record<string, unknown>;
-      if (r.dirName !== record) continue;
+      // The engine's join rule: a stored dirName, else the legacy `<slug>-<id8>` shape.
+      if (typeof r.slug !== "string") continue;
+      const row = {
+        slug: r.slug,
+        uuid: typeof r.uuid === "string" ? r.uuid : undefined,
+        dirName: typeof r.dirName === "string" ? r.dirName : undefined,
+      };
+      if (!recordDirMatches(row, record)) continue;
       return {
         slug: typeof r.slug === "string" ? r.slug : undefined,
         scope: typeof r.scope === "string" ? r.scope : undefined,

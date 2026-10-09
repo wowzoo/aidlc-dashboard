@@ -28,7 +28,7 @@ import { type PipelineStore, RefreshPipeline } from "./credit/pipeline/refresh-p
 import { SnapshotStore } from "./credit/storage/snapshot-store";
 import { type CreditReadStore, assembleCredit } from "./credit/view/credit-model";
 import { resolveWindow } from "./credit/view/credit-view";
-import { NoRunError, type UsageContext, assemble } from "./model/assemble";
+import { NoRunError, type UsageContext, assemble, noRunText } from "./model/assemble";
 import type { Locale } from "./model/types";
 import { esc } from "./render/common";
 import { type Strings, strings } from "./render/i18n";
@@ -41,7 +41,7 @@ import { renderWorkspaceMenu } from "./render/workspace-menu";
 import { browse, resolveWorkspace, workspaceKey } from "./scan/browse";
 import { buildExplorer } from "./scan/explorer";
 import { openArtifact } from "./scan/open-file";
-import { resolveState } from "./scan/resolve";
+import { type NoRunKind, resolveState } from "./scan/resolve";
 import { readWorkspaceSummary } from "./scan/summary";
 import { readArtifactSource } from "./scan/view-file";
 import {
@@ -127,7 +127,7 @@ function html(
  * different sentences (`NoRunError` keeps them apart for exactly that reason), and the
  * caller has no way to recover the distinction once it is flattened.
  */
-type RecordDirResult = { ok: true; recordDir: string } | { ok: false; kind: "none" | "ambiguous" };
+type RecordDirResult = { ok: true; recordDir: string } | { ok: false; kind: NoRunKind };
 
 function activeRecordDir(root: string): RecordDirResult {
   const resolved = resolveState(root);
@@ -557,8 +557,7 @@ export async function handle(
     if (err instanceof NoRunError) {
       // Re-said in the reader's language from the FACTS the error carries, not from its
       // own `message` — that one was built with the default catalogue for the terminal.
-      const said =
-        err.kind === "ambiguous" ? s.cli.intentAmbiguous(err.root) : s.cli.noWorkflow(err.root);
+      const said = noRunText(s.cli, err.kind, err.root);
       return html(errorPage(root, said, locale), 404);
     }
     const message = err instanceof Error ? err.message : String(err);

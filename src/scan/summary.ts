@@ -34,7 +34,7 @@ import * as path from "node:path";
 import type { SourceKind } from "../model/types";
 import { type AidlcState, parseState } from "./parser";
 import { readQuestions } from "./questions";
-import { resolveState } from "./resolve";
+import { type NoRunKind, resolveState } from "./resolve";
 import { readStageCatalog } from "./stage-catalog";
 
 /**
@@ -101,10 +101,11 @@ export type WorkspaceSummary =
       progress: SummaryProgress;
       blockers: SummaryBlockers;
     }
-  /** No single intent resolves. The two reasons are kept apart because they are different
-   *  sentences: `none` is an empty or absent space, `ambiguous` is several records with no
-   *  active-intent cursor — the same split `NoRunError` carries. */
-  | { kind: "no-run"; reason: "none" | "ambiguous" }
+  /** No single intent resolves. The reasons are kept apart because they are different
+   *  sentences: `none` is an empty or absent space, `ambiguous` is several live records with
+   *  no active-intent cursor, `archived` is only archived records — the split `NoRunError`
+   *  carries (scan/resolve.ts). */
+  | { kind: "no-run"; reason: NoRunKind }
   /** The state file resolved and then could not be read. */
   | { kind: "unreadable" };
 
