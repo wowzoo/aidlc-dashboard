@@ -197,8 +197,11 @@ const status: StatusStrings = {
   checksFailed: (failed) => `✗ 검사 실패 ${failed}건 기록`,
   checksPassed: (passed) => `✓ 검사 통과 ${passed}건`,
   checksSource: (stage) => `sensor · ${stage} (Current Stage) · 감사 로그`,
+  checksUnevaluated: (n) => `? 아무것도 검사하지 못한 검사 ${n}건`,
+  checksUnevaluatedTip:
+    "Note 가 붙은 통과(도구 없음, 스크립트 오류)입니다. sensor 가 아무것도 평가하지 않았고, 차단 관문은 이를 실패처럼 거부합니다. 통과로 세지 않습니다",
   checksFailedTip:
-    "현재 stage 에서 기록된 sensor 실패 수입니다. 이후 재검사가 통과했는지는 이 집계만으로는 알 수 없습니다",
+    "현재 stage 에서 기록된 sensor 실패 중, 같은 출력에 대한 이후의 검증된 통과로 해소되지 않은 것입니다. 관문은 sensor 를 다시 실행하므로, 관문의 판정을 미리 말하는 것이 아니라 기록된 내용입니다",
 };
 
 const overview: OverviewStrings = {
@@ -437,7 +440,7 @@ const timeline: TimelineStrings = {
   zeroSecondTip: "0초 — 같은 초에 시작·완료",
   loadArtifacts: (n) => `산출 ${n}`,
   loadFailures: (n) => `실패 ${n}`,
-  loadDelegations: (n) => `위임 ${n}`,
+  loadDelegations: (n) => `리뷰 ${n}`,
   loadHumanTurns: (n) => `사람 ${n}`,
   noStageSpans: "감사 기록에 stage 구간 없음.",
 
@@ -486,6 +489,9 @@ const timeline: TimelineStrings = {
   statApproved: "승인",
   statRevisions: "수정 회차",
   statJumps: "stage 점프",
+  statReopened: "유닛 재진입",
+  statReopenedTip:
+    "사람의 요청으로 유닛 단위 stage 에 다시 들어간 횟수입니다(/aidlc --stage, 또는 재진입 때 Redo). 내용을 판정한 것이 아니므로 반려 수와 재작업 시간에는 넣지 않습니다",
   statFreezeBlocked: "검토중 편집 차단",
   colSubmissions: "제출",
   colSubmissionsTip: "STAGE_AWAITING_APPROVAL — 관문에 올린 횟수",

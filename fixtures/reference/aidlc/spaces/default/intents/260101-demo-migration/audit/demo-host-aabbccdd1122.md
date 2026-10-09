@@ -202,13 +202,26 @@
 **Timestamp**: 2026-01-01T03:30:00Z
 **Event**: REVIEW_REQUESTED
 **Stage**: code-generation
+**Reviewer**: code-reviewer
+**Iteration**: 1
+**Request Id**: review:0123456789abcdef0123456789abcdef
 
 ---
 
 ## Subagent Completed
-**Timestamp**: 2026-01-01T03:35:00Z
+**Timestamp**: 2026-01-01T03:34:00Z
 **Event**: SUBAGENT_COMPLETED
+**Agent Type**: code-reviewer
+
+---
+
+## Review Completed
+**Timestamp**: 2026-01-01T03:35:00Z
+**Event**: REVIEW_COMPLETED
 **Stage**: code-generation
+**Reviewer**: code-reviewer
+**Verdict**: approve
+**Request Id**: review:0123456789abcdef0123456789abcdef
 
 ---
 

@@ -37,6 +37,12 @@
 // resolved against the workspace's own stage catalogue — `isStage` below — and
 // only falls back to position when no catalogue was supplied.
 //
+// COPIED SHARDS ARE READ ONCE. A sync tool's conflict copy (`<shard> 2.md`) or a hand
+// copy repeats rows another shard already holds; read twice, every copied row ties
+// with itself across two files, doubles the counts and reads as causally unordered,
+// which stops every receipt stamped before the copy from settling. `copiedAuditBlocks`
+// is the engine's rule, transcribed, and the ledger skips what it names.
+//
 // Node fs only, never throws: an unreadable shard is skipped, not fatal.
 
 import * as fs from "node:fs";
@@ -129,12 +135,14 @@ export function parseAuditShard(
   shard: string,
   isStage?: IsStage,
   shardIndex = 0,
+  skip?: ReadonlySet<number>,
 ): AuditEvent[] {
   const out: AuditEvent[] = [];
-  // Normalise CRLF first so the `---` split and the line regex both hold on a
-  // shard that travelled through a Windows clone.
-  const blocks = text.replace(/\r\n/g, "\n").split("\n---\n");
+  const blocks = shardBlocks(text);
   for (let pos = 0; pos < blocks.length; pos++) {
+    // A skipped copy keeps its neighbours' positions: `pos` is the block's index in
+    // the file, never renumbered, as the engine's `parseAuditShardEvents` keeps it.
+    if (skip?.has(pos)) continue;
     const block = blocks[pos] ?? "";
     // The engine's `auditBlockField`: an optional leading `- ` is stripped, and a
     // duplicated field keeps its FIRST value. Keeping the last one let a repeated
@@ -173,6 +181,97 @@ export function parseAuditShard(
   return out;
 }
 
+/**
+ * The block sequence of one shard. CRLF is normalised first so the `---` split and the
+ * line regex both hold on a shard that travelled through a Windows clone.
+ */
+function shardBlocks(text: string): string[] {
+  return text.replace(/\r\n/g, "\n").split("\n---\n");
+}
+
+/** The engine's `auditBlockField(block, name) !== null`: first line carrying the field. */
+function hasField(block: string, name: string): boolean {
+  const prefix = `**${name}**:`;
+  return block
+    .split("\n")
+    .some((raw) => (raw.startsWith("- ") ? raw.slice(2) : raw).startsWith(prefix));
+}
+
+/** The engine's `AUDIT_SHARD_FILE_RE`: `<host>-<token>.md`, which a `"x 2.md"` copy is not. */
+const AUDIT_SHARD_FILE_RE = /^[a-z0-9][a-z0-9-]*-[a-z0-9]{1,32}\.md$/;
+
+/**
+ * Per shard, the block positions that are copies of a better-ranked shard's blocks —
+ * a transcription of the engine's `copiedAuditBlocks` (`tools/aidlc-lib.ts`, 2.11.0).
+ *
+ * Only shards whose FIRST block is identical and timestamped are compared, because a
+ * copy starts with its source's header and first row; a row two independent clones
+ * happen to write alike is therefore never taken for a copy. Within such a group a
+ * timestamped block found byte-identical in two or more files is read once, from the
+ * best of them: a file with a shard name, then the one with more timestamped blocks,
+ * then filename order. Repeats inside one file are not copies and stay.
+ *
+ * The engine ranks "this clone's own shard" first. A reader has no clone of its own —
+ * the same answer `aidlc-attest.ts` gives for a committed tree (`() => null`) — and the
+ * kept row's text is identical either way; only which file lends it a name differs.
+ */
+export function copiedAuditBlocks(
+  shards: readonly { shard: string; content: string }[],
+): Set<number>[] {
+  const skip = shards.map(() => new Set<number>());
+  if (shards.length < 2) return skip;
+  const groups = new Map<string, number[]>();
+  shards.forEach(({ content }, index) => {
+    const end = content.search(/\r?\n---\r?\n/);
+    const head = (end < 0 ? content : content.slice(0, end)).replace(/\r\n/g, "\n");
+    if (!hasField(head, "Timestamp")) return;
+    const members = groups.get(head);
+    if (members) members.push(index);
+    else groups.set(head, [index]);
+  });
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const blocks = members.map((index) =>
+      shardBlocks(shards[index]!.content).map((block) =>
+        hasField(block, "Timestamp") ? block : null,
+      ),
+    );
+    const holders = new Map<string, Set<number>>();
+    blocks.forEach((memberBlocks, member) => {
+      for (const block of memberBlocks) {
+        if (block === null) continue;
+        const found = holders.get(block);
+        if (found) found.add(member);
+        else holders.set(block, new Set([member]));
+      }
+    });
+    const counts = blocks.map((memberBlocks) => memberBlocks.filter((b) => b !== null).length);
+    const isShardName = (member: number): boolean =>
+      AUDIT_SHARD_FILE_RE.test(path.basename(shards[members[member]!]!.shard));
+    const order = members
+      .map((_, member) => member)
+      .sort((a, b) => {
+        if (isShardName(a) !== isShardName(b)) return isShardName(a) ? -1 : 1;
+        if (counts[a] !== counts[b]) return counts[b]! - counts[a]!;
+        return a - b;
+      });
+    const rank = new Map(order.map((member, position) => [member, position]));
+    blocks.forEach((memberBlocks, member) => {
+      memberBlocks.forEach((block, pos) => {
+        const found = block === null ? undefined : holders.get(block);
+        if (!found || found.size < 2) return;
+        for (const holder of found) {
+          if (rank.get(holder)! < rank.get(member)!) {
+            skip[members[member]!]!.add(pos);
+            return;
+          }
+        }
+      });
+    });
+  }
+  return skip;
+}
+
 /** Absolute paths of the audit shards in a record dir, sorted for determinism. */
 function shardPaths(recordDir: string): string[] {
   const dir = path.join(recordDir, "audit");
@@ -197,20 +296,19 @@ function shardPaths(recordDir: string): string[] {
  */
 export function readAuditLedger(recordDir: string, isStage?: IsStage): AuditLedger {
   const events: AuditEvent[] = [];
-  const shards: string[] = [];
+  const read: { shard: string; content: string }[] = [];
 
   for (const p of shardPaths(recordDir)) {
-    let text: string;
     try {
-      text = fs.readFileSync(p, "utf-8");
-    } catch {
-      continue;
-    }
-    const base = path.basename(p);
-    // A loop, not `push(...)`: spreading a large shard's events overflows the stack.
-    for (const e of parseAuditShard(text, base, isStage, shards.length)) events.push(e);
-    shards.push(base);
+      read.push({ shard: path.basename(p), content: fs.readFileSync(p, "utf-8") });
+    } catch {}
   }
+  const copied = copiedAuditBlocks(read);
+  read.forEach(({ shard, content }, index) => {
+    // A loop, not `push(...)`: spreading a large shard's events overflows the stack.
+    for (const e of parseAuditShard(content, shard, isStage, index, copied[index])) events.push(e);
+  });
+  const shards = read.map((r) => r.shard);
 
   // ISO second-precision UTC strings sort lexicographically == chronologically.
   // Ties keep insertion order (shard-sorted), which is stable in V8's sort.

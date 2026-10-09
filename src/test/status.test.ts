@@ -121,6 +121,28 @@ describe("status — readings", () => {
     expect(st.checks).toEqual({ state: "passed", passed: 2 });
   });
 
+  test("a failure a later verified pass retired is not a standing failure", () => {
+    const st = buildStatus(
+      withSensorRow({ fired: 2, passed: 1, failed: 1, superseded: 1, pending: 0 }),
+    );
+    expect(st.checks).toEqual({ state: "passed", passed: 1 });
+  });
+
+  test("a check that ran nothing is not a pass", () => {
+    const st = buildStatus(
+      withSensorRow({
+        fired: 2,
+        passed: 1,
+        failed: 0,
+        superseded: 0,
+        unevaluated: 1,
+        unevaluatedStanding: 1,
+        pending: 0,
+      }),
+    );
+    expect(st.checks).toEqual({ state: "unevaluated", unevaluated: 1, passed: 1 });
+  });
+
   test("an open gate with no unanswered question is still something awaiting the human", () => {
     const m = withGate("code-generation", { ...base, blockers: [] });
     const h = buildStatus(m).human;
@@ -168,6 +190,22 @@ describe("Run Health card — markup", () => {
     expect(html).toContain("내 답변");
     expect(html).toContain("막힘");
     expect(html).toContain("검사 실패");
+  });
+
+  test("a check that ran nothing says so in warning tone, never as passed", () => {
+    const m = withSensorRow({
+      fired: 1,
+      passed: 0,
+      failed: 0,
+      superseded: 0,
+      unevaluated: 1,
+      unevaluatedStanding: 1,
+      pending: 0,
+    });
+    const html = renderRunHealth({ ...m, sensors: { ...m.sensors, failures: [] } }, ko);
+    expect(html).toContain(ko.status.checksUnevaluated(1));
+    expect(html).toContain('<b class="mc-n warn">?</b>');
+    expect(html).not.toContain("검사 통과");
   });
 
   test("tab counts carry the signal: coloured when actionable", () => {

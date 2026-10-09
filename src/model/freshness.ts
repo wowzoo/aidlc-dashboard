@@ -3,7 +3,8 @@
 // The one non-obvious judgement is runtime-graph.json. It is not merely "old" —
 // it is recompiled only when a transition-class event lands in the audit tail
 // (GATE_APPROVED / STAGE_STARTED / STAGE_AWAITING_APPROVAL / AUDIT_MERGED /
-// WORKFLOW_COMPLETED, per hooks/aidlc-runtime-compile.ts). Mid-stage the audit
+// UNIT_MERGED / WORKFLOW_COMPLETED, per hooks/aidlc-rebuild-stage-graph.ts in
+// 2.11.0, whose header still lists four of them). Mid-stage the audit
 // keeps growing while the graph does not, so during the phase of a run someone
 // actually wants to watch, the graph is systematically behind.
 //

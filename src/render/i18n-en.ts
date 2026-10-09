@@ -209,8 +209,11 @@ const status: StatusStrings = {
   checksFailed: (failed) => `✗ ${plural(failed, "check failure")} recorded`,
   checksPassed: (passed) => `✓ ${plural(passed, "check")} passed`,
   checksSource: (stage) => `sensors · ${stage} (Current Stage) · audit log`,
+  checksUnevaluated: (n) => `? ${plural(n, "check")} ran nothing`,
+  checksUnevaluatedTip:
+    "A pass carrying a Note (tool unavailable, script error): the sensor evaluated nothing, and a blocking gate refuses it like a failure. Not counted as passed",
   checksFailedTip:
-    "Sensor failures recorded in the current stage. This roll-up cannot tell whether a later re-check passed",
+    "Sensor failures recorded in the current stage that no later verified pass of the same output has retired. The gate re-runs its sensors, so this is what was recorded, not a verdict ahead of it",
 };
 
 const overview: OverviewStrings = {
@@ -460,7 +463,7 @@ const timeline: TimelineStrings = {
   zeroSecondTip: "0s — started and completed in the same second",
   loadArtifacts: (n) => `artifacts ${n}`,
   loadFailures: (n) => `failed ${n}`,
-  loadDelegations: (n) => `delegated ${n}`,
+  loadDelegations: (n) => `reviews ${n}`,
   loadHumanTurns: (n) => `human ${n}`,
   noStageSpans: "The audit ledger holds no stage spans.",
 
@@ -512,6 +515,9 @@ const timeline: TimelineStrings = {
   statApproved: "approved",
   statRevisions: "revision rounds",
   statJumps: "stage jumps",
+  statReopened: "units reopened",
+  statReopenedTip:
+    "A per-unit stage re-entered at the person's request (/aidlc --stage, or Redo on re-entry). Not a rejection: the content was not judged, so it is neither in the rejected count nor in the rework time",
   statFreezeBlocked: "edits blocked in review",
   colSubmissions: "submitted",
   colSubmissionsTip: "STAGE_AWAITING_APPROVAL — how many times it was put to a gate",

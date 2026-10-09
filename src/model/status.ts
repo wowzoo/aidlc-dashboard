@@ -82,10 +82,13 @@ export type ChecksReading =
   | { state: "none" }
   | { state: "in-flight"; pending: number; failed: number; passed: number }
   /**
-   * At least one firing in this stage failed. The roll-up does not say whether a
-   * later re-fire passed, so this is "failures recorded", not "failing now".
+   * At least one failure in this stage that no later verified pass of the same output
+   * retired (`SensorFailure.supersededAt`). Still "failures recorded", not "failing
+   * now": the engine re-fires sensors live at the gate, which no record shows ahead.
    */
   | { state: "failed"; failed: number; passed: number }
+  /** No standing failure, but a sensor ran nothing — a pass carrying a `Note`. */
+  | { state: "unevaluated"; unevaluated: number; passed: number }
   | { state: "passed"; passed: number };
 
 export interface StatusStrip {
@@ -153,10 +156,14 @@ function readChecks(m: StatusInput): ChecksReading {
   const stage = m.state.currentStage;
   const row = stage ? m.sensors.stages.find((s) => s.stage === stage) : undefined;
   if (!row || row.fired === 0) return { state: "none" };
+  const failed = row.failed - row.superseded;
   if (row.pending > 0) {
-    return { state: "in-flight", pending: row.pending, failed: row.failed, passed: row.passed };
+    return { state: "in-flight", pending: row.pending, failed, passed: row.passed };
   }
-  if (row.failed > 0) return { state: "failed", failed: row.failed, passed: row.passed };
+  if (failed > 0) return { state: "failed", failed, passed: row.passed };
+  if (row.unevaluatedStanding > 0) {
+    return { state: "unevaluated", unevaluated: row.unevaluatedStanding, passed: row.passed };
+  }
   return { state: "passed", passed: row.passed };
 }
 

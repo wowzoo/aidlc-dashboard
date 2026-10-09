@@ -18,7 +18,7 @@
 // one run: 58 of 79 minutes). So each gap between consecutive events is sorted:
 //
 //   HUMAN  a gate-opening event followed by one of the engine's answer receipts
-//          (GATE_CLOSE — HUMAN_TURN is only one of five).
+//          (GATE_CLOSE — HUMAN_TURN is only one of eight).
 //   PARKED every clone PRESENT at that moment is between WORKFLOW_PARKED and
 //          WORKFLOW_UNPARKED, plus an inferred session break when an old ledger has
 //          no balanced park pair.
@@ -52,12 +52,7 @@
 import type { AuditEvent, AuditLedger } from "./audit";
 
 /** Events that open a human wait: after one of these, a gap to a receipt is IDLE. */
-const GATE_OPEN = new Set([
-  "DECISION_RECORDED",
-  "QUESTION_ASKED",
-  "GATE_OPENED",
-  "STAGE_AWAITING_APPROVAL",
-]);
+const GATE_OPEN = new Set(["DECISION_RECORDED", "QUESTION_ASKED", "STAGE_AWAITING_APPROVAL"]);
 
 /**
  * Events that CLOSE a human wait — the engine's documented answer receipts. Every one
@@ -83,13 +78,20 @@ const GATE_OPEN = new Set([
  * Measured on one real run: UNKNOWN 6.78h → 5.90h, 사용자 대기 2.17h → 3.20h (+47%),
  * with only 0.16h traded out of `observed`. The gate-open precondition stays — this
  * widens WHAT CLOSES a wait, never what opens one.
+ *
+ * The set is the engine's `GATE_RESOLUTION_EVENTS` (`tools/aidlc-lib.ts`, 2.11.0) plus
+ * `HUMAN_TURN`: the three recorded answers it adds — verification command,
+ * construction policy, plan approval — are each written after a person chose.
  */
 const GATE_CLOSE = new Set([
   "HUMAN_TURN",
-  "QUESTION_ANSWERED",
-  "SUMMARY_CONFIRMATION_RECORDED",
   "GATE_APPROVED",
   "GATE_REJECTED",
+  "QUESTION_ANSWERED",
+  "SUMMARY_CONFIRMATION_RECORDED",
+  "VERIFICATION_COMMAND_RECORDED",
+  "CONSTRUCTION_POLICY_RECORDED",
+  "PLAN_APPROVAL_RECORDED",
 ]);
 
 /**
@@ -110,9 +112,8 @@ const SESSION_RESUME = new Set([
   "SESSION_RESUMED",
 ]);
 
-/** Delegation open/close — the span between them is a subagent working. */
-const AGENT_OPEN = new Set(["REVIEW_REQUESTED", "SUBAGENT_DISPATCHED", "MERGE_DISPATCH"]);
-const AGENT_CLOSE = new Set(["SUBAGENT_COMPLETED", "REVIEW_COMPLETED"]);
+/** Merge-dispatch terminals: the agent returned, or the engine fell back to defaults. */
+const MERGE_DISPATCH_END = new Set(["MERGE_DISPATCH_RETURNED", "MERGE_DISPATCH_FALLBACK"]);
 
 /** Gaps shorter than this are not classified as waiting — they are just work. */
 const IDLE_FLOOR_SEC = 60;
@@ -151,7 +152,13 @@ export interface Workload {
   sensors: number;
   /** SENSOR_FAILED. */
   sensorFailures: number;
-  /** SUBAGENT_COMPLETED. */
+  /**
+   * REVIEW_COMPLETED on this stage. It used to be SUBAGENT_COMPLETED, which in 2.11 carries
+   * `Agent Type` and no stage (`hooks/aidlc-log-subagent.ts`), so the by-stage count read 0
+   * everywhere — and counting it by time span instead put 160 on one unit-major stage
+   * of run E, whose span covers every later stage the units walked. A review names its
+   * stage; a subagent does not.
+   */
   delegations: number;
   /** HUMAN_TURN (no stage field, so counted within the span). */
   humanTurns: number;
@@ -400,6 +407,72 @@ function secs(a: string, b: string): number {
 }
 
 /**
+ * Indices `g` of the gaps `events[g] → events[g + 1]` that lie inside a delegation.
+ *
+ * DELEGATION IS A WINDOW, NOT AN ADJACENT PAIR. `REVIEW_REQUESTED` is followed by the
+ * artifacts the reviewer writes, so the close is several events later: measured, 52 of
+ * 61 delegation gaps closed on `ARTIFACT_UPDATED`, leaving an adjacency test to
+ * recognise 0.31h of a real 14.4h. So each open is paired with ITS close and every gap
+ * in between is marked. An unclosed open marks nothing, so a dangling request cannot
+ * swallow the rest of the run.
+ *
+ * WHAT PAIRS WITH WHAT is the engine's own correlation, because "the next close in the
+ * shard" was not one. The 2.11.0 ledger has two delegations:
+ *
+ *   REVIEW_REQUESTED → REVIEW_COMPLETED   by `Request Id` — the completion must echo it
+ *                                         (`completionCarriesVerifiedReview`). A retry
+ *                                         re-sends the SAME id and a replacement mints a
+ *                                         new one, so the window opens at the LAST request
+ *                                         the completion answers: what ran before a retry
+ *                                         is not known to have been the reviewer.
+ *   MERGE_DISPATCH_INVOKED → _RETURNED | _FALLBACK
+ *                                         by `Bolt slug`, the first unconsumed terminal at
+ *                                         or after it — the doctor's pairing; the format
+ *                                         documents no correlation tag.
+ *
+ * `SUBAGENT_COMPLETED` closed windows before this, and `SUBAGENT_DISPATCHED`, bare
+ * `MERGE_DISPATCH` and `GATE_OPENED` were read as opens — none of the three exists in the
+ * 2.11.0 engine, and a subagent completion carries no request it answers. On a run whose
+ * Claude Code hook writes one per subagent, the first of them closed a review window
+ * long before its `REVIEW_COMPLETED`.
+ *
+ * Same shard, as before: the reviewer writes in the clone that asked.
+ */
+function delegationGaps(events: readonly AuditEvent[]): Set<number> {
+  const marked = new Set<number>();
+  const mark = (from: number, to: number): void => {
+    for (let g = from; g < to; g++) marked.add(g);
+  };
+  const reviews = new Map<string, number>(); // shard \0 request id → last request index
+  const merges = new Map<string, number[]>(); // shard \0 bolt slug → open invocations
+  events.forEach((e, i) => {
+    if (e.event === "REVIEW_REQUESTED" || e.event === "REVIEW_COMPLETED") {
+      const id = e.fields["Request Id"];
+      if (!id) return;
+      const key = `${e.shard}\0${id}`;
+      if (e.event === "REVIEW_REQUESTED") reviews.set(key, i);
+      else {
+        const from = reviews.get(key);
+        if (from === undefined) return;
+        mark(from, i);
+        reviews.delete(key);
+      }
+    } else if (e.event === "MERGE_DISPATCH_INVOKED" || MERGE_DISPATCH_END.has(e.event)) {
+      const slug = e.fields["Bolt slug"];
+      if (!slug) return;
+      const key = `${e.shard}\0${slug}`;
+      const open = merges.get(key) ?? [];
+      if (e.event === "MERGE_DISPATCH_INVOKED") merges.set(key, [...open, i]);
+      else {
+        const from = open.shift();
+        if (from !== undefined) mark(from, i);
+      }
+    }
+  });
+  return marked;
+}
+
+/**
  * Classify the gaps between consecutive events. Exported for tests: the whole
  * IDLE/AGENT/WORK rule is here and checkable from a synthetic event list.
  *
@@ -447,26 +520,7 @@ export function classifyGaps(
     return out;
   };
 
-  // DELEGATION IS A WINDOW, NOT AN ADJACENT PAIR. `REVIEW_REQUESTED` is followed by
-  // the artifacts the reviewer writes, so the close is several events later:
-  // measured, 52 of 61 delegation gaps closed on `ARTIFACT_UPDATED`, leaving the
-  // adjacency test to recognise 0.31h of a real 14.4h and dumping the rest into
-  // UNKNOWN. Pair each open with the next close IN THE SAME SHARD and mark the
-  // gaps in between. An unclosed open is never marked, so a dangling
-  // `REVIEW_REQUESTED` cannot swallow the rest of the run.
-  const delegatedGaps = new Set<number>();
-  const openDelegation = new Map<string, number>();
-  events.forEach((event, i) => {
-    if (AGENT_OPEN.has(event.event)) {
-      if (!openDelegation.has(event.shard)) openDelegation.set(event.shard, i);
-    } else if (AGENT_CLOSE.has(event.event)) {
-      const from = openDelegation.get(event.shard);
-      if (from !== undefined) {
-        for (let g = from; g < i; g++) delegatedGaps.add(g);
-        openDelegation.delete(event.shard);
-      }
-    }
-  });
+  const delegatedGaps = delegationGaps(events);
 
   for (let i = 0; i < events.length - 1; i++) {
     const a = events[i]!;
@@ -811,7 +865,7 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
       if (e.event === "ARTIFACT_CREATED" || e.event === "ARTIFACT_UPDATED") workload.artifacts++;
       else if (e.event === "SENSOR_FIRED") workload.sensors++;
       else if (e.event === "SENSOR_FAILED") workload.sensorFailures++;
-      else if (e.event === "SUBAGENT_COMPLETED") workload.delegations++;
+      else if (e.event === "REVIEW_COMPLETED") workload.delegations++;
     }
     for (const segment of stageSegments) {
       workload.humanTurns += actual.filter(

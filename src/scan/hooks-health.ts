@@ -9,14 +9,17 @@
 //                                     engine's own doctor reads.
 //   .aidlc-hooks-health/<hook>.drops  TSV `<ISO>\t<reason>`, one line per event
 //                                     the hook chose NOT to act on. Append-only.
-//   .aidlc-stop-hook/block-count.json {"signature":"<stage>::<auditLines>","count":N}
+//   .aidlc-engine/stop-hook/block-count.json
+//                                     {"signature":"<stage>::<state sha256>::<directive
+//                                     fingerprint>","count":N}
 //
 // READING block-count CORRECTLY. `count` is a NO-PROGRESS counter, not an
 // activity counter: the stop hook increments it for each consecutive block with
-// no intervening workflow advance, and resets it to 0 the moment the signature
-// changes (a `report` ran). So a rising count means the loop is stuck, and 0
-// means healthy — the opposite of the "heartbeat" reading it invites. See
-// hooks/aidlc-stop.ts (the no-progress counter and its run-mode-aware cap).
+// no intervening workflow advance, and the first block after a changed signature
+// writes 1, not 0 — 0 comes only from done/notice/parked/handoff. So a rising count
+// means the loop is stuck — the opposite of the "heartbeat" reading it invites. See
+// hooks/aidlc-continue-workflow.ts (the counter and its run-mode-aware cap) and
+// model/status.ts for how the levels are read.
 //
 // A `.drops` reason containing "[degraded]" marks a degraded-mode drop, which the
 // engine's doctor counts separately; we surface it the same way.

@@ -37,6 +37,21 @@
 // recompiled at stage transitions, so for the in-flight stage — the one being
 // looked at — it is empty while audit already holds hundreds of firings.
 //
+// A PASS WITH A `Note` EVALUATED NOTHING. `tool-unavailable` or `script-error: …`
+// (`tools/aidlc-sensor.ts`) rides on `SENSOR_PASSED`, and `audit-format.md` says a
+// blocking gate refuses it like a failure. Counting it as a pass put a green "checks
+// passed" on a stage whose checker never ran, so it is its own count, `unevaluated`.
+//
+// A VERIFIED PASS RETIRES EARLIER FAILURES OF THE SAME OUTPUT. On a pass with no Note
+// the engine deletes that sensor's older detail files for the same output path in the
+// stage (`pruneSupersededDetailFiles`) — "without this the directory keeps showing a
+// failure that no longer exists". The audit keeps the failure row, so a reader that
+// stopped there showed the failure as current AND, its body now gone, as "recorded on
+// another clone". A failure followed by such a pass is `supersededAt` instead. The
+// engine compares realpaths; a reader of a copied tree compares the recorded spelling
+// (separators normalised), so a second spelling of one output keeps the failure shown,
+// which is the side to err on.
+//
 // Node fs only, never throws.
 
 import * as fs from "node:fs";
@@ -69,14 +84,26 @@ export interface SensorFailure {
   unreferenced: string[];
   /** Detail-file basename, or undefined when no body was found on disk. */
   detailFile?: string;
+  /**
+   * When a later verified pass of the same sensor on the same output in the same stage
+   * retired this failure — the pass that made the engine delete its detail file.
+   */
+  supersededAt?: string;
 }
 
 /** Per-stage roll-up of firings. */
 export interface SensorStageSummary {
   stage: string;
   fired: number;
+  /** Verified passes only — a pass carrying a `Note` is in `unevaluated`. */
   passed: number;
+  /** `SENSOR_PASSED` with a `Note`: the sensor ran nothing (tool missing, script error). */
+  unevaluated: number;
+  /** Of `unevaluated`, those no later verified pass of the same output answered. */
+  unevaluatedStanding: number;
   failed: number;
+  /** Failures a later verified pass retired; a subset of `failed`. */
+  superseded: number;
   budgetOverride: number;
   /** Firings with no terminal event yet — in flight at read time. */
   pending: number;
@@ -91,6 +118,7 @@ export interface SensorReport {
   failures: SensorFailure[];
   totalFired: number;
   totalPassed: number;
+  totalUnevaluated: number;
   totalFailed: number;
   /** Detail files found on disk that no audit failure claimed — a drift signal. */
   orphanDetailFiles: number;
@@ -98,7 +126,8 @@ export interface SensorReport {
    * Failures whose findings body is absent. Normal in a multi-clone record: the
    * audit merges every clone's shard while `.aidlc-sensors/` holds only the local
    * clone's files, so these findings exist — on another machine. Reported so the
-   * screen can say that instead of showing a failure with an empty body.
+   * screen can say that instead of showing a failure with an empty body. A superseded
+   * failure is not counted: the engine deleted its body on purpose.
    */
   failuresWithoutBody: number;
 }
@@ -116,6 +145,14 @@ interface DetailBody {
 }
 
 const FIELD_RE = /^\*\*([^*]+)\*\*:[ \t]*(.*)$/;
+
+/** What a verified pass retires: one sensor, one stage, one output (spelling-normalised). */
+function outputKey(e: { fields: Record<string, string>; stage?: string }): string | undefined {
+  const id = e.fields["Sensor ID"];
+  const output = e.fields["Output path"];
+  if (!id || !output) return undefined;
+  return `${e.stage ?? ""}\0${id}\0${output.trim().replace(/\\/g, "/")}`;
+}
 
 /**
  * Parse one `.aidlc-sensors/**` detail file. Exported for tests — the format
@@ -232,27 +269,50 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
   const stageOf = (stage: string): SensorStageSummary => {
     let s = perStage.get(stage);
     if (!s) {
-      s = { stage, fired: 0, passed: 0, failed: 0, budgetOverride: 0, pending: 0, byId: new Map() };
+      s = {
+        stage,
+        fired: 0,
+        passed: 0,
+        unevaluated: 0,
+        unevaluatedStanding: 0,
+        failed: 0,
+        superseded: 0,
+        budgetOverride: 0,
+        pending: 0,
+        byId: new Map(),
+      };
       perStage.set(stage, s);
     }
     return s;
   };
 
-  // Terminal events per fire id, so a FIRED with no terminal counts as pending.
+  // Terminal events per fire id, so a FIRED with no terminal counts as pending. A
+  // noted pass is told apart here, and each output's LAST verified pass is kept for the
+  // failures it retires.
   const terminal = new Map<string, string>();
-  for (const e of ledger.events) {
+  const lastVerifiedPass = new Map<string, { index: number; ts: string }>();
+  const notedPasses: { index: number; stage: string; key?: string }[] = [];
+  ledger.events.forEach((e, index) => {
     if (
       e.event === "SENSOR_PASSED" ||
       e.event === "SENSOR_FAILED" ||
       e.event === "SENSOR_BUDGET_OVERRIDE"
     ) {
+      const noted = e.event === "SENSOR_PASSED" && Object.hasOwn(e.fields, "Note");
       const fid = e.fields["Fire id"];
-      if (fid) terminal.set(fid, e.event);
+      if (fid) terminal.set(fid, noted ? "SENSOR_PASSED+Note" : e.event);
+      const key = e.event === "SENSOR_PASSED" ? outputKey(e) : undefined;
+      if (noted) notedPasses.push({ index, stage: e.stage ?? "(unattributed)", key });
+      else if (key) lastVerifiedPass.set(key, { index, ts: e.ts });
     }
-  }
+  });
+  const answered = (key: string | undefined, index: number): string | undefined => {
+    const pass = key ? lastVerifiedPass.get(key) : undefined;
+    return pass && pass.index > index ? pass.ts : undefined;
+  };
 
   const failures: SensorFailure[] = [];
-  for (const e of ledger.events) {
+  for (const [index, e] of ledger.events.entries()) {
     if (e.event === "SENSOR_FIRED") {
       const stage = e.stage ?? "(unattributed)";
       const s = stageOf(stage);
@@ -262,6 +322,7 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
       const fid = e.fields["Fire id"];
       const t = fid ? terminal.get(fid) : undefined;
       if (t === "SENSOR_PASSED") s.passed++;
+      else if (t === "SENSOR_PASSED+Note") s.unevaluated++;
       else if (t === "SENSOR_FAILED") s.failed++;
       else if (t === "SENSOR_BUDGET_OVERRIDE") s.budgetOverride++;
       else s.pending++;
@@ -272,6 +333,8 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
     const fireId = e.fields["Fire id"] ?? "";
     const body = fireId ? bodies.get(fireId) : undefined;
     if (body) claimed.add(fireId);
+    const supersededAt = answered(outputKey(e), index);
+    if (supersededAt) stageOf(e.stage ?? body?.stage ?? "(unattributed)").superseded++;
     const countRaw = e.fields["Findings count"];
     failures.push({
       id: e.fields["Sensor ID"] ?? body?.sensorId ?? "(unknown)",
@@ -284,10 +347,13 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
       errors: body?.errors ?? [],
       unreferenced: body?.unreferenced ?? [],
       detailFile: body?.file,
+      ...(supersededAt ? { supersededAt } : {}),
     });
   }
 
   failures.reverse(); // ledger is ascending; failures read newest-first
+  for (const p of notedPasses)
+    if (!answered(p.key, p.index)) stageOf(p.stage).unevaluatedStanding++;
 
   const stages = [...perStage.values()];
   return {
@@ -295,8 +361,10 @@ export function readSensorReport(recordDir: string, ledger: AuditLedger): Sensor
     failures,
     totalFired: stages.reduce((n, s) => n + s.fired, 0),
     totalPassed: stages.reduce((n, s) => n + s.passed, 0),
+    totalUnevaluated: stages.reduce((n, s) => n + s.unevaluated, 0),
     totalFailed: stages.reduce((n, s) => n + s.failed, 0),
     orphanDetailFiles: [...bodies.keys()].filter((k) => !claimed.has(k)).length,
-    failuresWithoutBody: failures.filter((f) => f.detailFile === undefined).length,
+    failuresWithoutBody: failures.filter((f) => f.detailFile === undefined && !f.supersededAt)
+      .length,
   };
 }

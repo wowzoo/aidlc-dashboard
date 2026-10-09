@@ -66,7 +66,7 @@ describe("assemble on the fixture workspace", () => {
   test("merges BOTH audit shards in time order", () => {
     const shards = new Set(m.recentEvents.map((e) => e.shard));
     expect(shards.size).toBe(2);
-    expect(m.totalEvents).toBe(33); // 30 in the main shard + 3 in the second
+    expect(m.totalEvents).toBe(34); // 31 in the main shard + 3 in the second
     // The second shard's events are later, so they sort last overall.
     expect(m.recentEvents[0]?.ts).toBe("2026-01-02T09:58:00Z");
   });

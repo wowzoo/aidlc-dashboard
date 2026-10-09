@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseAuditShard, parseContext } from "../scan/audit";
+import { copiedAuditBlocks, parseAuditShard, parseContext, readAuditLedger } from "../scan/audit";
 import type { AuditEvent } from "../scan/audit";
 import { parseDeferralSections, readDeferrals, resolveOwner } from "../scan/deferrals";
 import { engineReadDir } from "../scan/engine-dir";
@@ -73,6 +73,49 @@ describe("audit shard", () => {
     const ev = parseAuditShard(SHARD, "s.md");
     expect(ev[1]?.stage).toBe("code-generation");
     expect(ev[1]?.fields["Fire id"]).toBe("abcd1234");
+  });
+
+  // A sync tool's conflict copy repeats every row; read twice, each row ties with
+  // itself across two files and the counts double.
+  test("a conflict copy of a shard is read once, from the shard-named file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-copy-"));
+    try {
+      fs.mkdirSync(path.join(dir, "audit"));
+      const extra =
+        "\n## Stage Done\n**Timestamp**: 2026-01-01T00:02:00Z\n**Event**: STAGE_COMPLETED\n**Stage**: intent-capture\n\n---\n";
+      fs.writeFileSync(path.join(dir, "audit", "host-aabbccdd1122.md"), SHARD);
+      // The copy has one row the original lacks: it is still read, once.
+      fs.writeFileSync(path.join(dir, "audit", "host-aabbccdd1122 2.md"), SHARD + extra);
+      const ledger = readAuditLedger(dir);
+      expect(ledger.events.map((e) => e.event)).toEqual([
+        "STAGE_STARTED",
+        "SENSOR_FIRED",
+        "STAGE_COMPLETED",
+      ]);
+      expect(ledger.counts.get("STAGE_STARTED")).toBe(1);
+      // The shared rows come from the shard-named file even though the copy holds more.
+      expect(ledger.events[0]?.shard).toBe("host-aabbccdd1122.md");
+      expect(ledger.events[2]?.shard).toBe("host-aabbccdd1122 2.md");
+      // Positions are the file's own, never renumbered after a skip.
+      expect(ledger.events[2]?.pos).toBe(2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("shards that start differently are never compared, even with an identical row", () => {
+    const other = SHARD.replace("**Agent**: orchestrator", "**Agent**: someone-else");
+    const skip = copiedAuditBlocks([
+      { shard: "a-aabbccdd1122.md", content: SHARD },
+      { shard: "b-112233445566.md", content: other },
+    ]);
+    expect(skip.map((set) => set.size)).toEqual([0, 0]);
+  });
+
+  test("repeats inside one file are not copies", () => {
+    const twice = `${SHARD}${SHARD.slice(SHARD.indexOf("\n## Sensor"))}`;
+    expect(parseAuditShard(twice, "s.md").filter((e) => e.event === "SENSOR_FIRED").length).toBe(2);
+    expect(copiedAuditBlocks([{ shard: "s.md", content: twice }])[0]?.size).toBe(0);
   });
 
   test("skips the title block (no Timestamp/Event)", () => {
@@ -1403,6 +1446,72 @@ describe("sensor detail", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  const sensorEv = (
+    ts: string,
+    event: string,
+    fireId: string,
+    extra: Record<string, string> = {},
+  ) =>
+    ({
+      ts,
+      event,
+      fields: {
+        "Fire id": fireId,
+        "Sensor ID": "type-check",
+        "Output path": "/w/src/a.ts",
+        ...extra,
+      },
+      shard: "s.md",
+      stage: "code-generation",
+    }) as AuditEvent;
+  const report = (events: AuditEvent[]) =>
+    readSensorReport(path.join(os.tmpdir(), "aidlc-no-such-record"), {
+      events,
+      counts: new Map(),
+      shards: ["s.md"],
+    });
+
+  // A noted pass ran nothing; the gate refuses it like a failure.
+  test("a pass carrying a Note is unevaluated, not passed", () => {
+    const r = report([
+      sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
+      sensorEv("2026-01-01T00:00:01Z", "SENSOR_PASSED", "f1", { Note: "tool-unavailable" }),
+      sensorEv("2026-01-01T00:00:02Z", "SENSOR_FIRED", "f2"),
+      sensorEv("2026-01-01T00:00:03Z", "SENSOR_PASSED", "f2"),
+    ]);
+    const st = r.stages[0]!;
+    expect(st.passed).toBe(1);
+    expect(st.unevaluated).toBe(1);
+    // The verified pass of the same output came later, so nothing is left standing.
+    expect(st.unevaluatedStanding).toBe(0);
+    expect(r.totalPassed).toBe(1);
+    expect(r.totalUnevaluated).toBe(1);
+  });
+
+  // The engine deletes the failure's detail file on that pass; the body is gone on
+  // purpose, so it is neither "on another clone" nor a standing failure.
+  test("a later verified pass of the same output retires a failure; a noted one does not", () => {
+    const r = report([
+      sensorEv("2026-01-01T00:00:00Z", "SENSOR_FIRED", "f1"),
+      sensorEv("2026-01-01T00:00:01Z", "SENSOR_FAILED", "f1"),
+      sensorEv("2026-01-01T00:00:02Z", "SENSOR_FIRED", "f2", { "Output path": "/w/src/b.ts" }),
+      sensorEv("2026-01-01T00:00:03Z", "SENSOR_FAILED", "f2", { "Output path": "/w/src/b.ts" }),
+      sensorEv("2026-01-01T00:00:04Z", "SENSOR_FIRED", "f3"),
+      sensorEv("2026-01-01T00:00:05Z", "SENSOR_PASSED", "f3"),
+      sensorEv("2026-01-01T00:00:06Z", "SENSOR_FIRED", "f4", { "Output path": "/w/src/b.ts" }),
+      sensorEv("2026-01-01T00:00:07Z", "SENSOR_PASSED", "f4", {
+        "Output path": "/w/src/b.ts",
+        Note: "script-error: exit-2",
+      }),
+    ]);
+    const a = r.failures.find((f) => f.fireId === "f1")!;
+    const b = r.failures.find((f) => f.fireId === "f2")!;
+    expect(a.supersededAt).toBe("2026-01-01T00:00:05Z");
+    expect(b.supersededAt).toBeUndefined();
+    expect(r.stages[0]?.superseded).toBe(1);
+    expect(r.failuresWithoutBody).toBe(1); // b only
+  });
 });
 
 describe("engine dir (2.9+)", () => {
@@ -1480,6 +1589,12 @@ describe("hook drops", () => {
 
 describe("gap classification", () => {
   const ev = (ts: string, event: string): AuditEvent => ({ ts, event, fields: {}, shard: "s" });
+  const evf = (ts: string, event: string, fields: Record<string, string>): AuditEvent => ({
+    ts,
+    event,
+    fields,
+    shard: "s",
+  });
 
   test("gate → HUMAN_TURN is IDLE", () => {
     const g = classifyGaps([
@@ -1565,8 +1680,8 @@ describe("gap classification", () => {
 
   test("delegation counts as AGENT and inside WORK", () => {
     const g = classifyGaps([
-      ev("2026-01-01T00:00:00Z", "REVIEW_REQUESTED"),
-      ev("2026-01-01T00:10:00Z", "SUBAGENT_COMPLETED"),
+      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      evf("2026-01-01T00:10:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
     ]);
     expect(g.agentSec).toBe(600);
     expect(g.workSec).toBe(600);
@@ -1679,10 +1794,10 @@ describe("gap classification", () => {
   // closed on `ARTIFACT_UPDATED`, so an adjacency test saw 0.31h of a real 14.4h.
   test("delegation spans the whole open→close window, not just the adjacent pair", () => {
     const g = classifyGaps([
-      ev("2026-01-01T00:00:00Z", "REVIEW_REQUESTED"),
+      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
       ev("2026-01-01T00:20:00Z", "ARTIFACT_UPDATED"),
       ev("2026-01-01T00:40:00Z", "ARTIFACT_UPDATED"),
-      ev("2026-01-01T01:00:00Z", "REVIEW_COMPLETED"),
+      evf("2026-01-01T01:00:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
       // After the close, an equally long gap is NOT delegation.
       ev("2026-01-01T01:20:00Z", "ARTIFACT_UPDATED"),
     ]);
@@ -1691,9 +1806,67 @@ describe("gap classification", () => {
     expect(g.unknownSec).toBe(1200); // the post-close gap stays unclassified
   });
 
+  // 2.11 writes a SUBAGENT_COMPLETED per subagent (Claude Code's hook), carrying no
+  // request it answers; closing on the first one cut a review window to its first minute.
+  test("a subagent completion does not close a review: only its own Request Id does", () => {
+    const g = classifyGaps([
+      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      ev("2026-01-01T00:01:00Z", "SUBAGENT_COMPLETED"),
+      evf("2026-01-01T00:20:00Z", "REVIEW_COMPLETED", { "Request Id": "review:other" }),
+      evf("2026-01-01T00:40:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
+    ]);
+    expect(g.delegatedSec).toBe(2400);
+    expect(g.unknownSec).toBe(0);
+  });
+
+  test("a retried request opens the window at the last request its completion answers", () => {
+    const g = classifyGaps([
+      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
+      ev("2026-01-01T00:30:00Z", "SESSION_STARTED"),
+      evf("2026-01-01T00:31:00Z", "REVIEW_REQUESTED", {
+        "Request Id": "review:a",
+        Retry: "pending-request",
+      }),
+      evf("2026-01-01T00:41:00Z", "REVIEW_COMPLETED", { "Request Id": "review:a" }),
+    ]);
+    expect(g.delegatedSec).toBe(600);
+  });
+
+  test("merge dispatch pairs by Bolt slug with the first terminal after it", () => {
+    const g = classifyGaps([
+      evf("2026-01-01T00:00:00Z", "MERGE_DISPATCH_INVOKED", { "Bolt slug": "b1" }),
+      evf("2026-01-01T00:02:00Z", "MERGE_DISPATCH_INVOKED", { "Bolt slug": "b2" }),
+      evf("2026-01-01T00:10:00Z", "MERGE_DISPATCH_FALLBACK", { "Bolt slug": "b2" }),
+      evf("2026-01-01T00:20:00Z", "MERGE_DISPATCH_RETURNED", { "Bolt slug": "b1" }),
+      // A terminal with no invocation open marks nothing.
+      evf("2026-01-01T00:40:00Z", "MERGE_DISPATCH_RETURNED", { "Bolt slug": "b1" }),
+    ]);
+    expect(g.delegatedSec).toBe(1200);
+    expect(g.unknownSec).toBe(1200);
+  });
+
+  test("events the 2.11 engine never writes open nothing", () => {
+    const g = classifyGaps([
+      ev("2026-01-01T00:00:00Z", "SUBAGENT_DISPATCHED"),
+      ev("2026-01-01T00:10:00Z", "SUBAGENT_COMPLETED"),
+      ev("2026-01-01T00:20:00Z", "GATE_OPENED"),
+      ev("2026-01-01T00:30:00Z", "HUMAN_TURN"),
+    ]);
+    expect(g.delegatedSec).toBe(0);
+    expect(g.humanWaitSec).toBe(0);
+  });
+
+  test("a recorded plan approval closes the wait like any other answer receipt", () => {
+    const g = classifyGaps([
+      ev("2026-01-01T00:00:00Z", "DECISION_RECORDED"),
+      ev("2026-01-01T00:30:00Z", "PLAN_APPROVAL_RECORDED"),
+    ]);
+    expect(g.humanWaitSec).toBe(1800);
+  });
+
   test("an unclosed delegation marks nothing, so a dangling open cannot swallow the run", () => {
     const g = classifyGaps([
-      ev("2026-01-01T00:00:00Z", "REVIEW_REQUESTED"),
+      evf("2026-01-01T00:00:00Z", "REVIEW_REQUESTED", { "Request Id": "review:a" }),
       ev("2026-01-01T00:20:00Z", "ARTIFACT_UPDATED"),
       ev("2026-01-01T00:40:00Z", "ARTIFACT_UPDATED"),
     ]);
@@ -2046,6 +2219,61 @@ describe("rework", () => {
     expect(r.reworkSec).toBe(0);
     expect(r.rejected).toBe(0);
     expect(r.approved).toBe(1);
+  });
+
+  // The approve-time backstop writes the backfilled rejection, the revision and the
+  // re-entered gate in the SAME second as the approval that follows them.
+  test("a backfilled rejection settles on the approval written in the same second", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "STAGE_AWAITING_APPROVAL", "x"),
+        at("2026-01-01T01:00:00Z", "GATE_REJECTED", "x", { Recovered: "true" }),
+        at("2026-01-01T01:00:00Z", "STAGE_REVISING", "x", { Recovered: "true" }),
+        at("2026-01-01T01:00:00Z", "STAGE_AWAITING_APPROVAL", "x", { Recovered: "true" }),
+        at("2026-01-01T01:00:00Z", "GATE_APPROVED", "x"),
+        at("2026-01-01T02:00:00Z", "STAGE_COMPLETED", "x"),
+      ]),
+    );
+    expect(r.stages[0]?.settled).toBe(true);
+    expect(r.stages[0]?.reworkSec).toBe(0);
+    expect(r.provisional).toBe(false);
+  });
+
+  test("a unit gate is its own record: unit B's approval does not settle unit A", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "cg", { Unit: "A", Feedback: "A 다시" }),
+        at("2026-01-01T01:00:00Z", "GATE_APPROVED", "cg", { Unit: "B" }),
+        at("2026-01-01T02:00:00Z", "ARTIFACT_UPDATED", "cg", { Unit: "A" }),
+      ]),
+    );
+    expect(r.stages.length).toBe(1);
+    expect(r.stages[0]?.unit).toBe("A");
+    expect(r.stages[0]?.settled).toBe(false);
+    expect(r.stages[0]?.reworkSec).toBe(7200);
+  });
+
+  test("a reopen on request is not a rejection; a Request Changes reopen is", () => {
+    const r = buildRework(
+      ledger([
+        at("2026-01-01T00:00:00Z", "GATE_REJECTED", "fd", {
+          Unit: "A",
+          Reopen: "jump",
+          Feedback: "Reopened Functional Design for unit A (/aidlc --stage fd).",
+        }),
+        at("2026-01-01T00:10:00Z", "GATE_REJECTED", "fd", { Unit: "B", Reopen: "redo" }),
+        at("2026-01-01T00:20:00Z", "GATE_REJECTED", "fd", {
+          Unit: "C",
+          Reopen: "change",
+          Feedback: "도메인 경계를 다시",
+        }),
+        at("2026-01-01T01:20:00Z", "GATE_APPROVED", "fd", { Unit: "C" }),
+      ]),
+    );
+    expect(r.reopened).toBe(2);
+    expect(r.rejected).toBe(1);
+    expect(r.stages.map((st) => st.unit)).toEqual(["C"]);
+    expect(r.stages[0]?.feedback.map((f) => f.text)).toEqual(["도메인 경계를 다시"]);
   });
 });
 

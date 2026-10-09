@@ -346,7 +346,7 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
   const x = s.status;
   const stage = m.state.currentStage;
   const now = Date.parse(m.generatedAt);
-  const failures = m.sensors.failures.filter((f) => f.stage === stage);
+  const failures = m.sensors.failures.filter((f) => f.stage === stage && !f.supersededAt);
   const rows: Row[] = failures.map((f) => {
     const age = (now - Date.parse(f.ts)) / 1000;
     const findings = f.findingsCount !== undefined ? ` · ${f.findingsCount}` : "";
@@ -375,6 +375,16 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
         rows.push({ label: esc(x.checksFailed(r.failed)), value: "", pct: 100, tone: "bad" });
       }
       count = { text: String(r.failed), tone: "bad" };
+      break;
+    case "unevaluated":
+      rows.push({
+        label: esc(x.checksUnevaluated(r.unevaluated)),
+        value: "",
+        pct: 100,
+        tone: "warn",
+        tip: x.checksUnevaluatedTip,
+      });
+      count = { text: "?", tone: "warn" };
       break;
     case "passed":
       rows.push({ label: esc(x.checksPassed(r.passed)), value: "", tone: "ok" });

@@ -266,6 +266,8 @@ export interface StatusStrings {
   checksInFlight(pending: number): string;
   checksFailed(failed: number): string;
   checksPassed(passed: number): string;
+  checksUnevaluated(n: number): string;
+  readonly checksUnevaluatedTip: string;
   /** Names the stage the checks are for — Current Stage, which can differ from the run line. */
   checksSource(stage: string): string;
   readonly checksFailedTip: string;
@@ -532,6 +534,8 @@ export interface TimelineStrings {
   readonly statApproved: string;
   readonly statRevisions: string;
   readonly statJumps: string;
+  readonly statReopened: string;
+  readonly statReopenedTip: string;
   readonly statFreezeBlocked: string;
   readonly colSubmissions: string;
   readonly colSubmissionsTip: string;

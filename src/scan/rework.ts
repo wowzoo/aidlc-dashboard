@@ -21,13 +21,31 @@
 // last rejection the rework is still open: `settled` is false and the span is measured
 // to the stage's last event, which the screen marks provisional rather than dropping.
 //
+// "AFTER" IS LEDGER ORDER, NOT A LATER TIMESTAMP. The approve-time revision backstop
+// writes `GATE_REJECTED` (`Recovered: true`), `STAGE_REVISING` and the re-entered
+// `STAGE_AWAITING_APPROVAL` in the same second as the `GATE_APPROVED` that follows
+// (`tools/aidlc-state.ts approve`), so a strict `ts >` comparison left every backfilled
+// rejection unsettled for good.
+//
+// A UNIT GATE IS ITS OWN RECORD. Unit-end and team gate rows carry `Unit`; keyed by
+// stage alone, unit A's rejection was "settled" by unit B's approval.
+//
+// A REOPEN IS NOT A REJECTION. 2.11 writes `GATE_REJECTED` with `Reopen: jump|redo|change`
+// when the person re-enters a per-unit stage (`tools/aidlc-jump.ts`): `jump` is
+// `/aidlc --stage`, `redo` the Redo answer on re-entry, `change` a Request Changes at
+// the late question. Only `change` judges the content — its Feedback holds the person's
+// words — so `jump`/`redo` are counted as reopens, apart from rejections, and their
+// engine-written Feedback is not offered as a human's reason.
+//
 // Node-free and never throws: it reads the already-parsed ledger.
 
-import type { AuditLedger } from "./audit";
+import type { AuditEvent, AuditLedger } from "./audit";
 
 /** One stage's rework record. Only stages that were actually sent back appear. */
 export interface StageRework {
   stage: string;
+  /** Set when the gate rows were unit-scoped (they carry `Unit`). */
+  unit?: string;
   /** `STAGE_AWAITING_APPROVAL` — how many times it was submitted for approval. */
   submissions: number;
   rejections: number;
@@ -48,7 +66,10 @@ export interface ReworkReport {
   /** Stages that were sent back, costliest first. */
   stages: StageRework[];
   approved: number;
+  /** Rejections, reopens excluded. */
   rejected: number;
+  /** `GATE_REJECTED` rows with `Reopen: jump|redo` — a unit re-entered on request. */
+  reopened: number;
   revisions: number;
   jumps: number;
   /** `REVIEW_FREEZE_BLOCKED` — an edit refused because a review was in progress. */
@@ -67,71 +88,86 @@ const MAX_FEEDBACK = 6;
  */
 export function buildRework(ledger: AuditLedger): ReworkReport {
   const submissions = new Map<string, number>();
-  const rejections = new Map<string, string[]>(); // stage → rejection timestamps
+  const rejections = new Map<string, { at: string; index: number }[]>();
   const revisions = new Map<string, number>();
   const revisionHigh = new Map<string, number>();
-  const approvals = new Map<string, string[]>(); // stage → approval timestamps
+  const approvals = new Map<string, number[]>(); // key → approval ledger indices
   const feedback = new Map<string, { at: string; text: string }[]>();
-  const lastSeen = new Map<string, string>(); // stage → last timestamp of any event
+  const lastSeen = new Map<string, string>(); // key → last timestamp of any event
+  const units = new Map<string, { stage: string; unit?: string }>();
+  let reopened = 0;
   const bump = (m: Map<string, number>, k: string): void => {
     m.set(k, (m.get(k) ?? 0) + 1);
   };
-  const push = (m: Map<string, string[]>, k: string, v: string): void => {
-    const list = m.get(k);
-    if (list) list.push(v);
-    else m.set(k, [v]);
+  const addFeedback = (k: string, at: string, text: string): void => {
+    const list = feedback.get(k) ?? [];
+    list.push({ at, text });
+    feedback.set(k, list);
   };
 
-  for (const e of ledger.events) {
+  const isReopen = (e: AuditEvent): boolean =>
+    e.event === "GATE_REJECTED" && e.fields.Reopen !== undefined && e.fields.Reopen !== "change";
+
+  ledger.events.forEach((e, index) => {
+    if (isReopen(e)) {
+      reopened++;
+      return;
+    }
     const stage = e.stage;
-    if (!stage) continue;
-    lastSeen.set(stage, e.ts);
-    if (e.event === "STAGE_AWAITING_APPROVAL") bump(submissions, stage);
-    else if (e.event === "GATE_APPROVED") push(approvals, stage, e.ts);
-    else if (e.event === "GATE_REJECTED") {
-      push(rejections, stage, e.ts);
+    if (!stage) return;
+    const unit = e.fields.Unit || undefined;
+    const key = unit === undefined ? stage : `${stage}\0${unit}`;
+    if (!units.has(key)) units.set(key, { stage, unit });
+    lastSeen.set(key, e.ts);
+    if (unit !== undefined) lastSeen.set(stage, e.ts);
+    if (e.event === "STAGE_AWAITING_APPROVAL") bump(submissions, key);
+    else if (e.event === "GATE_APPROVED") {
+      const list = approvals.get(key);
+      if (list) list.push(index);
+      else approvals.set(key, [index]);
+    } else if (e.event === "GATE_REJECTED") {
+      const list = rejections.get(key);
+      if (list) list.push({ at: e.ts, index });
+      else rejections.set(key, [{ at: e.ts, index }]);
       const text = e.fields.Feedback?.trim();
-      if (text) {
-        const list = feedback.get(stage) ?? [];
-        list.push({ at: e.ts, text });
-        feedback.set(stage, list);
-      }
+      if (text) addFeedback(key, e.ts, text);
     } else if (e.event === "STAGE_REVISING") {
-      bump(revisions, stage);
+      bump(revisions, key);
       const raw = e.fields["Revision count"];
       if (raw && /^\d+$/.test(raw.trim())) {
         const n = Number(raw.trim());
-        if (n > (revisionHigh.get(stage) ?? 0)) revisionHigh.set(stage, n);
+        if (n > (revisionHigh.get(key) ?? 0)) revisionHigh.set(key, n);
       }
       // Only used when the rejection itself carried no reason.
       const text = e.fields.Feedback?.trim();
-      if (text && !(feedback.get(stage) ?? []).some((f) => f.text === text)) {
-        const list = feedback.get(stage) ?? [];
-        list.push({ at: e.ts, text });
-        feedback.set(stage, list);
-      }
+      if (text && !(feedback.get(key) ?? []).some((f) => f.text === text))
+        addFeedback(key, e.ts, text);
     }
-  }
+  });
 
   const stages: StageRework[] = [];
-  for (const [stage, rejectedAt] of rejections) {
-    const first = rejectedAt[0]!;
-    const last = rejectedAt[rejectedAt.length - 1]!;
-    const after = (approvals.get(stage) ?? []).filter((ts) => ts > last);
+  for (const [key, rejected] of rejections) {
+    const { stage, unit } = units.get(key)!;
+    const first = rejected[0]!.at;
+    const last = rejected[rejected.length - 1]!;
+    const after = (approvals.get(key) ?? []).filter((index) => index > last.index);
     const settled = after.length > 0;
-    const end = settled ? after[after.length - 1]! : (lastSeen.get(stage) ?? last);
+    const end = settled
+      ? ledger.events[after[after.length - 1]!]!.ts
+      : (lastSeen.get(key) ?? last.at);
     const reworkSec = Math.max(0, (Date.parse(end) - Date.parse(first)) / 1000);
-    const high = revisionHigh.get(stage);
+    const high = revisionHigh.get(key);
     stages.push({
       stage,
-      submissions: submissions.get(stage) ?? 0,
-      rejections: rejectedAt.length,
-      revisions: revisions.get(stage) ?? 0,
+      ...(unit === undefined ? {} : { unit }),
+      submissions: submissions.get(key) ?? 0,
+      rejections: rejected.length,
+      revisions: revisions.get(key) ?? 0,
       ...(high === undefined ? {} : { revisionHigh: high }),
       firstRejectedAt: first,
       reworkSec: Number.isFinite(reworkSec) ? reworkSec : 0,
       settled,
-      feedback: (feedback.get(stage) ?? []).slice().reverse().slice(0, MAX_FEEDBACK),
+      feedback: (feedback.get(key) ?? []).slice().reverse().slice(0, MAX_FEEDBACK),
     });
   }
   stages.sort((a, b) => b.reworkSec - a.reworkSec);
@@ -140,7 +176,8 @@ export function buildRework(ledger: AuditLedger): ReworkReport {
   return {
     stages,
     approved: n("GATE_APPROVED"),
-    rejected: n("GATE_REJECTED"),
+    rejected: n("GATE_REJECTED") - reopened,
+    reopened,
     revisions: n("STAGE_REVISING"),
     jumps: n("STAGE_JUMPED"),
     freezeBlocked: n("REVIEW_FREEZE_BLOCKED"),

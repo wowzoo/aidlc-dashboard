@@ -146,7 +146,7 @@ function pct(value: number, total: number): string {
 function reworkBlock(m: DashboardModel, classifiedSec: number, s: Strings): string {
   const t = s.timeline;
   const r = m.rework;
-  if (r.rejected === 0 && r.revisions === 0 && r.jumps === 0) {
+  if (r.rejected === 0 && r.revisions === 0 && r.jumps === 0 && r.reopened === 0) {
     return `<p class="note">${esc(t.reworkNone)}</p>`;
   }
   const share = classifiedSec > 0 ? pct(r.reworkSec, classifiedSec) : "0.0";
@@ -154,6 +154,8 @@ function reworkBlock(m: DashboardModel, classifiedSec: number, s: Strings): stri
     .map((st) => {
       return `<tr>
   <th class="g-name">${esc(st.stage)}${
+    st.unit ? `<span class="mute"> · ${esc(st.unit)}</span>` : ""
+  }${
     st.settled ? "" : `<span class="prov-mark" title="${esc(t.reworkProvisionalTip)}">~</span>`
   }</th>
   <td class="g-n">${esc(String(st.submissions || "—"))}</td>
@@ -178,7 +180,7 @@ function reworkBlock(m: DashboardModel, classifiedSec: number, s: Strings): stri
     .flatMap((st) =>
       st.feedback.map(
         (f) => `<li class="why-item">
-  <div class="why-head"><b>${esc(st.stage)}</b><span class="mute">${esc(shortTs(f.at))}</span></div>
+  <div class="why-head"><b>${esc(st.stage)}${st.unit ? ` · ${esc(st.unit)}` : ""}</b><span class="mute">${esc(shortTs(f.at))}</span></div>
   <p class="why-text">${esc(f.text)}</p>
 </li>`,
       ),
@@ -201,6 +203,7 @@ function reworkBlock(m: DashboardModel, classifiedSec: number, s: Strings): stri
   <div><span class="time-stat-n">${r.approved}</span><span class="time-stat-l">${esc(t.statApproved)}</span></div>
   <div><span class="time-stat-n">${r.revisions}</span><span class="time-stat-l">${esc(t.statRevisions)}</span></div>
   ${r.jumps ? `<div><span class="time-stat-n">${r.jumps}</span><span class="time-stat-l">${esc(t.statJumps)}</span></div>` : ""}
+  ${r.reopened ? `<div title="${esc(t.statReopenedTip)}"><span class="time-stat-n">${r.reopened}</span><span class="time-stat-l">${esc(t.statReopened)}</span></div>` : ""}
   ${r.freezeBlocked ? `<div><span class="time-stat-n">${r.freezeBlocked}</span><span class="time-stat-l">${esc(t.statFreezeBlocked)}</span></div>` : ""}
 </div>
 <div class="timeline-table-wrap"><table class="tbl">
