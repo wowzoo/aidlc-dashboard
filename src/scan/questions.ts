@@ -87,8 +87,10 @@
 //
 //   - Only VISIBLE lines count (scan/visible-lines.ts): a tag or heading inside a
 //     fence, an HTML comment or a <pre> block is example text, as the engine's
-//     `visibleMarkdownLines` reads it. An unclosed one hides nothing and is
-//     reported — the alternative is a typo hiding every blocker below it.
+//     `visibleMarkdownLines` reads it. That module approximates the engine's and
+//     differs both ways on rare shapes (its header lists them); an unclosed block
+//     hides nothing and is reported — the alternative is a typo hiding every
+//     blocker below it.
 //   - A question heading opens a span at ANY depth (`### Q2.`), and a heading
 //     DEEPER than the span's own is a subsection that stays inside it; a heading
 //     at the same depth or shallower ends it. Closing on any `##` had a `### 선택지`
@@ -99,24 +101,36 @@
 //     `## 📌 Assumption Confirmation` is that gate. The summary and feedback
 //     headings are compared exactly by the engine and stay exact here.
 //   - The three gate headings are H2 only, as the engine reads them.
-//   - A blank tag under NO recognised heading is still a blocker. The stop hook
-//     tests the whole file with one regex and never looks at headings, so the run
-//     parks on it all the same. It attaches to the heading above it (or to none),
-//     as `loose`. A filled one there stays uncounted, as before.
-//   - Plan approval reads the LATEST section's LAST tag, a subsection tag only
-//     filling an empty slot (`latestPlanApproval`, aidlc-testing-posture.ts); the
-//     summary confirmation must hold EXACTLY ONE tag or the engine reads no answer
-//     at all (`summaryConfirmationAnswer`), whatever the tags say. Every other ask
-//     keeps rule 2 below.
+//   - A blank tag under NO recognised heading is still an ask. The protocol asks
+//     for every blank tag to be filled ("If any [Answer]: tag is still blank …"),
+//     whatever heading it sits under. It attaches to the heading above it (or to
+//     none), as `loose`. A filled one there stays uncounted, as before.
+//   - Plan approval and the summary confirmation are read by TRANSCRIPTIONS of the
+//     engine's readers, which own their lines: `latestPlanApproval`
+//     (aidlc-testing-posture.ts — the latest section's last tag, its own heading
+//     grammar and section ends) and `summaryConfirmationAnswer` (aidlc-lib.ts — the
+//     first summary H2 through the next H2, exactly one tag). Letting the general
+//     question grammar draw their boundaries split a nested `### [Q2]` off a plan
+//     and hid the blank tag the engine was waiting on. Compared against the engine
+//     functions (2.11.0) on 20,000 random files built from these shapes, with no
+//     unclosed block: 0 disagreements; adding a line holding only a closing tag
+//     (`</pre>`, CommonMark HTML block type 7, which visible-lines.ts does not
+//     model) brings it to 0.6–0.8%. Every other ask keeps rule 2 below.
 //
-// The engine is not consistent with itself here, and this reader sides with the
-// readers that DECIDE: the stop hook's whole-file regex also counts a blank tag
-// inside a fence and does not anchor `[Answer]:` to the line start, while the
-// readers that grant an approval read visible lines with the tag at column 0.
+// THIS IS A READING OF THE RECORD, NOT THE ENGINE'S PENDING CHECK. The stop hook
+// (aidlc-continue-workflow.ts `hasPendingQuestion`) tests the raw text of the
+// ACTIVE stage's own questions files with one regex — no headings, no visibility,
+// no column-0 anchor — and what it decides is whether the forwarding loop may let
+// the turn end, not what was answered. So a blank placeholder this reader reads as
+// answered (rule 2, a continuation section) can still hold that hook. Which files
+// are active, and that second fact, belong with the pending-interaction reading in
+// model/status.ts, not here.
 //
-// WHERE WE LOOK. stage-protocol.md: "Recursively read every
-// `<record>/**/*-questions.md`", so the walk is recursive below each known phase
-// dir (bounded in depth, dot-dirs and symlinked dirs skipped). Which stage a file
+// WHERE WE LOOK. Recursively below each known phase dir (bounded in depth, dot-dirs
+// and symlinked dirs skipped). That is a dashboard choice: the protocol's
+// "Recursively read every `<record>/**/*-questions.md`" is about reusing earlier
+// answers, while the stop hook reads only a stage dir's direct children — a file
+// further down is a record to show, not proof the run is held by it. Which stage a file
 // belongs to comes from the catalogue's `isStage` oracle when there is one — a
 // stage's own subdirectory (`<stage>/reviews/`) was read as a unit named after
 // the stage. Without one, only `construction/` has units, and there a dir
@@ -260,15 +274,9 @@ function isBlank(answer: string): boolean {
 }
 
 /** How a span's tags become an answer — see the header for where each rule comes from. */
-type Role = "question" | "gate" | "summary" | "plan" | "loose";
+type Role = "question" | "gate" | "loose";
 
-const KIND: Record<Role, AskKind> = {
-  question: "question",
-  gate: "confirmation",
-  summary: "confirmation",
-  plan: "confirmation",
-  loose: "loose",
-};
+const KIND: Record<Role, AskKind> = { question: "question", gate: "confirmation", loose: "loose" };
 
 /**
  * The id a question heading names, so a later section reusing it (`### Q7 답변`)
@@ -282,61 +290,166 @@ function questionId(title: string): string | undefined {
   return n === undefined ? undefined : `Q${Number(n)}`;
 }
 
-/** The role a heading opens, or undefined for one this reader does not recognise. */
+/**
+ * The role a heading opens, or undefined for one this reader does not recognise.
+ * Plan approval and the summary are not here: their own readers below own those
+ * lines, with the engine's boundaries rather than this one's.
+ */
 function roleOf(title: string, depth: number): Role | undefined {
-  if (isPlanApprovalTitle(title.replace(QUESTION_PREFIX_RE, ""))) return "plan";
   const key = headingKey(title);
   if (QUESTION_ID_RE.test(key) || NUMBERED_RE.test(key)) return "question";
-  if (depth !== 2) return undefined;
-  if (title === SUMMARY_HEADING) return "summary";
-  if (title === FEEDBACK_HEADING || key === ASSUMPTION_HEADING) return "gate";
+  if (depth === 2 && (title === FEEDBACK_HEADING || key === ASSUMPTION_HEADING)) return "gate";
   return undefined;
 }
 
-/** The answer a span gives, or undefined when it is not an ask. */
-function entryOf(s: {
-  heading: string;
-  role: Role;
-  markers: { value: string; sub: boolean }[];
-}): QuestionEntry | undefined {
-  const base = { heading: s.heading, kind: KIND[s.role] };
-  if (s.markers.length === 0) return undefined;
-  const unanswered = { ...base, answer: "", answered: false };
-  switch (s.role) {
-    case "plan": {
-      // Each tag overwrites the last; a subsection's only fills an empty slot.
-      let answer: string | undefined;
-      for (const m of s.markers) if (!(m.sub && answer !== undefined)) answer = m.value;
-      if (answer === undefined) return undefined;
-      // A plan built with approval off left a record, not an ask (see the header).
-      if (answer.toLowerCase() === PLAN_APPROVAL_OFF) return undefined;
-      return isBlank(answer) ? unanswered : { ...base, answer, answered: true };
+/** An ask found at a line, so the readers' results can be put back in document order. */
+type Located = { line: number; entry: QuestionEntry };
+
+/** Lines a dedicated reader claimed, so the general one does not read them twice. */
+type Owned = Set<number>;
+
+/**
+ * `latestPlanApproval` (aidlc-testing-posture.ts), transcribed rather than
+ * approximated: its heading grammar (column 0, a closing `#` with no space), its
+ * section end (a heading at the section's depth or shallower, or a numbered
+ * heading at any depth), its subsection rule (a deeper tag fills only an empty
+ * slot), its `## 1.` + label-on-the-next-line form, and its reset — every new Plan
+ * Approval heading discards what the last one held. A reader that let its general
+ * question grammar decide these boundaries split a nested `### [Q2]` off the plan
+ * and hid the blank tag the engine was waiting on.
+ */
+const PLAN_HEADING_RE = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+function readPlanApproval(lines: string[], owned: Owned): Located | undefined {
+  let inPlan = false;
+  let awaitingLabel = false;
+  let numberedLine = -1;
+  let depth = 0;
+  let inSub = false;
+  let found: { line: number; heading: string } | undefined;
+  let answer: string | undefined;
+  const open = (d: number, heading: string, line: number) => {
+    inPlan = true;
+    depth = d;
+    inSub = false;
+    awaitingLabel = false;
+    found = { line, heading };
+    answer = undefined;
+  };
+  lines.forEach((line, i) => {
+    const h = PLAN_HEADING_RE.exec(line);
+    if (h) {
+      const d = h[1]?.length ?? 0;
+      const text = (h[2] ?? "").trim();
+      if (isPlanApprovalTitle(text.replace(QUESTION_PREFIX_RE, ""))) {
+        open(d, text, i);
+        owned.add(i);
+        return;
+      }
+      if (inPlan && d > depth && !QUESTION_PREFIX_RE.test(text) && !NUMBERED_BARE_RE.test(text)) {
+        inSub = true;
+        awaitingLabel = false;
+        owned.add(i);
+        return;
+      }
+      inPlan = false;
+      awaitingLabel = NUMBERED_BARE_RE.test(text);
+      if (awaitingLabel) {
+        depth = d;
+        numberedLine = i;
+      }
+      return;
     }
-    case "summary": {
-      if (s.markers.length > 1) return { ...unanswered, invalidTags: s.markers.length };
-      const answer = s.markers[0]?.value ?? "";
-      return isBlank(answer) ? unanswered : { ...base, answer, answered: true };
+    if (awaitingLabel && line.trim().length > 0) {
+      awaitingLabel = false;
+      if (isPlanApprovalTitle(line)) {
+        open(depth, line.trim(), numberedLine);
+        owned.add(numberedLine);
+      }
     }
-    case "loose":
-      // Only an all-blank one is an ask; a filled one stays uncounted, as before.
-      return s.markers.every((m) => isBlank(m.value)) ? unanswered : undefined;
-    default: {
-      // Rule 2: the first NON-EMPTY marker, not the first marker.
-      const answer = s.markers.find((m) => !isBlank(m.value))?.value;
-      return answer === undefined ? unanswered : { ...base, answer, answered: true };
+    if (!inPlan) return;
+    owned.add(i);
+    const a = ANSWER_RE.exec(line);
+    if (a && !(inSub && answer !== undefined)) answer = (a[1] ?? "").trim();
+  });
+  if (!found || answer === undefined) return undefined;
+  // A plan built with approval off left a record, not an ask (see the header).
+  if (answer.toLowerCase() === PLAN_APPROVAL_OFF) return undefined;
+  const base = { heading: found.heading, kind: "confirmation" as const };
+  return {
+    line: found.line,
+    entry: isBlank(answer)
+      ? { ...base, answer: "", answered: false }
+      : { ...base, answer, answered: true },
+  };
+}
+
+/**
+ * `summaryConfirmationAnswer` (aidlc-lib.ts): the FIRST visible H2 titled exactly
+ * `Consolidated Summary Confirmation`, through the next H2 — an H1 or a nested
+ * question heading does not end it — answered only by exactly one tag.
+ */
+function readSummary(lines: string[], owned: Owned): Located | undefined {
+  let start = -1;
+  const answers: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const h = ATX_RE.exec(line);
+    if (h && h[1]?.length === 2) {
+      if (start >= 0) break;
+      if (closedTitle(h[2]) === SUMMARY_HEADING) {
+        start = i;
+        owned.add(i);
+      }
+      continue;
     }
+    if (start < 0) continue;
+    owned.add(i);
+    const a = ANSWER_RE.exec(line);
+    if (a) answers.push((a[1] ?? "").trim());
   }
+  if (start < 0 || answers.length === 0) return undefined;
+  const base = {
+    heading: SUMMARY_HEADING,
+    kind: "confirmation" as const,
+    answer: "",
+    answered: false,
+  };
+  if (answers.length > 1) return { line: start, entry: { ...base, invalidTags: answers.length } };
+  const answer = answers[0] ?? "";
+  return { line: start, entry: isBlank(answer) ? base : { ...base, answer, answered: true } };
+}
+
+/** An ATX heading's title without its closing sequence (`## Q3 ##` → `Q3`). */
+function closedTitle(raw: string | undefined): string {
+  return (raw ?? "").replace(/(?:^|[ \t]+)#+$/, "").trim();
+}
+
+/** The answer a general span gives, or undefined when it is not an ask. */
+function entryOf(s: { heading: string; role: Role; markers: string[] }): QuestionEntry | undefined {
+  if (s.markers.length === 0) return undefined;
+  const base = { heading: s.heading, kind: KIND[s.role] };
+  if (s.role === "loose") {
+    // Only an all-blank one is an ask; a filled one stays uncounted, as before.
+    return s.markers.every(isBlank) ? { ...base, answer: "", answered: false } : undefined;
+  }
+  // Rule 2: the first NON-EMPTY marker, not the first marker.
+  const answer = s.markers.find((m) => !isBlank(m));
+  return answer === undefined
+    ? { ...base, answer: "", answered: false }
+    : { ...base, answer, answered: true };
 }
 
 /**
  * Parse one questions artifact's text. Exported for tests: this is the whole
  * answered/unanswered contract, checkable from a string.
  *
- * A recognised heading opens a span that runs to the next heading at its depth or
- * shallower (or to the next recognised one). It becomes an ask only if it holds an
- * `[Answer]:` marker, and how its markers become an answer depends on what kind of
- * ask it is — see the header for the real-run and engine shapes behind each rule.
- * A marker under no recognised heading belongs to the nearest heading above it.
+ * Plan approval and the summary confirmation are read first, by transcriptions of
+ * the engine's own readers, and claim their lines. Everything else goes to the
+ * general reader: a recognised heading opens a span that runs to the next heading
+ * at its depth or shallower (or to the next recognised one), it becomes an ask only
+ * if it holds an `[Answer]:` marker, and a marker under no recognised heading
+ * belongs to the nearest heading above it. See the header for the shapes behind
+ * each rule.
  */
 export function parseQuestionsFile(text: string): {
   questions: QuestionEntry[];
@@ -346,59 +459,61 @@ export function parseQuestionsFile(text: string): {
     heading: string;
     depth: number;
     role: Role;
-    markers: { value: string; sub: boolean }[];
+    markers: string[];
     inSub: boolean;
-    awaitLabel: boolean;
     id?: string;
+    line: number;
   };
-  const span = (heading: string, depth: number, role: Role, awaitLabel = false): Span => ({
-    heading,
-    depth,
-    role,
-    markers: [],
-    inSub: false,
-    awaitLabel,
-  });
   const visible = visibleLines(text);
-  let current = span("", 0, "loose");
+  const lines = visible.lines;
+  const owned: Owned = new Set();
+  const found: Located[] = [];
+  const plan = readPlanApproval(lines, owned);
+  if (plan) found.push(plan);
+  const summary = readSummary(lines, owned);
+  if (summary) found.push(summary);
+
+  // A sink for lines after a claimed section, until the next heading opens a span.
+  const sink: Span = { heading: "", depth: 0, role: "loose", markers: [], inSub: false, line: -1 };
+  let current: Span = { heading: "", depth: 0, role: "loose", markers: [], inSub: false, line: 0 };
   const spans: Span[] = [current];
 
-  for (const line of visible.lines) {
+  lines.forEach((line, i) => {
+    if (owned.has(i)) {
+      current = sink;
+      return;
+    }
     const h = ATX_RE.exec(line);
     if (h) {
       const depth = h[1]?.length ?? 0;
-      // A closing sequence (`## Q3 ##`) is not part of the title.
-      const title = (h[2] ?? "").replace(/(?:^|[ \t]+)#+$/, "").trim();
+      const title = closedTitle(h[2]);
       const role = roleOf(title, depth);
       if (role === undefined && current.role !== "loose" && depth > current.depth) {
         // A subsection of the open ask: its tags still belong to that ask.
         current.inSub = true;
-        current.awaitLabel = false;
-        continue;
+        return;
       }
-      const awaitLabel = role === "question" && NUMBERED_BARE_RE.test(headingKey(title));
-      current = span(title, depth, role ?? "loose", awaitLabel);
+      current = {
+        heading: title,
+        depth,
+        role: role ?? "loose",
+        markers: [],
+        inSub: false,
+        line: i,
+      };
       if (role === "question") current.id = questionId(title);
       spans.push(current);
-      continue;
-    }
-    if (current.awaitLabel && line.trim().length > 0) {
-      // `## 1.` with the label on the next line: the engine reads that as plan
-      // approval when the label is one.
-      current.awaitLabel = false;
-      if (isPlanApprovalTitle(line)) {
-        current.role = "plan";
-        current.heading = line.trim();
-        current.id = undefined;
-      }
+      return;
     }
     const a = ANSWER_RE.exec(line);
-    if (a) current.markers.push({ value: (a[1] ?? "").trim(), sub: current.inSub });
-  }
+    if (a) current.markers.push((a[1] ?? "").trim());
+  });
 
-  // A section reusing an earlier question's id is that question's continuation: its
-  // markers join the first one's, in document order, so rule 2 reads across both.
-  // The engine refuses two sections with one id, so this never merges two real asks.
+  // A section reusing an earlier question's id is read as that question's
+  // continuation — a dashboard reading of how humans answer here (`### Q7 답변`
+  // under the engine's blank `### Q7.`), not an engine rule: its markers join the
+  // first one's in document order, so rule 2 reads across both. The stop hook's raw
+  // regex still sees the placeholder blank; that is a separate, active-stage fact.
   const byId = new Map<string, Span>();
   for (const s of spans) {
     if (s.role !== "question" || s.id === undefined) continue;
@@ -407,19 +522,17 @@ export function parseQuestionsFile(text: string): {
       byId.set(s.id, s);
       continue;
     }
-    first.markers.push(...s.markers);
+    // A loop, not `push(...)`: a spread of a huge array overflows the stack.
+    for (const m of s.markers) first.markers.push(m);
     s.markers = [];
   }
 
-  // Only the latest plan approval section is read; an earlier one is superseded.
-  const lastPlan = spans.findLastIndex((s) => s.role === "plan" && s.markers.length > 0);
-  const out: QuestionEntry[] = [];
-  spans.forEach((s, i) => {
-    if (s.role === "plan" && i !== lastPlan) return;
+  for (const s of spans) {
     const e = entryOf(s);
-    if (e) out.push(e);
-  });
-  return { questions: out, unclosed: visible.unclosed };
+    if (e) found.push({ line: s.line, entry: e });
+  }
+  found.sort((a, b) => a.line - b.line);
+  return { questions: found.map((f) => f.entry), unclosed: visible.unclosed };
 }
 
 /** Just the asks — see `parseQuestionsFile`. */

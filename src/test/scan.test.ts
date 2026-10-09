@@ -1011,8 +1011,8 @@ prose only, no marker
 
   test("a later section reusing a question's id answers it, as a later marker would", () => {
     // Real shape: the engine's blank placeholders under `### Q7.` / `### Q8.`, then
-    // the human's answers under `### Q7 답변` / `### Q8 답변`. The engine forbids two
-    // sections with one id, so the second is the first one's answer, not a new ask.
+    // the human's answers under `### Q7 답변` / `### Q8 답변`. A dashboard reading,
+    // not an engine rule: the stop hook still sees the placeholder blank.
     const qs = parseQuestions(`## 학습 의례
 
 ### Q7. 보존할 후보
@@ -1040,6 +1040,62 @@ prose only, no marker
       ["Q8. 더 남길 것", false, ""],
       ["Question 1: 범위", true, "B"],
     ]);
+  });
+
+  // Second-review counterexamples. Each expectation is what the engine's own reader
+  // returned on the same text (`questionsFileHasPendingPlanApproval`,
+  // `summaryConfirmationAnswer`, 2.11.0), measured 2026-10-09.
+  const pending = (t: string) => parseQuestions(t).filter((q) => !q.answered).length;
+
+  test("plan approval: a question-looking heading nested in the section is a subsection", () => {
+    // `[Q2]` is not the engine's numbered prefix, so it stays inside Plan Approval and
+    // its blank tag is the plan's answer — not a second Q2 to merge with the first.
+    const t = "## [Q2] Scope\n\n[Answer]: A\n\n## Plan Approval\n\n### [Q2] Scope\n\n[Answer]:\n";
+    expect(pending(t)).toBe(1);
+    expect(parseQuestions(t).find((q) => !q.answered)?.heading).toBe("Plan Approval");
+  });
+
+  test("plan approval: a newer section with no tag yet supersedes an older blank one", () => {
+    expect(
+      parseQuestions("## Plan Approval\n\n[Answer]:\n\n## Plan Approval\n\nNo tag yet\n"),
+    ).toEqual([]);
+  });
+
+  test("plan approval: the engine's heading grammar — column 0, a closing `#` needs no space", () => {
+    expect(pending("   ## Plan Approval\n\n[Answer]:\n")).toBe(1);
+    expect(parseQuestions("   ## Plan Approval\n\n[Answer]:\n")[0]?.kind).toBe("loose");
+    expect(parseQuestions("## Plan Approval#\n\n[Answer]:\n")[0]?.kind).toBe("confirmation");
+  });
+
+  test("summary confirmation: the section runs to the next H2, not to an H1 or a nested question", () => {
+    for (const tail of ["### Q2. Followup", "# Notes"]) {
+      const qs = parseQuestions(
+        `## Consolidated Summary Confirmation\n\n[Answer]: Looks correct\n\n${tail}\n\n[Answer]: A\n`,
+      );
+      expect(qs).toEqual([
+        {
+          heading: "Consolidated Summary Confirmation",
+          answer: "",
+          answered: false,
+          kind: "confirmation",
+          invalidTags: 2,
+        },
+      ]);
+    }
+  });
+
+  test("a comment opener inside inline code or escaped hides nothing", () => {
+    expect(pending("## Plan Approval\n\n`<!--`\n[Answer]:\n`-->`\n")).toBe(1);
+    expect(pending("## Q1 — x\n\n\\<!-- not a comment\n[Answer]:\n")).toBe(1);
+  });
+
+  test("text after a multi-line comment closes is not at column 0", () => {
+    expect(parseQuestions("## Plan Approval\n\ntext <!--\ncomment -->[Answer]:\n")).toEqual([]);
+  });
+
+  test("a huge continuation does not overflow the stack", () => {
+    const t = `## Q1 — x\n\n[Answer]:\n\n## Q1 답\n\n${"[Answer]:\n".repeat(1_000_000)}`;
+    expect(() => parseQuestionsFile(t)).not.toThrow();
   });
 
   test("a summary confirmation must hold exactly one tag", () => {

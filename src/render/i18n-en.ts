@@ -110,7 +110,7 @@ const blockers: BlockerStrings = {
     "An approval-gate decision — the run proceeds only once you pick one of the engine's options or state what should change",
   loose: "unrecognised heading",
   looseTip:
-    "A blank [Answer]: under no heading this dashboard reads as a question — the engine's stop hook looks for blank tags across the whole file regardless of headings, so the run stops on this one too",
+    "A blank [Answer]: under no heading this dashboard reads as a question — the protocol asks for every blank tag to be filled whatever heading it sits under, so while this stage is running it is waiting for an answer too",
   untitled: "(no heading)",
   invalidTags: (tags) => `confirmation invalid · ${tags} [Answer]: tags`,
   invalidTagsTip:

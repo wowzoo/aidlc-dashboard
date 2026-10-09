@@ -9,10 +9,10 @@
 // and hides its blank tag. The diary and the deferral ledger have the same
 // problem with their headings and bullets, so all three read through this.
 //
-// WHAT IT COVERS — a small subset, on purpose. The engine's version stands on
-// Bun.markdown's block model (~900 lines with probes and repairs). This one
-// handles the three constructs that can actually hold a control line at the
-// start of a line, which is the only place the readers here look:
+// WHAT IT COVERS — an approximation, on purpose, and it differs from the engine's
+// in BOTH directions. The engine's version stands on Bun.markdown's block model
+// (~900 lines with probes and repairs). This one handles the three constructs that
+// most often hold a control line in what the engine and its humans write:
 //
 //   - fenced code: ``` or ~~~, 0–3 spaces of indent, closed by the same character
 //     at least as long, with nothing after it
@@ -20,10 +20,16 @@
 //   - raw-text HTML blocks: a line starting `<pre`, `<script`, `<style` or
 //     `<textarea`, through the line that closes it
 //
-// Indented code needs nothing: every reader matches its control lines at column
-// 0–3, which indented code cannot reach. Fences inside list items or block
-// quotes are not recognised, and neither are setext headings; both are rare in
-// what the engine writes.
+// A comment opener inside inline code (`` `<!--` ``) or escaped (`\<!--`) opens
+// nothing, and text after a multi-line comment closes is kept off column 0, so it
+// is neither a heading nor a tag.
+//
+// Known differences, each rare in these files: other HTML blocks (`<div>`, a line
+// holding only a tag — CommonMark type 6/7, which run to the next blank line);
+// indented code (the questions reader matches at column 0–3 so it cannot reach
+// it, but the deferral reader takes indented bullets, and nested list indentation
+// cannot be told from code without a block parser); fences inside list items or
+// block quotes; inline code spanning lines; setext headings.
 //
 // AN UNCLOSED BLOCK HIDES NOTHING. CommonMark runs an unclosed fence to the end of
 // the file; reading it that way would let a typo hide every blank tag below it,
@@ -49,11 +55,60 @@ function fenceCloses(line: string, fence: string): boolean {
   return !!m && m[1]?.[0] === fence[0] && (m[1]?.length ?? 0) >= fence.length;
 }
 
+/**
+ * Where an unclosed search already ran out. A search from line `n` that found no
+ * closer covers every later start too, so a file with thousands of unclosed openers
+ * costs one pass per kind of closer rather than one pass per opener.
+ */
+type Exhausted = Map<string, number>;
+
 /** Index of the line closing the block opened at `start`, or -1. */
-function blockEnd(lines: string[], start: number, closes: (line: string) => boolean): number {
+function blockEnd(
+  lines: string[],
+  start: number,
+  key: string,
+  exhausted: Exhausted,
+  closes: (line: string) => boolean,
+): number {
+  if (start >= (exhausted.get(key) ?? Number.POSITIVE_INFINITY)) return -1;
   for (let i = start + 1; i < lines.length; i++) if (closes(lines[i] ?? "")) return i;
+  exhausted.set(key, Math.min(start, exhausted.get(key) ?? start));
   return -1;
 }
+
+/** The `[start, end)` ranges of this line's inline code spans (a backtick run to its match). */
+function codeSpans(line: string): [number, number][] {
+  const spans: [number, number][] = [];
+  const runs = [...line.matchAll(/`+/g)];
+  for (let r = 0; r < runs.length; r++) {
+    const open = runs[r];
+    if (!open || open.index === undefined) continue;
+    const match = runs.findIndex((x, n) => n > r && x[0].length === open[0].length);
+    if (match < 0) continue;
+    const close = runs[match];
+    if (!close || close.index === undefined) continue;
+    spans.push([open.index, close.index + close[0].length]);
+    r = match;
+  }
+  return spans;
+}
+
+/** The next `<!--` at or after `from` that opens a comment: not escaped, not in inline code. */
+function commentOpen(line: string, from: number, spans: [number, number][]): number {
+  for (let at = line.indexOf("<!--", from); at >= 0; at = line.indexOf("<!--", at + 1)) {
+    if (line[at - 1] === "\\") continue;
+    if (spans.some(([s, e]) => at >= s && at < e)) continue;
+    return at;
+  }
+  return -1;
+}
+
+/**
+ * Text that follows a multi-line comment's close continues the comment's line; it
+ * is not at column 0, so neither a heading nor a tag. The word joiner keeps it
+ * there without adding anything a reader would see.
+ */
+const CONTINUATION = "\u2060";
 
 /**
  * Blank out the invisible stretches of `text`. Never throws; an unclosed block is
@@ -65,6 +120,7 @@ export function visibleLines(text: string): VisibleText {
     .replace(/\r\n?/g, "\n")
     .split("\n");
   const out: string[] = [];
+  const exhausted: Exhausted = new Map();
   let unclosed = false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -74,7 +130,7 @@ export function visibleLines(text: string): VisibleText {
     // A backtick fence's info string may not contain a backtick (CommonMark).
     if (fence && !(fence[1]?.[0] === "`" && fence[2]?.includes("`"))) {
       const marker = fence[1] ?? "";
-      const end = blockEnd(lines, i, (l) => fenceCloses(l, marker));
+      const end = blockEnd(lines, i, `fence:${marker}`, exhausted, (l) => fenceCloses(l, marker));
       if (end < 0) {
         unclosed = true;
         out.push(line);
@@ -87,8 +143,11 @@ export function visibleLines(text: string): VisibleText {
 
     const raw = RAW_OPEN_RE.exec(line);
     if (raw) {
-      const close = new RegExp(`</${raw[1]}>`, "i");
-      const end = close.test(line) ? i : blockEnd(lines, i, (l) => close.test(l));
+      const tag = (raw[1] ?? "").toLowerCase();
+      const close = new RegExp(`</${tag}>`, "i");
+      const end = close.test(line)
+        ? i
+        : blockEnd(lines, i, `raw:${tag}`, exhausted, (l) => close.test(l));
       if (end < 0) {
         unclosed = true;
         out.push(line);
@@ -99,7 +158,8 @@ export function visibleLines(text: string): VisibleText {
       continue;
     }
 
-    if (!line.includes("<!--")) {
+    let spans = codeSpans(line);
+    if (commentOpen(line, 0, spans) < 0) {
       out.push(line);
       continue;
     }
@@ -109,8 +169,9 @@ export function visibleLines(text: string): VisibleText {
     let cur = line;
     let pos = 0;
     let visible = "";
+    let continued = false;
     for (;;) {
-      const open = cur.indexOf("<!--", pos);
+      const open = commentOpen(cur, pos, spans);
       if (open < 0) {
         visible += cur.slice(pos);
         break;
@@ -118,9 +179,9 @@ export function visibleLines(text: string): VisibleText {
       visible += cur.slice(pos, open);
       let close = cur.indexOf("-->", open + 4);
       let k = j;
-      while (close < 0 && k + 1 < lines.length) {
-        k++;
-        close = (lines[k] ?? "").indexOf("-->");
+      if (close < 0) {
+        k = blockEnd(lines, j, "comment", exhausted, (l) => l.includes("-->"));
+        close = k < 0 ? -1 : (lines[k] ?? "").indexOf("-->");
       }
       if (close < 0) {
         // Never closed: read the remainder as text (see the header).
@@ -129,15 +190,17 @@ export function visibleLines(text: string): VisibleText {
         break;
       }
       if (k > j) {
-        out.push(visible);
+        out.push(continued && visible ? CONTINUATION + visible : visible);
         for (let n = j + 1; n < k; n++) out.push("");
         visible = "";
         j = k;
         cur = lines[k] ?? "";
+        spans = codeSpans(cur);
+        continued = true;
       }
       pos = close + 3;
     }
-    out.push(visible);
+    out.push(continued && visible ? CONTINUATION + visible : visible);
     i = j;
   }
   return { lines: out, unclosed };

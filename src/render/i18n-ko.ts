@@ -101,7 +101,7 @@ const blockers: BlockerStrings = {
     "승인 관문의 결정 항목입니다 — 엔진이 정한 선택지를 고르거나 수정 요청 사유를 적어야 진행됩니다",
   loose: "제목 미인식",
   looseTip:
-    "질문 제목으로 인식하지 못한 자리의 빈 [Answer]: 입니다 — 엔진의 stop hook 은 제목과 상관없이 파일 전체에서 빈 태그를 찾으므로, 런은 이것 때문에도 멈춥니다",
+    "질문 제목으로 인식하지 못한 자리의 빈 [Answer]: 입니다 — 프로토콜은 제목과 상관없이 빈 태그를 모두 채우라고 하므로, 이 stage 가 진행 중이면 이것도 답을 기다리는 자리입니다",
   untitled: "(제목 없음)",
   invalidTags: (tags) => `확인 무효 · [Answer]: ${tags}개`,
   invalidTagsTip:
