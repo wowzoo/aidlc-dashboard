@@ -56,6 +56,15 @@ export interface AuditEvent {
   fields: Record<string, string>;
   /** Basename of the shard this block came from — which clone did it. */
   shard: string;
+  /**
+   * The block's index in its shard, counting every `---`-separated block (title and
+   * notes included), and the shard's index among the shards read, by sorted name —
+   * the engine's `pos` / `shardIndex`. Same-second rows are ordered by them, and the
+   * engine's `AMBIGUOUS` attempt floor is a digest over them, so a reader without
+   * them cannot rebuild that floor. Optional for events built by hand in tests.
+   */
+  pos?: number;
+  shardIndex?: number;
 }
 
 export interface AuditLedger {
@@ -115,11 +124,18 @@ export function parseContext(ctx: string, isStage?: IsStage): { stage?: string; 
  * Parse one shard's text into blocks. Exported for tests: it is the whole format
  * contract in one function, testable from a string with no filesystem.
  */
-export function parseAuditShard(text: string, shard: string, isStage?: IsStage): AuditEvent[] {
+export function parseAuditShard(
+  text: string,
+  shard: string,
+  isStage?: IsStage,
+  shardIndex = 0,
+): AuditEvent[] {
   const out: AuditEvent[] = [];
   // Normalise CRLF first so the `---` split and the line regex both hold on a
   // shard that travelled through a Windows clone.
-  for (const block of text.replace(/\r\n/g, "\n").split("\n---\n")) {
+  const blocks = text.replace(/\r\n/g, "\n").split("\n---\n");
+  for (let pos = 0; pos < blocks.length; pos++) {
+    const block = blocks[pos] ?? "";
     // The engine's `auditBlockField`: an optional leading `- ` is stripped, and a
     // duplicated field keeps its FIRST value. Keeping the last one let a repeated
     // `**Fingerprint**:` line hold open a decision the engine had closed.
@@ -152,7 +168,7 @@ export function parseAuditShard(text: string, shard: string, isStage?: IsStage):
       if (!stage) stage = resolved.stage;
     }
 
-    out.push({ ts, event, stage, unit, fields, shard });
+    out.push({ ts, event, stage, unit, fields, shard, pos, shardIndex });
   }
   return out;
 }
@@ -191,8 +207,9 @@ export function readAuditLedger(recordDir: string, isStage?: IsStage): AuditLedg
       continue;
     }
     const base = path.basename(p);
+    // A loop, not `push(...)`: spreading a large shard's events overflows the stack.
+    for (const e of parseAuditShard(text, base, isStage, shards.length)) events.push(e);
     shards.push(base);
-    events.push(...parseAuditShard(text, base, isStage));
   }
 
   // ISO second-precision UTC strings sort lexicographically == chronologically.

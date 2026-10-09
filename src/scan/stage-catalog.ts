@@ -128,6 +128,12 @@ export interface CatalogStage {
   producesKinds: Record<string, string[]>;
   /** "unit-of-work" on the 5 per-unit Construction stages (3.1–3.5), else undefined. */
   forEach?: string;
+  /**
+   * `workspace_requires: true` — the stage writes the project's code (code-generation in
+   * 2.11). Construction Checkpoints apply only to a scope holding such a per-unit stage
+   * (`constructionCheckpointsApply`), which is when the engine requires unit receipts.
+   */
+  workspaceRequires?: boolean;
   /** Sensor ids declared for the stage. */
   sensors: string[];
 }
@@ -224,6 +230,7 @@ export function readStageCatalog(root: string, harnessDir?: string): StageCatalo
       optionalProduces: asStringArray(r.optional_produces),
       producesKinds: asKindMap(r.produces_kinds),
       forEach: typeof r.for_each === "string" ? r.for_each : undefined,
+      workspaceRequires: r.workspace_requires === true,
       sensors: asStringArray(r.sensors),
     });
   }

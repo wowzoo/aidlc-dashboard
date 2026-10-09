@@ -224,6 +224,36 @@ function statMtimeMs(p: string): number | undefined {
   }
 }
 
+/**
+ * The receipt reader's policy, as the engine's lifecycle readers derive it from the state
+ * (scan/unit-receipts.ts): unit-major means the iteration OR checkpoints; per-unit floors
+ * also under team ownership; and receipts are REQUIRED — `inUse` with no unit row at all —
+ * when `constructionCheckpointsApply`: checkpoints enabled, not team, and the scope holds a
+ * per-unit stage that writes code. The scope test is approximated by the state rows: a
+ * per-unit `workspace_requires` stage the state marks EXECUTE.
+ */
+function receiptPolicy(
+  state: ReturnType<typeof parseState>,
+  catalog: StageCatalog | undefined,
+  team: boolean,
+): Parameters<typeof readUnitLifecycle>[1] {
+  const checkpoints = state.constructionCheckpoints === "enabled";
+  const unitMajor = state.constructionIteration?.trim() === "unit-major" || checkpoints;
+  const codeStage = state.phases.some((p) =>
+    p.stages.some((s) => {
+      const c = catalog?.bySlug.get(s.slug);
+      return s.execute && c?.forEach === "unit-of-work" && c.workspaceRequires === true;
+    }),
+  );
+  return {
+    unitMajor,
+    teamOwnership: team,
+    unitScoped: team || unitMajor,
+    receiptsRequired: checkpoints && !team && codeStage,
+    stageIndex: catalog ? (s) => catalog.stages.findIndex((x) => x.slug === s) : undefined,
+  };
+}
+
 /** Gate ledger from the audit + the revision count state.md tracks. */
 function buildGates(
   ledger: AuditLedger,
@@ -557,7 +587,7 @@ export function assemble(
         rosterMismatch || versionMismatch ? undefined : catalog,
         // Completion receipts come from the audit. Where a stage uses the unit
         // lifecycle they outrank artifact presence — the engine's own rule.
-        readUnitLifecycle(ledger.events, { unitMajor: unitMajorMode, teamOwnership: team }),
+        readUnitLifecycle(ledger.events, receiptPolicy(state, catalog, team)),
         // An unverified version does NOT throw the contract away — it withholds the claim
         // that the judgement matches the engine's. Separate axes, not one.
         stateCompat,

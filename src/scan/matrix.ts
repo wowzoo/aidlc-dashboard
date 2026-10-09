@@ -36,6 +36,12 @@ import {
   requiredArtifacts,
   vacuouslyCovered,
 } from "./stage-catalog";
+import {
+  type ReceiptReason,
+  type ReceiptRow,
+  type UnitReceipts,
+  readUnitReceipts,
+} from "./unit-receipts";
 
 // The per-unit Construction stage slugs — the stages the engine runs once per Unit of
 // Work (each writing a `construction/<unit>/<stage>/` segment). The remaining
@@ -60,25 +66,20 @@ export const PER_UNIT_STAGE_SLUGS: ReadonlySet<string> = new Set([
 export type StateCompat = "verified" | "unknown" | "incompatible";
 
 /**
- * The per-stage unit-receipt ledger, read from the audit. Mirrors the engine's two
- * modes exactly (`aidlc-orchestrate.ts::unitLedgerFor`): once a stage has ANY unit
- * lifecycle event, its `UNIT_COMPLETED` receipts are the completion authority and
- * artifacts are only evidence; a stage with no lifecycle events at all is "a genuinely
+ * The per-stage unit-receipt ledger, read from the audit (scan/unit-receipts.ts — a
+ * transcription of the engine's `unitLifecycleSnapshot`). Mirrors the engine's two
+ * modes (`aidlc-orchestrate.ts::unitLedgerFor`): once a stage has ANY unit lifecycle
+ * event — or the engine requires receipts by policy — its receipts are the completion
+ * authority and artifacts are only evidence; a stage with neither is "a genuinely
  * ledger-free legacy flow" and stays artifact-driven, which is the behaviour every
  * earlier tree had. Absent entirely → artifact-driven, unchanged.
- */
-/**
- * Whether a unit's stage is done, per the engine's receipt rules.
  *
- * THREE STATES, because a boolean conflated two different answers. `settled(): boolean`
- * returned false both for "the engine says this unit is not done" and for "this reader
- * cannot tell" — so every gap in our reproduction of the engine printed as a red ▩, which
- * is a fabricated blocker. `unverifiable` is the honest third answer, and it is the same
- * discipline as `Provenance` elsewhere in this model: a source we cannot check gets its own
- * shape rather than borrowing a verdict.
+ * FOUR ANSWERS, not a boolean. `settled(): boolean` once returned false both for "the
+ * engine says this unit is not done" and for "this reader cannot tell" — so every gap
+ * in the reproduction printed as a red ▩, a fabricated blocker. `unverifiable` is the
+ * honest answer for the second, and `skipped` (UNIT_SKIPPED) is neither done nor
+ * outstanding: the engine's own record that this unit does not run the stage.
  */
-export type ReceiptState = "settled" | "unsettled" | "unverifiable";
-
 /**
  * WHY a receipt could not be checked. Carried rather than collapsed, because the four
  * causes do not agree on what the ENGINE would say — and that is a different question
@@ -93,178 +94,48 @@ export type ReceiptState = "settled" | "unsettled" | "unverifiable";
  *   wave-fingerprint    an artifact fingerprint decides; same.
  *   ambiguous-floor     the floor is `AMBIGUOUS:<ts>#<digest>`, not reproducible; same.
  */
-export type ReceiptReason = "no-run-floor" | "team-claim" | "wave-fingerprint" | "ambiguous-floor";
+export type { ReceiptReason, ReceiptVerdict } from "./unit-receipts";
 
-export interface ReceiptVerdict {
-  state: ReceiptState;
-  /** Set only when `state` is `unverifiable`. */
-  reason?: ReceiptReason;
-}
+export type UnitLifecycle = UnitReceipts;
 
-export interface UnitLifecycle {
-  /** True when this stage has emitted any UNIT_* event, i.e. receipts are in force. */
-  inUse: (stageSlug: string) => boolean;
-  /** How this unit's receipt for this stage reads, and why when it cannot be read. */
-  state: (unit: string, stageSlug: string) => ReceiptVerdict;
-}
-
-/** UNIT_* events, per audit-format.md. Any of them proves the ledger is in use. */
-const UNIT_LIFECYCLE_EVENTS = new Set([
-  "UNIT_STARTED",
-  "UNIT_PAUSED",
-  "UNIT_RESUMED",
-  "UNIT_COMPLETED",
-]);
-
-export interface LifecycleEvent {
-  event: string;
-  ts?: string;
-  stage?: string;
-  unit?: string;
-  shard?: string;
-  fields?: Record<string, string>;
-}
-
-/** Boundary events that raise EVERY stage's floor. */
-const GLOBAL_BOUNDARY = new Set(["WORKFLOW_STARTED", "STAGE_JUMPED"]);
-
-/** `Gate Stages` (comma list) else the `Stage` field — the engine's own fallback. */
-function gateStages(e: LifecycleEvent): string[] {
-  const explicit = e.fields?.["Gate Stages"];
-  if (explicit) {
-    return explicit
-      .split(",")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
-  }
-  return e.stage ? [e.stage] : [];
-}
+/** An audit row as the receipt reader takes it; `pos`/`shardIndex` come from the ledger. */
+export type LifecycleEvent = ReceiptRow & { stage?: string; unit?: string };
 
 /**
- * Read the per-stage unit-receipt ledger from the audit, reproducing
- * `aidlc-lib.ts::currentUnitLifecycleRows` + `unitLifecycleSnapshot` as far as the audit
- * alone allows, and reporting `unverifiable` for the rest rather than guessing.
- *
- * ORDER: compute the attempt floor → keep only rows whose `Run floor` field EQUALS it →
- * reduce cross-shard same-second groups by safety rank → replay, completion adds and
- * anything else deletes. Getting that order wrong is not cosmetic: checking wave mode
- * before the floor filter let ONE old wave row block every later attempt for good.
- *
- * THE FLOOR IS SCOPED PER UNIT UNDER TEAM OWNERSHIP (`key = teamOwnership ? unit : ""` in
- * the engine). One stage-wide floor meant unit A's `GATE_REJECTED` invalidated unit B's
- * finished work.
- *
- * THE FLOOR STRING IS REBUILT, NOT COMPARED LOOSELY. The engine compares the row's field
- * against `<event>:<timestamp>#<ordinal>` where the ordinal counts that event name among
- * the boundary rows, or `unstarted#0` with no boundary at all. Asking only "is this row
- * after the last boundary?" accepted a row carrying a stale floor, and accepted rows with
- * no floor field at all.
+ * Read the per-stage unit-receipt ledger. `unitMajor` is `Construction Iteration:
+ * unit-major` OR `Construction Checkpoints: enabled`; `unitScoped` defaults to the
+ * engine's `unitScopedLifecycleFloors` (team, checkpoints, or solo unit-major), which
+ * for these two flags is `teamOwnership || unitMajor`.
  */
 export function readUnitLifecycle(
   events: readonly LifecycleEvent[],
-  opts: { unitMajor?: boolean; teamOwnership?: boolean } = {},
+  opts: {
+    unitMajor?: boolean;
+    teamOwnership?: boolean;
+    unitScoped?: boolean;
+    receiptsRequired?: boolean;
+    stageIndex?: (slug: string) => number;
+  } = {},
 ): UnitLifecycle {
-  const rows = events.map((e, i) => ({ e, i }));
-  const lifecycle = rows.filter(
-    ({ e }) => !!e.stage && UNIT_LIFECYCLE_EVENTS.has(e.event) && !!e.unit,
-  );
-  const inUse = new Set(lifecycle.map(({ e }) => e.stage as string));
-  const pairs = new Map<string, { stage: string; unit: string }>();
-  for (const { e } of lifecycle) {
-    pairs.set(`${e.stage}\u0001${e.unit}`, { stage: e.stage as string, unit: e.unit as string });
-  }
-
-  /** The engine's floor token for one (stage, unit), or null when it is AMBIGUOUS. */
-  const floorFor = (stage: string, unit: string): string | null => {
-    const boundary = rows.filter(({ e }) => {
-      if (e.ts === undefined) return false;
-      if (GLOBAL_BOUNDARY.has(e.event)) return true;
-      if (e.event === "GATE_REJECTED") {
-        if (!gateStages(e).includes(stage)) return false;
-        const eventUnit = e.fields?.Unit;
-        return eventUnit === undefined || eventUnit === unit;
-      }
-      return (
-        e.event === "STAGE_STARTED" &&
-        e.stage === stage &&
-        !opts.unitMajor &&
-        !e.fields?.Workflow?.startsWith("single-stage:")
-      );
-    });
-    if (boundary.length === 0) return "unstarted#0";
-    const latestTs = boundary[boundary.length - 1]!.e.ts as string;
-    const tied = boundary.filter(({ e }) => e.ts === latestTs);
-    // Tied across shards → the engine mints `AMBIGUOUS:<ts>#<sha>` over per-shard block
-    // positions this reader does not have. Not reproducible, so not claimed.
-    if (new Set(tied.map(({ e }) => e.shard)).size > 1) return null;
-    const ordinals = new Map<string, number>();
-    let floor = "unstarted#0";
-    for (const { e } of boundary) {
-      const n = (ordinals.get(e.event) ?? 0) + 1;
-      ordinals.set(e.event, n);
-      floor = `${e.event}:${e.ts}#${n}`;
-    }
-    return floor;
-  };
-
-  const out = new Map<string, ReceiptVerdict>();
-  for (const [key, { stage, unit }] of pairs) {
-    const floor = floorFor(stage, opts.teamOwnership ? unit : "");
-    if (floor === null) {
-      out.set(key, { state: "unverifiable", reason: "ambiguous-floor" });
-      continue;
-    }
-    // Under team ownership the engine compares each row's `Attempt Generation` with the
-    // CLAIM FILE's — missing field is a mismatch when a stamp is active, matching value is
-    // a pass — and that file is outside the audit. Neither verdict is derivable, so the
-    // whole pair is unverifiable; team/unit-major reads `## Unit Progress` instead.
-    if (opts.teamOwnership) {
-      out.set(key, { state: "unverifiable", reason: "team-claim" });
-      continue;
-    }
-
-    const mine = lifecycle.filter(({ e }) => e.stage === stage && e.unit === unit);
-    const current = mine.filter(({ e }) => e.fields?.["Run floor"] === floor);
-    // A pre-2.5.0 ledger carries no `Run floor` at all. The engine fails closed there, but
-    // "this ledger predates the field" is a can't-tell, not a not-done: reporting it as ▩
-    // would put a red cell on every older tree.
-    if (current.length === 0 && mine.some(({ e }) => e.fields?.["Run floor"] === undefined)) {
-      out.set(key, { state: "unverifiable", reason: "no-run-floor" });
-      continue;
-    }
-    // Wave mode adds an artifact-fingerprint check — but only for THIS attempt's rows.
-    if (current.some(({ e }) => e.fields?.Mode === "wave")) {
-      out.set(key, { state: "unverifiable", reason: "wave-fingerprint" });
-      continue;
-    }
-
-    // Cross-shard rows inside one second are causally unordered, so the engine reduces each
-    // (timestamp, unit) group to one candidate per shard and ranks them
-    // PAUSED(2) > STARTED/RESUMED(1) > COMPLETED(0), taking the highest: "a possible pause
-    // blocks all progress … only unanimous terminal candidates settle it".
-    const rank = (event: string) =>
-      event === "UNIT_PAUSED" ? 2 : event === "UNIT_COMPLETED" ? 0 : 1;
-    const reduced: typeof current = [];
-    for (let a = 0; a < current.length; ) {
-      let b = a + 1;
-      while (b < current.length && current[b]!.e.ts === current[a]!.e.ts) b++;
-      const byShard = new Map<string, (typeof current)[number]>();
-      for (const row of current.slice(a, b)) byShard.set(row.e.shard ?? "", row);
-      const candidates = [...byShard.values()];
-      candidates.sort((x, y) => rank(x.e.event) - rank(y.e.event) || x.i - y.i);
-      reduced.push(candidates[candidates.length - 1]!);
-      a = b;
-    }
-
-    let settled = false;
-    for (const { e } of reduced) settled = e.event === "UNIT_COMPLETED";
-    out.set(key, { state: settled ? "settled" : "unsettled" });
-  }
-
-  return {
-    inUse: (slug) => inUse.has(slug),
-    state: (unit, slug) => out.get(`${slug}\u0001${unit}`) ?? { state: "unsettled" },
-  };
+  // Rows built by hand (tests) may carry the stage/unit only on the event, not in its
+  // fields; the engine reads the fields, so fold them in where absent.
+  const rows = events.map((e) => ({
+    ...e,
+    fields: {
+      ...(e.stage !== undefined ? { Stage: e.stage } : {}),
+      ...(e.unit !== undefined ? { Unit: e.unit } : {}),
+      ...e.fields,
+    },
+  }));
+  const unitMajor = opts.unitMajor ?? false;
+  const team = opts.teamOwnership ?? false;
+  return readUnitReceipts(rows, {
+    unitMajor,
+    team,
+    unitScoped: opts.unitScoped ?? (team || unitMajor),
+    receiptsRequired: opts.receiptsRequired ?? false,
+    stageIndex: opts.stageIndex,
+  });
 }
 
 /** The engine's own marker for a per-unit stage, with the fixed list as fallback. */
@@ -307,6 +178,13 @@ export interface MatrixUnit {
  *            predating the `Run floor` field. Kept apart from `unsettled` because merging
  *            them printed a red "not done" over every gap in this reader's reproduction of
  *            the engine — a fabricated blocker.
+ * skipped  — the engine recorded UNIT_SKIPPED for this unit in this attempt: it does not
+ *            run the stage, by the engine's own decision, with the reason it gave. Neither
+ *            done nor outstanding, and not `n/a` either — n/a is the CONTRACT having
+ *            nothing for the unit's kind, skipped is the RUN deciding. A later start,
+ *            rejection or reaching jump cancels it (the receipt reader's floor).
+ *            Without this state a unit skipped in a stage read as `absent`, i.e. as work
+ *            nobody had done.
  * n/a      — the stage contracts NOTHING for this unit's kind, so there is nothing
  *            to be missing. Distinct from `absent` on purpose: measured on a real
  *            run, a `packaging` unit sat at functional-design, whose every artifact
@@ -316,7 +194,14 @@ export interface MatrixUnit {
  *            claimed when the catalogue has the stage row AND the unit's kind is
  *            known; without either, "nothing expected" means "we don't know".
  */
-export type CellState = "absent" | "partial" | "complete" | "unsettled" | "unverified" | "n/a";
+export type CellState =
+  | "absent"
+  | "partial"
+  | "complete"
+  | "unsettled"
+  | "unverified"
+  | "skipped"
+  | "n/a";
 
 /** One per-unit cell. */
 export interface MatrixCell {
@@ -332,6 +217,8 @@ export interface MatrixCell {
   missing: string[];
   /** Why the receipt could not be checked. Set only when state is "unverified". */
   receiptReason?: ReceiptReason;
+  /** The engine's `Reason` on the UNIT_SKIPPED row. Set only when state is "skipped". */
+  skipReason?: string;
 }
 
 /**
@@ -363,6 +250,8 @@ export interface MatrixStage {
   unverified: number;
   /** Units the stage contracts nothing for — excluded from the row's denominator. */
   notApplicable: number;
+  /** Units the engine recorded as skipping this stage — excluded from the denominator too. */
+  skipped: number;
   /** Roster size (0 for a stage that did not run). */
   total: number;
   /** True when the stage is not yet [x] — counts are a snapshot, not final. */
@@ -532,6 +421,7 @@ export function buildConstructionMatrix(
         unsettled: 0,
         unverified: 0,
         notApplicable: 0,
+        skipped: 0,
         total: 0,
         provisional: false,
       });
@@ -561,15 +451,17 @@ export function buildConstructionMatrix(
       const state: CellState =
         catStage !== undefined && u.kind !== undefined && vacuouslyCovered(catStage, u.kind)
           ? "n/a"
-          : present.length === 0
-            ? "absent"
-            : !artifactsMet
-              ? "partial"
-              : receipt?.state === "unsettled"
-                ? "unsettled"
-                : receipt?.state === "unverifiable"
-                  ? "unverified"
-                  : "complete";
+          : receipt?.state === "skipped"
+            ? "skipped"
+            : present.length === 0
+              ? "absent"
+              : !artifactsMet
+                ? "partial"
+                : receipt?.state === "unsettled"
+                  ? "unsettled"
+                  : receipt?.state === "unverifiable"
+                    ? "unverified"
+                    : "complete";
       return {
         unit: u.name,
         state,
@@ -577,11 +469,13 @@ export function buildConstructionMatrix(
         expected,
         required,
         missing,
-        ...(receipt?.reason ? { receiptReason: receipt.reason } : {}),
+        ...(receipt?.state === "unverifiable" ? { receiptReason: receipt.reason } : {}),
+        ...(receipt?.state === "skipped" ? { skipReason: receipt.reason } : {}),
       };
     });
 
     const notApplicable = cells.filter((c) => c.state === "n/a").length;
+    const skipped = cells.filter((c) => c.state === "skipped").length;
     stages.push({
       slug: st.slug,
       display: st.display,
@@ -593,6 +487,7 @@ export function buildConstructionMatrix(
       unsettled: cells.filter((c) => c.state === "unsettled").length,
       unverified: cells.filter((c) => c.state === "unverified").length,
       notApplicable,
+      skipped,
       total: dag.units.length,
       // Only a completed stage is guaranteed to hold every unit's segment; an
       // in-flight stage's counts are a snapshot that grows until it gates.

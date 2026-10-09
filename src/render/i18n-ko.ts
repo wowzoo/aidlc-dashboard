@@ -233,6 +233,8 @@ const overview: OverviewStrings = {
   tipUnverified: (reason, present) => `${RECEIPT_REASON_KO[reason]} (파일: ${present.join(", ")})`,
   tipNotApplicable: (present) =>
     `이 유닛 kind 에 계약된 산출물 없음${present.length ? ` (있는 파일: ${present.join(", ")})` : ""}`,
+  tipSkipped: (reason) =>
+    `엔진이 이 유닛의 이 stage 를 건너뛰었습니다(UNIT_SKIPPED)${reason ? ` — 사유: ${reason}` : ""}`,
   tipNotStarted: "미착수",
 
   legendBase:
@@ -244,6 +246,7 @@ const overview: OverviewStrings = {
   legendUnverified:
     " · ▤ 완료 수령증을 감사 기록만으로 확인할 수 없음 — 미완이라고 판정된 것은 아닙니다 (칸에 마우스를 올려 이유 확인)",
   legendNa: " · – 이 유닛 kind 에 계약된 산출물 없음(계 열의 괄호는 그 수)",
+  legendSkipped: " · ⊘ 엔진이 이 유닛의 stage 를 건너뜀(UNIT_SKIPPED) — 분모에서 뺌",
   legendUnverifiedContract:
     "state.md 와 harness 의 State Version 을 대조하지 못해 <b>확인되지 않은 계약</b>입니다 — 계약 내용은 그대로 보여주지만, 엔진과 같은 완료 판정이라고 보증하지 않습니다",
   legendNoContract: (receiptAware) =>
@@ -810,6 +813,7 @@ const cards: CardStrings = {
     unsettled: "완료 기록 없음",
     unverified: "확인 불가",
     absent: "시작 전",
+    skipped: "건너뜀",
     "n/a": "해당 없음",
   },
   decisionsTab: "미결 결정",

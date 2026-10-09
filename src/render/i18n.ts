@@ -296,6 +296,8 @@ export interface OverviewStrings {
   tipUnsettled(present: string[]): string;
   tipUnverified(reason: ReceiptReason, present: string[]): string;
   tipNotApplicable(present: string[]): string;
+  /** `reason` is the engine's own, from the UNIT_SKIPPED row; may be empty. */
+  tipSkipped(reason: string): string;
   readonly tipNotStarted: string;
 
   // Legend FRAGMENTS. The conditional composition stays in overview.ts — it is logic —
@@ -305,6 +307,7 @@ export interface OverviewStrings {
   readonly legendUnverifiedNoFloor: string;
   readonly legendUnverified: string;
   readonly legendNa: string;
+  readonly legendSkipped: string;
   /** Shown when stateCompat !== "verified". Carries `<b>` markup. */
   readonly legendUnverifiedContract: string;
   legendNoContract(receiptAware: boolean): string;

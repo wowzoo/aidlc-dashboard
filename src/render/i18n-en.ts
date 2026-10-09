@@ -246,6 +246,8 @@ const overview: OverviewStrings = {
   tipUnverified: (reason, present) => `${RECEIPT_REASON_EN[reason]} (files: ${present.join(", ")})`,
   tipNotApplicable: (present) =>
     `Nothing is contracted for this unit's kind${present.length ? ` (files present: ${present.join(", ")})` : ""}`,
+  tipSkipped: (reason) =>
+    `The engine skipped this stage for this unit (UNIT_SKIPPED)${reason ? ` — reason: ${reason}` : ""}`,
   tipNotStarted: "not started",
 
   legendBase:
@@ -258,6 +260,8 @@ const overview: OverviewStrings = {
     " · \u25a4 the completion receipt cannot be checked from the audit ledger alone — this is NOT a verdict that the work is incomplete (hover a cell for the reason)",
   legendNa:
     " · \u2013 nothing contracted for this unit's kind (the bracket in the total column is how many)",
+  legendSkipped:
+    " · \u2298 the engine skipped this stage for the unit (UNIT_SKIPPED) — left out of the total",
   legendUnverifiedContract:
     "state.md's State Version could not be checked against the harness, so this is an <b>unverified contract</b> — the contract is shown as read, but this page does not warrant that its completion judgements match the engine's",
   legendNoContract: (receiptAware) =>
@@ -843,6 +847,7 @@ const cards: CardStrings = {
     unsettled: "no receipt",
     unverified: "unverifiable",
     absent: "not started",
+    skipped: "skipped",
     "n/a": "n/a",
   },
   decisionsTab: "Open decisions",

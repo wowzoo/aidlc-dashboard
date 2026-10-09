@@ -135,6 +135,7 @@ const CELL_TONE: Record<CellState, RowTone> = {
   unsettled: "alt",
   unverified: "none",
   absent: "none",
+  skipped: "none",
   "n/a": "none",
 };
 
@@ -164,7 +165,7 @@ function unitRows(st: MatrixStage, s: Strings): Row[] {
       pct: fig.pct,
       tone: CELL_TONE[c.state],
       dim: c.state === "n/a",
-      tip: cellTip(c.state, c.missing, c.present, s, c.receiptReason),
+      tip: cellTip(c.state, c.missing, c.present, s, c.receiptReason, c.skipReason),
     };
   });
 }
@@ -195,7 +196,7 @@ export function renderUnitCard(m: DashboardModel, s: Strings): string {
     tabs: [
       {
         label: st.display,
-        count: { text: `${st.complete}/${st.total - st.notApplicable}` },
+        count: { text: `${st.complete}/${st.total - st.notApplicable - st.skipped}` },
         body: rowList(unitRows(st, s), {
           head: [s.cards.colUnit, s.cards.colArtifacts],
           max: CARD_ROWS,

@@ -396,6 +396,28 @@ describe("construction matrix", () => {
     expect(reopened.state("PU-A", "code-generation").state).toBe("settled");
   });
 
+  test("a unit the engine skipped is its own cell, out of the denominator", () => {
+    // UNIT_SKIPPED with a reason: before, the unit read as absent — work nobody did.
+    const all = () => ["code-generation-plan", "code-summary"];
+    const f = { "Run floor": "unstarted#0" };
+    const lc = readUnitLifecycle([
+      { event: "UNIT_COMPLETED", stage: "code-generation", unit: "PU-A", fields: f },
+      {
+        event: "UNIT_SKIPPED",
+        stage: "code-generation",
+        unit: "PU-B",
+        fields: { ...f, Reason: "no code for a spec unit" },
+      },
+    ]);
+    const row = buildConstructionMatrix(dag, stages, all, catalog, lc)!.stages[0]!;
+    expect(row.cells.map((c) => [c.state, c.skipReason])).toEqual([
+      ["complete", undefined],
+      ["skipped", "no code for a spec unit"],
+    ]);
+    expect(row.skipped).toBe(1);
+    expect(row.total - row.notApplicable - row.skipped).toBe(1);
+  });
+
   describe("unit receipts", () => {
     const S = "code-generation";
     const T = "2026-01-01T00:00:00Z";
