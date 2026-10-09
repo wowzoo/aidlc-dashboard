@@ -120,6 +120,19 @@ const blockers: BlockerStrings = {
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+const EN_ASK: Record<string, string> = {
+  "compose-offer": "compose offer",
+  "guard-recovery": "guard recovery choice",
+  "intent-pick": "intent pick",
+  "legacy-plan-approval-recovery": "plan approval recovery",
+  "new-work-routing": "new work routing",
+  "plan-approval": "plan approval",
+  "project-type": "project type",
+  "scope-confirm": "scope confirmation",
+  "unit-claim": "unit claim",
+  "unit-paused": "paused unit",
+};
+
 const status: StatusStrings = {
   runComplete: "✓ Complete",
   runUnknown: "? Run state unknown",
@@ -128,15 +141,38 @@ const status: StatusStrings = {
   runningSub: (stage, age) => `${stage} · last record ${age} ago`,
   runTip:
     "The last record is the newest event in the audit log. If it keeps growing, the run is not writing anything",
+  runningUnit: (unit) => `unit ${unit}`,
+  runUnverified: "position unverified",
+  runUnverifiedTip:
+    "Under unit-major, Current Stage stays on the first per-unit stage, so the run may be further on. state.md has no Unit Stage and no engine directive (active-directive.json) matches the current state, so Current Stage is shown",
   stuckNoRecord: "No block recorded",
   stuckClear: "✓ Not stuck",
   stuckEarlier: (stage) => `last block was in ${stage} · this clone`,
-  stuckBlocked: (count) => `⚠ Blocked ${count}× with no progress`,
+  stuckNudged: "Nudged once — first block after progress",
+  stuckBlocked: (count, cap) => `⚠ Blocked ${count}× with no progress (limit ${cap})`,
+  stuckReleased: (count, cap) =>
+    `⚠ Block limit reached ${count}/${cap} — the hook let the turn end`,
   stuckSource: "stop hook · this clone",
-  stuckTip:
-    "The stop hook's block-count.json. It rises by one each time the run tries to stop without progress and returns to 0 when work advances. The limit at which the engine gives up is engine-side, so it is not judged here",
+  stuckTip: (cap, autonomous) =>
+    `The stop hook's block-count.json. The first block after progress writes 1, each further block without progress adds one, and only done, notice or park resets it to 0. At the limit the hook stops blocking and lets the turn end. The limit shown is the ${autonomous ? "autonomous" : "interactive"} default of ${cap}; CLAUDE_CODE_STOP_HOOK_BLOCK_CAP may have changed it`,
   humanGate: (stage) => `Approval pending: ${stage}`,
-  humanGateSource: "gate open · audit log",
+  humanGateSource: "gate open · state.md [?]",
+  humanRevising: (stage) => `${stage} being revised — gate rejected`,
+  humanRevisingTip:
+    "You rejected the approval gate and the stage is being reworked (state.md [R]). The next move is the run's, so it is not counted as awaiting you",
+  humanParked: (stage, byPerson) => `⏸ Parked — ${stage}${byPerson ? " · parked by a person" : ""}`,
+  humanParkedTip: "The run is parked. It continues only once you ask the engine to resume",
+  humanStateSource: "state.md · Runtime State",
+  humanUnitPaused: (unit, reason) => `⏸ Unit ${unit} paused${reason ? ` — ${reason}` : ""}`,
+  humanUnitNext: (next) => `next: ${next}`,
+  humanEngineAsk: (askType, where) =>
+    `Engine question pending — ${askType ? (EN_ASK[askType] ?? askType) : "question"} · ${where}`,
+  humanEngineAskSource: "active-directive.json",
+  humanEngineAskTip:
+    "The directive the engine last handed out asks you something. Only a directive whose digest matches the current state is read; most of these are asked in the conversation with no questions file",
+  humanEngineOnly: (file) => `Blank tag only the engine waits on · ${file}`,
+  humanEngineOnlyTip:
+    "The stop hook lets the turn end when the raw text of the running stage's questions file holds a blank [Answer]:. This dashboard reads that spot as answered (an example in a code block, a placeholder answered in another section), so it is not counted — but the engine may stop here",
   humanNone: "✓ Nothing awaiting you",
   humanSource: "questions files",
   checksNone: "No checks recorded this stage",

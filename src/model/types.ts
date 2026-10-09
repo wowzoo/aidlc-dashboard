@@ -26,6 +26,7 @@ import type { AskKind, QuestionsReport } from "../scan/questions";
 import type { ReworkReport } from "../scan/rework";
 import type { SensorReport } from "../scan/sensors";
 import type { TimingReport } from "../scan/timing";
+import type { Waits } from "./waits";
 
 /** Where a number came from. */
 export type SourceKind =
@@ -237,6 +238,8 @@ export interface DashboardModel {
   timing: TimingReport;
   blockers: Blocker[];
   gates: GateSummary;
+  /** Where the run is and what else holds it — see model/waits.ts. */
+  waits: Waits;
   /**
    * How much of the run was done over again. Separate from `gates`, which only
    * counts the events: this pairs each rejection with the approval that closed it

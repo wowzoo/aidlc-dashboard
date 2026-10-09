@@ -181,6 +181,12 @@ export interface QuestionsFile {
   mtime: string;
   /** A fence, comment or raw HTML block was never closed and was read as text. */
   unclosed: boolean;
+  /**
+   * The stop hook's own test on the raw text — `\[Answer\]:[ \t]*_*[ \t]*$` anywhere,
+   * no headings, no visibility (aidlc-continue-workflow.ts `hasPendingQuestion`). Not
+   * an ask: a fact about the engine, used only for the active stage's own files.
+   */
+  rawBlank: boolean;
 }
 
 export interface QuestionsReport {
@@ -551,6 +557,9 @@ function statMtime(p: string): string {
   }
 }
 
+/** The stop hook's pending-question regex, verbatim. */
+const STOP_HOOK_BLANK_RE = /\[Answer\]:[ \t]*_*[ \t]*$/m;
+
 /** Read one questions artifact into a QuestionsFile, or undefined if unreadable. */
 function readFileEntry(
   recordDir: string,
@@ -576,6 +585,7 @@ function readFileEntry(
     unanswered: parsed.questions.filter((q) => !q.answered),
     mtime: statMtime(abs),
     unclosed: parsed.unclosed,
+    rawBlank: STOP_HOOK_BLANK_RE.test(text),
   };
 }
 

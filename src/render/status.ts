@@ -17,6 +17,7 @@ import {
   type HumanReading,
   type StuckReading,
   buildStatus,
+  defaultStopCap,
 } from "../model/status";
 import type { Blocker, DashboardModel } from "../model/types";
 import {
@@ -53,10 +54,17 @@ export function renderRunLine(m: DashboardModel, s: Strings): string {
     )}</span></div>`;
   }
   const phase = m.state.lifecyclePhase;
-  const where = phase ? `${phase} › ${st.run.stageDisplay}` : st.run.stageDisplay;
+  const stage = st.run.unit
+    ? `${st.run.stageDisplay} · ${x.runningUnit(st.run.unit)}`
+    : st.run.stageDisplay;
+  const where = phase ? `${phase} › ${stage}` : stage;
+  // Said, not implied: a Current Stage that can lag is not where the engine is.
+  const unverified = st.run.verified
+    ? ""
+    : ` <span class="rl-sub" title="${esc(x.runUnverifiedTip)}">· ${esc(x.runUnverified)}</span>`;
   return `<div class="runline" title="${esc(x.runTip)}"><span class="rl-dot run"></span><b>${esc(
     x.running,
-  )}</b><span class="rl-sub">${esc(x.runningSub(where, dur(st.run.lastEventAgeSec)))}</span></div>`;
+  )}</b><span class="rl-sub">${esc(x.runningSub(where, dur(st.run.lastEventAgeSec)))}</span>${unverified}</div>`;
 }
 
 // ── Run Health ───────────────────────────────────────────────────────────────
@@ -104,21 +112,83 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
   const x = s.status;
   const maxWait = Math.max(0, ...m.blockers.map((b) => b.waitingSec ?? 0));
   const rows: Row[] = [];
-  if (h?.awaitingGate) {
+  const w = h?.waits;
+  const now = Date.parse(m.generatedAt);
+  const age = (iso: string | undefined) => {
+    const t = iso ? (now - Date.parse(iso)) / 1000 : Number.NaN;
+    return Number.isFinite(t) && t >= 0 ? dur(t) : "";
+  };
+  const sub = (text: string) => `<span class="mr-sub"> · ${esc(text)}</span>`;
+  // The run's own holds first — each is something only the person can release.
+  if (w?.parked) {
     rows.push({
-      label: `${esc(x.humanGate(h.awaitingGate))}<span class="mr-sub"> · ${esc(x.humanGateSource)}</span>`,
+      label: `${esc(x.humanParked(w.parked.stage, w.parked.byPerson))}${sub(x.humanStateSource)}`,
+      value: age(w.parked.since),
+      pct: 100,
+      tone: "warn",
+      tip: x.humanParkedTip,
+    });
+  }
+  if (w?.unitPaused) {
+    const next = w.unitPaused.nextAction ? ` · ${x.humanUnitNext(w.unitPaused.nextAction)}` : "";
+    rows.push({
+      label: `${esc(x.humanUnitPaused(w.unitPaused.unit, w.unitPaused.reason))}${sub(`${x.humanStateSource}${next}`)}`,
       value: "",
       pct: 100,
       tone: "warn",
     });
   }
+  if (w?.engineAsk) {
+    const where = w.engineAsk.unit
+      ? `${w.engineAsk.unit} · ${w.engineAsk.stage}`
+      : w.engineAsk.stage;
+    rows.push({
+      label: `${esc(x.humanEngineAsk(w.engineAsk.askType, where))}${sub(x.humanEngineAskSource)}`,
+      value: "",
+      pct: 100,
+      tone: "warn",
+      tip: x.humanEngineAskTip,
+    });
+  }
+  if (h?.awaitingGate) {
+    rows.push({
+      label: `${esc(x.humanGate(h.awaitingGate))}${sub(x.humanGateSource)}`,
+      value: age(w?.gate?.since),
+      pct: 100,
+      tone: "warn",
+    });
+  }
+  if (w?.revising) {
+    rows.push({
+      label: esc(x.humanRevising(w.revising)),
+      value: "",
+      tone: "none",
+      tip: x.humanRevisingTip,
+    });
+  }
   // buildBlockers already sorts current-stage asks first; parked ones follow, dimmed.
   for (const b of m.blockers) rows.push(askRow(b, s, maxWait));
+  for (const rel of w?.engineOnly ?? []) {
+    rows.push({
+      label: `${esc(x.humanEngineOnly(rel.split("/").pop() ?? rel))}<span class="mr-sub"> · ${viewLink(
+        rel,
+        rel.split("/").pop() ?? rel,
+        s.blockers.viewTip(rel),
+      )}</span>`,
+      value: "",
+      tone: "none",
+      dim: true,
+      tip: x.humanEngineOnlyTip,
+    });
+  }
   // An open gate is usually answered IN the current-stage questions file, so adding it
   // to their count would report one approval twice. It counts on its own only when no
-  // current ask carries it — the same rule the status chip used.
+  // current ask carries it — the same rule the status chip used. A park, a paused unit
+  // and an engine ask each hold the run on their own and count once each; revising
+  // and engine-only rows are shown, not counted (see model/waits.ts).
   const current = h?.current ?? 0;
-  const open = current > 0 ? current : h?.awaitingGate ? 1 : 0;
+  const holds = (w?.parked ? 1 : 0) + (w?.unitPaused ? 1 : 0) + (w?.engineAsk ? 1 : 0);
+  const open = (current > 0 ? current : h?.awaitingGate ? 1 : 0) + holds;
   return {
     label: s.cards.answersTab,
     count: { text: String(open), tone: open > 0 ? "warn" : "ok" },
@@ -133,7 +203,7 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
   };
 }
 
-function stuckTab(r: StuckReading, s: Strings): Tab {
+function stuckTab(r: StuckReading, s: Strings, autonomous: boolean): Tab {
   const x = s.status;
   let row: Row;
   let count: { text: string; tone: CountTone };
@@ -154,9 +224,26 @@ function stuckTab(r: StuckReading, s: Strings): Tab {
       };
       count = { text: "0", tone: "ok" };
       break;
+    case "nudged":
+      row = {
+        label: `${esc(x.stuckNudged)}<span class="mr-sub"> · ${esc(r.stage)}</span>`,
+        value: "1",
+        tone: "ok",
+      };
+      count = { text: "1", tone: "ok" };
+      break;
     case "blocked":
       row = {
-        label: `${esc(x.stuckBlocked(r.count))}<span class="mr-sub"> · ${esc(r.stage)}</span>`,
+        label: `${esc(x.stuckBlocked(r.count, r.cap))}<span class="mr-sub"> · ${esc(r.stage)}</span>`,
+        value: String(r.count),
+        pct: share(r.count, r.cap),
+        tone: "warn",
+      };
+      count = { text: String(r.count), tone: "warn" };
+      break;
+    case "released":
+      row = {
+        label: `${esc(x.stuckReleased(r.count, r.cap))}<span class="mr-sub"> · ${esc(r.stage)}</span>`,
         value: String(r.count),
         pct: 100,
         tone: "warn",
@@ -167,7 +254,7 @@ function stuckTab(r: StuckReading, s: Strings): Tab {
   return {
     label: s.cards.stuckTab,
     count,
-    body: rowList([{ ...row, tip: x.stuckTip }], {
+    body: rowList([{ ...row, tip: x.stuckTip(defaultStopCap(autonomous), autonomous) }], {
       head: [s.cards.colGuard, s.cards.colCount],
       note: x.stuckSource,
     }),
@@ -247,7 +334,7 @@ export function renderRunHealth(m: DashboardModel, s: Strings): string {
 
   const tabs = [
     answersTab(st.human, m, s),
-    stuckTab(st.stuck ?? { state: "no-record" }, s),
+    stuckTab(st.stuck ?? { state: "no-record" }, s, m.waits.autonomous),
     checksTab(st.checks ?? { state: "none" }, m, s),
   ];
   const problem = tabs.findIndex((t) => t.count?.tone === "warn" || t.count?.tone === "bad");

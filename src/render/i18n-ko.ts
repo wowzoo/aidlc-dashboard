@@ -109,6 +109,19 @@ const blockers: BlockerStrings = {
   viewTip: (rel) => `${rel} 원문을 대시보드에서 보기`,
 };
 
+const KO_ASK: Record<string, string> = {
+  "compose-offer": "작업 묶음 제안 확인",
+  "guard-recovery": "가드 복구 방법 선택",
+  "intent-pick": "intent 선택",
+  "legacy-plan-approval-recovery": "계획 승인 복구",
+  "new-work-routing": "새 요청 분류",
+  "plan-approval": "계획 승인",
+  "project-type": "프로젝트 유형 확인",
+  "scope-confirm": "범위 확인",
+  "unit-claim": "유닛 선점",
+  "unit-paused": "일시정지된 유닛 재개",
+};
+
 const status: StatusStrings = {
   runComplete: "✓ 완료",
   runUnknown: "? run 상태 확인 불가",
@@ -117,15 +130,37 @@ const status: StatusStrings = {
   runningSub: (stage, age) => `${stage} · 마지막 기록 ${age} 전`,
   runTip:
     "마지막 기록은 감사 로그의 가장 최근 이벤트입니다. 이 값이 계속 커지면 run 이 아무것도 쓰지 않고 있다는 뜻입니다",
+  runningUnit: (unit) => `유닛 ${unit}`,
+  runUnverified: "위치 미확인",
+  runUnverifiedTip:
+    "unit-major 에서는 Current Stage 가 첫 per-unit stage 에 머무르므로 실제 위치가 더 뒤일 수 있습니다. state.md 의 Unit Stage 도, 지금 state 에 맞는 엔진 지시(active-directive.json)도 없어 Current Stage 로 표시했습니다",
   stuckNoRecord: "차단 기록 없음",
   stuckClear: "✓ 막힘 없음",
   stuckEarlier: (stage) => `마지막 차단은 ${stage} · 이 clone`,
-  stuckBlocked: (count) => `⚠ 진행 없이 ${count}회 연속 차단`,
+  stuckNudged: "한 번 재촉함 — 진행 후 첫 차단",
+  stuckBlocked: (count, cap) => `⚠ 진행 없이 ${count}회 연속 차단 (한도 ${cap})`,
+  stuckReleased: (count, cap) => `⚠ 재촉 한도 도달 ${count}/${cap} — hook 이 멈춤을 허용함`,
   stuckSource: "stop hook · 이 clone",
-  stuckTip:
-    "stop hook 의 block-count.json 입니다. 진행 없이 멈추려 할 때마다 1 씩 오르고 진행하면 0 으로 돌아갑니다. 엔진이 포기하는 한도는 엔진 쪽 설정이라 여기서 판정하지 않습니다",
+  stuckTip: (cap, autonomous) =>
+    `stop hook 의 block-count.json 입니다. 진행한 뒤 처음 막으면 1, 진행 없이 다시 막을 때마다 1 씩 오르고, 완료·알림·일시정지 때만 0 이 됩니다. 한도에 닿으면 hook 이 더 막지 않고 멈춤을 허용합니다. 한도는 ${autonomous ? "자율" : "대화형"} 기본값 ${cap} 기준이며 CLAUDE_CODE_STOP_HOOK_BLOCK_CAP 으로 바뀌었을 수 있습니다`,
   humanGate: (stage) => `승인 대기 ${stage}`,
-  humanGateSource: "게이트 열림 · 감사 로그",
+  humanGateSource: "게이트 열림 · state.md [?]",
+  humanRevising: (stage) => `${stage} 수정 중 — 게이트가 거절됨`,
+  humanRevisingTip:
+    "사용자가 승인 게이트를 거절해 stage 를 고치는 중입니다(state.md [R]). 다음 행동은 run 쪽이라 답변 대기로 세지 않습니다",
+  humanParked: (stage, byPerson) => `⏸ 일시정지 — ${stage}${byPerson ? " · 사람이 세움" : ""}`,
+  humanParkedTip: "run 이 park 되었습니다. 엔진에 resume 을 요청해야 다시 진행합니다",
+  humanStateSource: "state.md · Runtime State",
+  humanUnitPaused: (unit, reason) => `⏸ 유닛 ${unit} 일시정지${reason ? ` — ${reason}` : ""}`,
+  humanUnitNext: (next) => `다음 행동: ${next}`,
+  humanEngineAsk: (askType, where) =>
+    `엔진 질문 대기 — ${askType ? (KO_ASK[askType] ?? askType) : "질문"} · ${where}`,
+  humanEngineAskSource: "active-directive.json",
+  humanEngineAskTip:
+    "엔진이 마지막으로 내준 지시가 사람에게 묻는 질문입니다. 지금 state 와 digest 가 맞는 지시만 읽으며, 대부분 질문 파일 없이 대화로만 묻습니다",
+  humanEngineOnly: (file) => `엔진만 대기로 보는 빈 태그 · ${file}`,
+  humanEngineOnlyTip:
+    "stop hook 은 진행 중 stage 의 질문 파일 원문에서 빈 [Answer]: 를 찾으면 턴 종료를 허용합니다. 이 대시보드가 답한 것으로 읽은 자리(코드 블록 속 예시, 다른 절에서 답한 자리 등)이므로 답변 대기로 세지 않지만, 엔진이 여기서 멈출 수 있습니다",
   humanNone: "✓ 답변 대기 없음",
   humanSource: "questions 파일",
   checksNone: "현재 stage 검사 기록 없음",

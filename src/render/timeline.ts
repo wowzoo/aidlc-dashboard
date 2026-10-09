@@ -413,8 +413,9 @@ function body(m: DashboardModel, s: Strings): string {
   const runSpan = t.elapsedSec;
 
   // WHAT IS THE RUN WAITING ON — said out loud rather than left to be inferred from
-  // the rightmost bar. `awaitingStage` is undefined on a run that never emitted
-  // STAGE_AWAITING_APPROVAL for its current stage, and silence there is what made a
+  // the rightmost bar. The gate claim is the one the status strip makes (the state
+  // row's `[?]`, model/waits.ts), not this ledger's last STAGE_AWAITING_APPROVAL —
+  // which stayed "awaiting" after the gate was answered. Silence there is what made a
   // reader guess from bar colour.
   const inFlight = t.stages.filter((s) => s.endKind === "in-flight");
   const nowLine = `<p class="note">${
@@ -423,7 +424,7 @@ function body(m: DashboardModel, s: Strings): string {
           inFlight.map((sp) => `<b>${esc(sp.stage)}</b> ${esc(hours(sp.elapsedSec))}`).join(" · "),
         )
       : esc(x.noneInFlight)
-  } · ${t.awaitingStage ? x.awaiting(esc(t.awaitingStage)) : x.awaitingNone}${
+  } · ${m.gates.awaitingStage ? x.awaiting(esc(m.gates.awaitingStage)) : x.awaitingNone}${
     m.rework.provisional ? esc(x.reworkPending) : ""
   }</p>`;
 

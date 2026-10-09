@@ -202,14 +202,35 @@ export interface StatusStrings {
   /** `age` is how long since the newest audit event, already formatted. */
   runningSub(stage: string, age: string): string;
   readonly runTip: string;
+  /** Appended to the stage when the position names the unit the run is on. */
+  runningUnit(unit: string): string;
+  /** The position fell back to a Current Stage that can lag (unit-major). */
+  readonly runUnverified: string;
+  readonly runUnverifiedTip: string;
   readonly stuckNoRecord: string;
   readonly stuckClear: string;
   stuckEarlier(stage: string): string;
-  stuckBlocked(count: number): string;
+  readonly stuckNudged: string;
+  stuckBlocked(count: number, cap: number): string;
+  stuckReleased(count: number, cap: number): string;
   readonly stuckSource: string;
-  readonly stuckTip: string;
+  /** `cap` is the default the reading assumed; `autonomous` says which one. */
+  stuckTip(cap: number, autonomous: boolean): string;
   humanGate(stage: string): string;
   readonly humanGateSource: string;
+  humanRevising(stage: string): string;
+  readonly humanRevisingTip: string;
+  humanParked(stage: string, byPerson: boolean): string;
+  readonly humanParkedTip: string;
+  readonly humanStateSource: string;
+  humanUnitPaused(unit: string, reason: string): string;
+  humanUnitNext(next: string): string;
+  /** `askType` absent = 2.10's untyped ask. */
+  humanEngineAsk(askType: string | undefined, where: string): string;
+  readonly humanEngineAskSource: string;
+  readonly humanEngineAskTip: string;
+  humanEngineOnly(file: string): string;
+  readonly humanEngineOnlyTip: string;
   readonly humanNone: string;
   readonly humanSource: string;
   readonly checksNone: string;

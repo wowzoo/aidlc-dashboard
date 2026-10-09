@@ -12,15 +12,20 @@
 //   2. A chip is only green when its signal was READ and is off. A source that is
 //      missing reads as "no record" (muted), never as healthy — a run whose stop
 //      hook never wrote block-count.json has not been shown to be unstuck.
-//   3. No thresholds are invented. The stop hook's give-up cap is run-mode-aware
-//      and lives in the engine (hooks/aidlc-stop.ts), not in this repo, so the
-//      stuck chip reports the measured count and does not grade it.
+//   3. No thresholds are invented — and the one the stuck chip uses is the engine's.
+//      The stop hook (aidlc-continue-workflow.ts) writes `count` 1 on the first block
+//      after progress (a changed signature), adds one per block with no progress,
+//      resets to 0 only on done/notice/parked/handoff, and RELEASES the turn once the
+//      count reaches its cap: 8 under autonomous Construction, 2 otherwise, unless
+//      `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` overrides it — which a file on disk cannot
+//      show, so the reading says which default it assumed. 1 is a nudge, not "stuck".
 //
 // A completed run shows the run chip alone: a past block or a past failed check is
 // history, not a problem with the run. The one exception is an ask left unanswered,
 // which stays reachable as a loose end (see buildStatus).
 
 import type { DashboardModel } from "./types";
+import type { Waits } from "./waits";
 
 export type RunReading =
   | { state: "complete" }
@@ -28,6 +33,10 @@ export type RunReading =
   | {
       state: "running";
       stageDisplay: string;
+      /** The unit the run is on, when the position names one. */
+      unit?: string;
+      /** False when the position fell back to a `Current Stage` that can lag. */
+      verified: boolean;
       /** Age of the newest audit event — how long since the run last wrote anything. */
       lastEventAgeSec?: number;
     };
@@ -43,7 +52,12 @@ export type StuckReading =
    * run has left means no block has happened since the move.
    */
   | { state: "earlier-stage"; stage: string }
-  | { state: "blocked"; count: number; stage: string };
+  /** count 1 — the hook pushed once since the last progress. Normal operation. */
+  | { state: "nudged"; stage: string; cap: number }
+  /** 2 ≤ count < cap — blocked again with no progress in between. */
+  | { state: "blocked"; count: number; stage: string; cap: number }
+  /** count ≥ cap — the hook gave up and let the turn end. */
+  | { state: "released"; count: number; stage: string; cap: number };
 
 export interface HumanReading {
   /** Unanswered asks in the stage the engine is on — the ones stopping the run. */
@@ -54,6 +68,8 @@ export interface HumanReading {
   awaitingGate?: string;
   /** Unanswered asks parked in earlier stages — loose ends, not the reason it stopped. */
   earlier: number;
+  /** The run's other holds, read from the engine's own records — see model/waits.ts. */
+  waits?: Waits;
 }
 
 export type ChecksReading =
@@ -79,8 +95,13 @@ export interface StatusStrip {
 
 type StatusInput = Pick<
   DashboardModel,
-  "state" | "health" | "blockers" | "sensors" | "timing" | "provenance"
+  "state" | "health" | "blockers" | "sensors" | "timing" | "provenance" | "waits"
 >;
+
+/** The stop hook's default cap — see rule 3 in the header. */
+export function defaultStopCap(autonomous: boolean): number {
+  return autonomous ? 8 : 2;
+}
 
 /**
  * The stage part of a stop-guard signature — everything before the FIRST `::`.
@@ -103,7 +124,10 @@ function readStuck(m: StatusInput): StuckReading {
   const stage = signatureStage(guard.signature);
   const current = m.state.currentStage;
   if (current && stage && stage !== current) return { state: "earlier-stage", stage };
-  return { state: "blocked", count: guard.count, stage };
+  const cap = defaultStopCap(m.waits.autonomous);
+  if (guard.count >= cap) return { state: "released", count: guard.count, stage, cap };
+  if (guard.count === 1) return { state: "nudged", stage, cap };
+  return { state: "blocked", count: guard.count, stage, cap };
 }
 
 function readHuman(m: StatusInput): HumanReading {
@@ -114,8 +138,9 @@ function readHuman(m: StatusInput): HumanReading {
   return {
     current: current.length,
     oldestWaitingSec: waits.length > 0 ? Math.max(...waits) : undefined,
-    awaitingGate: m.timing.awaitingStage,
+    awaitingGate: m.waits.gate?.stage,
     earlier: m.blockers.length - current.length,
+    waits: m.waits,
   };
 }
 
@@ -142,10 +167,16 @@ export function buildStatus(m: StatusInput): StatusStrip {
       human: { current: 0, earlier: m.blockers.length },
     };
   }
-  const run: RunReading = m.state.currentStage
+  const pos = m.waits.position;
+  // The position's stage, not Current Stage, when the engine's own records name a
+  // later one (unit-major) — and its display name only when it IS the Current Stage.
+  const stage = pos.stage ?? m.state.currentStage;
+  const run: RunReading = stage
     ? {
         state: "running",
-        stageDisplay: m.state.currentStageDisplay || m.state.currentStage,
+        stageDisplay: stage === m.state.currentStage ? m.state.currentStageDisplay || stage : stage,
+        unit: pos.unit,
+        verified: pos.verified,
         lastEventAgeSec: m.provenance.audit.ageSec,
       }
     : { state: "unknown" };

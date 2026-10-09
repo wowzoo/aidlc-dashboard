@@ -31,6 +31,7 @@ import { type StageStatus, parseState } from "../scan/parser";
 import { readQuestions } from "../scan/questions";
 import { resolveState } from "../scan/resolve";
 import { buildRework } from "../scan/rework";
+import { type RunPosition, readDirectiveMarker, resolvePosition } from "../scan/run-position";
 import { readSensorReport } from "../scan/sensors";
 import { type StageCatalog, harnessDirsWithCatalog, readStageCatalog } from "../scan/stage-catalog";
 import { buildTiming } from "../scan/timing";
@@ -44,6 +45,7 @@ import type {
   UsageView,
   Warning,
 } from "./types";
+import { buildWaits } from "./waits";
 
 /** Newest events kept for the stream panel. The full ledger stays server-side. */
 const RECENT_EVENT_LIMIT = 300;
@@ -204,7 +206,7 @@ function buildGates(
  */
 function buildBlockers(
   questions: ReturnType<typeof readQuestions>,
-  currentStage: string | undefined,
+  position: RunPosition,
   now: string,
 ): Blocker[] {
   const out: Blocker[] = [];
@@ -223,7 +225,12 @@ function buildBlockers(
         waitingSec: Number.isFinite(parsed)
           ? Math.max(0, (Date.parse(now) - parsed) / 1000)
           : undefined,
-        isCurrentStage: currentStage !== undefined && f.stage === currentStage,
+        // The stage the run is on, and — when the position names one — the unit: a
+        // blank ask in another unit's copy of the same stage is not what holds it.
+        isCurrentStage:
+          position.stage !== undefined &&
+          f.stage === position.stage &&
+          (position.unit === undefined || f.unit === position.unit),
       });
     }
   }
@@ -321,6 +328,18 @@ export function assemble(
   if (questions.unclosed.length > 0) {
     warnings.push({ code: "questions-unclosed-block", files: questions.unclosed });
   }
+  // Where the run is: the unit cache, then a directive issued against this exact
+  // state, then Current Stage — see scan/run-position.ts.
+  const marker = readDirectiveMarker(recordDir, stateText);
+  const position = resolvePosition({
+    currentStage: state.currentStage,
+    unitStage: state.runtime.unitStage,
+    activeUnit: state.runtime.activeUnit,
+    constructionIteration: state.constructionIteration ?? "",
+    isPerUnit: catalog ? (s) => catalog?.bySlug.get(s)?.forEach === "unit-of-work" : undefined,
+    marker,
+  });
+  const waits = buildWaits({ state, position, marker, events: ledger.events, questions });
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
   const timing = buildTiming(ledger, now);
@@ -633,8 +652,10 @@ export function assemble(
     deferrals,
     health,
     timing,
-    blockers: buildBlockers(questions, state.currentStage, now),
-    gates: buildGates(ledger, state.revisionCount, timing.awaitingStage),
+    blockers: buildBlockers(questions, position, now),
+    // The gate claim comes from the state row, as the engine's does — see model/waits.ts.
+    gates: buildGates(ledger, state.revisionCount, waits.gate?.stage),
+    waits,
     rework: buildRework(ledger),
     usage,
     eventCounts: [...ledger.counts].sort((a, b) => b[1] - a[1]),

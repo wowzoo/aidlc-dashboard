@@ -226,6 +226,13 @@ export interface AidlcState {
   unitOwnership?: string;
   constructionIteration?: string;
   hasUnitProgress: boolean;
+  /**
+   * The engine's `## Runtime State` cache of where the run is held (2.11 aidlc-state.ts):
+   * the active unit and the stage it is on — under unit-major NOT `Current Stage`, which
+   * stays on the first per-unit stage — and a park. Present only when written; 2.10
+   * writes no `Unit Stage` or `Parked By`. See scan/run-position.ts.
+   */
+  runtime: RuntimeFields;
   /** The parsed `## Unit Progress` table, when the state carries one. */
   unitProgress?: UnitProgress;
   scope: string;
@@ -503,6 +510,37 @@ function buildConstructionBatches(text: string, bolts: BoltInfo[]): BatchInfo[] 
   return batches.length > 0 ? batches : undefined;
 }
 
+/** `## Runtime State` fields that say where the run is held. Empty string = not written. */
+export interface RuntimeFields {
+  activeUnit: string;
+  unitStage: string;
+  /** `in-progress` or `paused` — the only two values the engine writes. */
+  unitState: string;
+  unitPauseReason: string;
+  unitNextAction: string;
+  /** ISO timestamp of the park, when parked. */
+  parked: string;
+  parkedAtStage: string;
+  /** `person` for an attended park; otherwise the line is absent. */
+  parkedBy: string;
+  /** Only the exact value `autonomous` counts (`isAutonomousMode`). Often absent. */
+  autonomyMode: string;
+}
+
+function readRuntimeFields(text: string): RuntimeFields {
+  return {
+    activeUnit: extractField(text, "Active Unit"),
+    unitStage: extractField(text, "Unit Stage"),
+    unitState: extractField(text, "Unit State"),
+    unitPauseReason: extractField(text, "Unit Pause Reason"),
+    unitNextAction: extractField(text, "Unit Next Action"),
+    parked: extractField(text, "Parked"),
+    parkedAtStage: extractField(text, "Parked At Stage"),
+    parkedBy: extractField(text, "Parked By"),
+    autonomyMode: extractField(text, "Construction Autonomy Mode"),
+  };
+}
+
 export function parseState(
   text: string,
   /**
@@ -593,6 +631,7 @@ export function parseState(
     ...(unitOwnership ? { unitOwnership } : {}),
     ...(constructionIteration ? { constructionIteration } : {}),
     hasUnitProgress,
+    runtime: readRuntimeFields(text),
     ...(unitProgress ? { unitProgress } : {}),
     scope,
     lifecyclePhase,

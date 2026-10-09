@@ -20,6 +20,11 @@ const withGuard = (stopGuard: DashboardModel["health"]["stopGuard"]): DashboardM
   health: { ...base.health, stopGuard },
 });
 
+const withGate = (stage: string, m: DashboardModel = base): DashboardModel => ({
+  ...m,
+  waits: { ...m.waits, gate: { stage } },
+});
+
 const withSensorRow = (
   row: Partial<DashboardModel["sensors"]["stages"][number]>,
 ): DashboardModel => ({
@@ -38,9 +43,11 @@ describe("status — readings", () => {
     expect(st.run).toEqual({
       state: "running",
       stageDisplay: "Code Generation",
+      verified: true,
       lastEventAgeSec: base.provenance.audit.ageSec,
     });
-    expect(st.stuck).toEqual({ state: "blocked", count: 1, stage: "code-generation" });
+    // count 1 is the first block after progress — a nudge, not "stuck".
+    expect(st.stuck).toEqual({ state: "nudged", stage: "code-generation", cap: 2 });
     expect(st.human?.current).toBe(1);
     expect(st.human?.earlier).toBe(0);
     expect(st.human?.oldestWaitingSec).toBe(base.blockers[0]?.waitingSec);
@@ -73,9 +80,10 @@ describe("status — readings", () => {
     // green "cleared in an earlier stage".
     const signature = `${base.state.currentStage}::${"a".repeat(64)}::${"b".repeat(64)}`;
     expect(buildStatus(withGuard({ signature, count: 3 })).stuck).toEqual({
-      state: "blocked",
+      state: "released",
       count: 3,
       stage: base.state.currentStage,
+      cap: 2,
     });
   });
 
@@ -105,17 +113,14 @@ describe("status — readings", () => {
   });
 
   test("an open gate with no unanswered question is still something awaiting the human", () => {
-    const m: DashboardModel = {
-      ...base,
-      blockers: [],
-      timing: { ...base.timing, awaitingStage: "code-generation" },
-    };
+    const m = withGate("code-generation", { ...base, blockers: [] });
     const h = buildStatus(m).human;
     expect(h).toEqual({
       current: 0,
       oldestWaitingSec: undefined,
       awaitingGate: "code-generation",
       earlier: 0,
+      waits: m.waits,
     });
   });
 });
@@ -165,8 +170,11 @@ describe("Run Health card — markup", () => {
 
   test("opens on the first tab that has a problem", () => {
     expect(checked(renderRunHealth(base, ko))).toBe("0");
-    // No asks → the next problem is the block.
-    expect(checked(renderRunHealth({ ...base, blockers: [] }, ko))).toBe("1");
+    // No asks → the next problem is the block (count 2 reaches the interactive cap).
+    const blocked = withGuard({ signature: "code-generation::40", count: 2 });
+    expect(checked(renderRunHealth({ ...blocked, blockers: [] }, ko))).toBe("1");
+    // A single nudge is not a problem.
+    expect(checked(renderRunHealth({ ...base, blockers: [] }, ko))).toBe("2");
     // No asks, no block → the failed check.
     const noBlock = withGuard({ signature: "code-generation::40", count: 0 });
     expect(checked(renderRunHealth({ ...noBlock, blockers: [] }, ko))).toBe("2");
@@ -212,21 +220,13 @@ describe("Run Health card — markup", () => {
   });
 
   test("an open gate with no question still counts as something awaiting you", () => {
-    const m: DashboardModel = {
-      ...base,
-      blockers: [],
-      timing: { ...base.timing, awaitingStage: "code-generation" },
-    };
-    const html = renderRunHealth(m, ko);
+    const html = renderRunHealth(withGate("code-generation", { ...base, blockers: [] }), ko);
     expect(html).toContain("승인 대기 code-generation");
     expect(html).toContain('<b class="mc-n warn">1</b>');
   });
 
   test("an open gate on the stage whose ask is waiting counts once, not twice", () => {
-    const m: DashboardModel = {
-      ...base,
-      timing: { ...base.timing, awaitingStage: base.state.currentStage },
-    };
+    const m = withGate(base.state.currentStage);
     expect(base.blockers.filter((b) => b.isCurrentStage).length).toBe(1);
     const html = renderRunHealth(m, ko);
     expect(html).toContain('<b class="mc-n warn">1</b>');
@@ -264,7 +264,7 @@ describe("Run Health card — markup", () => {
   test("English renders with no Hangul", () => {
     const html = renderRunHealth(base, strings("en")) + renderRunLine(base, strings("en"));
     expect(/[가-힣]/.test(html)).toBe(false);
-    expect(html).toContain("Blocked 1× with no progress");
+    expect(html).toContain("Nudged once");
     expect(html).toContain("Your answers");
   });
 });

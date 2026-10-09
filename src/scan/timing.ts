@@ -344,8 +344,6 @@ export interface TimingReport {
   sinceLastEventSec: number;
   /** Team wall-clock: first → last event across every shard. */
   elapsedSec: number;
-  /** Stage awaiting approval right now, per the ledger. */
-  awaitingStage?: string;
   /**
    * `total` re-cut into `BIN_SEC` slices from the first event to the LAST EVENT, for
    * the time chart. Merged timeline, like `total` and the stage spans — see TimeBin.
@@ -750,7 +748,6 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
   const raw = new Map<string, RawSegment[]>();
   const finalKind = new Map<string, StageEndKind>();
   const order: string[] = [];
-  let awaitingStage: string | undefined;
 
   const close = (stage: string, endedAt: string, endKind: StageEndKind): void => {
     const current = open.get(stage);
@@ -773,15 +770,11 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
       // superseded, because whatever state it was in, it is over.
       close(stage, e.ts, "superseded");
       open.set(stage, { startedAt: e.ts, awaiting: false });
-      if (awaitingStage === stage) awaitingStage = undefined;
     } else if (e.event === "STAGE_COMPLETED") {
       close(stage, e.ts, "completed");
-      if (awaitingStage === stage) awaitingStage = undefined;
     } else if (e.event === "STAGE_SKIPPED") {
       close(stage, e.ts, "skipped");
-      if (awaitingStage === stage) awaitingStage = undefined;
     } else if (e.event === "STAGE_AWAITING_APPROVAL") {
-      awaitingStage = stage;
       const current = open.get(stage);
       if (current) current.awaiting = true;
     }
@@ -903,7 +896,6 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
     lastEventTs: lastActualTs,
     sinceLastEventSec: Math.max(0, secs(lastActualTs, endTs)),
     elapsedSec,
-    awaitingStage,
     bins: buildBins(gaps, firstTs, lastActualTs),
     workers,
     parallel: workers.length > 1,
