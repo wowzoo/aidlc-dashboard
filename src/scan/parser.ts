@@ -393,7 +393,11 @@ export function parseStages(
     if (!m) continue;
     const box = m[1]!;
     const slug = m[2]!;
-    const isSkipMarker = /\bSKIP\b/.test(line);
+    // The engine reads the ACTION after the em dash (`parseStateStageSuffixes`:
+    // `— (EXECUTE|SKIP)\b`), not the word anywhere on the line — `— EXECUTE: do not SKIP
+    // the review` is an executed stage. A row with no suffix keeps the old reading.
+    const suffix = /—\s*(EXECUTE|SKIP)\b/.exec(line)?.[1];
+    const isSkipMarker = suffix ? suffix === "SKIP" : /\bSKIP\b/.test(line);
     byPhase.get(current)?.push({
       slug,
       display: stageDisplay(slug, catalogName),

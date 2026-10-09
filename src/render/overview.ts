@@ -255,7 +255,9 @@ function matrixTable(mx: ConstructionMatrix, s: Strings): string {
       }`
     : // Receipts come from the audit, not the catalogue, so ▩ can appear with no
       // catalogue at all. Claiming "file presence only" was wrong whenever it did.
-      `<p class="note warn">${esc(s.overview.legendNoContract(mx.receiptAware))}</p>`;
+      `<p class="note warn">${esc(s.overview.legendNoContract(mx.receiptAware))}${
+        anySkipped ? esc(s.overview.legendSkipped) : ""
+      }</p>`;
 
   const batches = mx.batches.length
     ? `<div class="dag">${mx.batches

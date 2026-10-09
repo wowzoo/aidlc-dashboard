@@ -118,15 +118,22 @@ export function readUnitLifecycle(
   } = {},
 ): UnitLifecycle {
   // Rows built by hand (tests) may carry the stage/unit only on the event, not in its
-  // fields; the engine reads the fields, so fold them in where absent.
-  const rows = events.map((e) => ({
-    ...e,
-    fields: {
-      ...(e.stage !== undefined ? { Stage: e.stage } : {}),
-      ...(e.unit !== undefined ? { Unit: e.unit } : {}),
-      ...e.fields,
-    },
-  }));
+  // fields, so those are folded in. A parsed ledger row (it has a `pos`) is passed as it
+  // is: its `stage`/`unit` may be INFERRED from `Context`, and the engine reads only the
+  // raw `Stage`/`Unit` fields — folding them in turned a Context-only completion into a
+  // receipt the engine never counted.
+  const rows = events.map((e) =>
+    e.pos !== undefined
+      ? e
+      : {
+          ...e,
+          fields: {
+            ...(e.stage !== undefined ? { Stage: e.stage } : {}),
+            ...(e.unit !== undefined ? { Unit: e.unit } : {}),
+            ...e.fields,
+          },
+        },
+  );
   const unitMajor = opts.unitMajor ?? false;
   const team = opts.teamOwnership ?? false;
   return readUnitReceipts(rows, {
@@ -447,7 +454,13 @@ export function buildConstructionMatrix(
       const artifactsMet = present.length > 0 && missing.length === 0;
       const needsReceipt = lifecycle?.inUse(st.slug) === true;
       if (needsReceipt) receiptsInForce = true;
-      const receipt = needsReceipt ? lifecycle?.state(u.name, st.slug) : undefined;
+      // A skip is read whether or not receipts are in force: UNIT_SKIPPED does not count
+      // toward `inUse` (the engine's snapshot leaves it out, and adding it would make
+      // every other legacy unit of the stage receipt-bound), but the engine's settled
+      // check reads the skip first. A stage whose only unit rows are skips is real — the
+      // skip writer emits no UNIT_STARTED.
+      const verdict = lifecycle?.state(u.name, st.slug);
+      const receipt = needsReceipt || verdict?.state === "skipped" ? verdict : undefined;
       const state: CellState =
         catStage !== undefined && u.kind !== undefined && vacuouslyCovered(catStage, u.kind)
           ? "n/a"

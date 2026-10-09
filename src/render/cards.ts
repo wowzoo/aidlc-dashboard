@@ -187,7 +187,11 @@ export function renderUnitCard(m: DashboardModel, s: Strings): string {
   // the full stage × unit matrix is one click away.
   let pick = stages.find((st) => st.slug === m.state.currentStage);
   if (!pick) {
-    for (const st of stages) if (st.complete + st.partial + st.unsettled > 0) pick = st;
+    // Any cell the run has touched counts as progress — a skip or an unverifiable receipt
+    // is the run having been there, not a stage nothing happened in.
+    for (const st of stages) {
+      if (st.complete + st.partial + st.unsettled + st.unverified + st.skipped > 0) pick = st;
+    }
   }
   const st = pick ?? (stages[0] as MatrixStage);
   return tabbedCard({

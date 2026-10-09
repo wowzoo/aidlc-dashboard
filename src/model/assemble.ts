@@ -239,12 +239,20 @@ function receiptPolicy(
 ): Parameters<typeof readUnitLifecycle>[1] {
   const checkpoints = state.constructionCheckpoints === "enabled";
   const unitMajor = state.constructionIteration?.trim() === "unit-major" || checkpoints;
-  const codeStage = state.phases.some((p) =>
-    p.stages.some((s) => {
-      const c = catalog?.bySlug.get(s.slug);
-      return s.execute && c?.forEach === "unit-of-work" && c.workspaceRequires === true;
-    }),
-  );
+  // Construction rows only, and not a stage the run skipped at runtime (`[S]`): the
+  // engine's `unitMajorConstructionStageSlugs` excludes it, and counting it here turned
+  // every other stage's artifact-only cells unsettled. Not reproduced: the scope's own
+  // default for a stage the state has no row for, and an unknown scope (which the engine
+  // reads as not applying) — both rare in a state the engine wrote.
+  const codeStage = (state.phases.find((p) => p.key === "construction")?.stages ?? []).some((s) => {
+    const c = catalog?.bySlug.get(s.slug);
+    return (
+      s.execute &&
+      s.status !== "skipped" &&
+      c?.forEach === "unit-of-work" &&
+      c.workspaceRequires === true
+    );
+  });
   return {
     unitMajor,
     teamOwnership: team,
@@ -587,7 +595,12 @@ export function assemble(
         rosterMismatch || versionMismatch ? undefined : catalog,
         // Completion receipts come from the audit. Where a stage uses the unit
         // lifecycle they outrank artifact presence — the engine's own rule.
-        readUnitLifecycle(ledger.events, receiptPolicy(state, catalog, team)),
+        // The same catalogue the matrix is given: one it refused (roster or version
+        // mismatch) must not keep steering the receipt policy or the jump order either.
+        readUnitLifecycle(
+          ledger.events,
+          receiptPolicy(state, rosterMismatch || versionMismatch ? undefined : catalog, team),
+        ),
         // An unverified version does NOT throw the contract away — it withholds the claim
         // that the judgement matches the engine's. Separate axes, not one.
         stateCompat,

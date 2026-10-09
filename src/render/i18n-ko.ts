@@ -238,7 +238,7 @@ const overview: OverviewStrings = {
   tipNotStarted: "미착수",
 
   legendBase:
-    "█ 완료(수령증 확인) · ▨ 착수했으나 산출물 미완(칸에 마우스를 올리면 무엇이 빠졌는지 표시) · · 미착수",
+    "█ 완료(수령증을 쓰는 stage 는 수령증 확인, 아니면 산출물 기준) · ▨ 착수했으나 산출물 미완(칸에 마우스를 올리면 무엇이 빠졌는지 표시) · · 미착수",
   legendUnsettled:
     " · ▩ 산출물은 다 있으나 완료 수령증(UNIT_COMPLETED) 없음 — 엔진도 이 유닛을 미완으로 봅니다",
   legendUnverifiedNoFloor:

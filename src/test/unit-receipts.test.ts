@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import { parseAuditShard } from "../scan/audit";
+import { readUnitLifecycle } from "../scan/matrix";
 import { type ReceiptPolicy, readUnitReceipts } from "../scan/unit-receipts";
 
 const ORDER = ["functional-design", "nfr-design", "code-generation"];
@@ -187,5 +188,81 @@ describe("receipts required by policy, end to end", () => {
     const after = assemble(root).matrix?.stages.find((s) => s.slug === "code-generation")?.cells[0]
       ?.state;
     expect(after).toBe("unsettled");
+  });
+});
+
+describe("second-review regressions — receipts at the matrix boundary", () => {
+  const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+  const STATE_REL = "aidlc/spaces/default/intents/260101-demo-migration/aidlc-state.md";
+  function tree(editState: (s: string) => string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-rc2-"));
+    fs.cpSync(FIXTURE, root, { recursive: true });
+    const graph = path.join(root, ".kiro", "tools", "data", "stage-graph.json");
+    const g = JSON.parse(fs.readFileSync(graph, "utf-8"));
+    const list: { slug: string; workspace_requires?: boolean }[] = Array.isArray(g) ? g : g.stages;
+    for (const st of list) if (st.slug === "code-generation") st.workspace_requires = true;
+    fs.writeFileSync(graph, JSON.stringify(g));
+    const p = path.join(root, STATE_REL);
+    fs.writeFileSync(p, editState(fs.readFileSync(p, "utf-8")));
+    return root;
+  }
+  const checkpoints = (s: string) =>
+    s.replace(
+      "- **Revision Count**: 2",
+      "- **Revision Count**: 2\n- **Construction Checkpoints**: enabled",
+    );
+  const cellsOf = (root: string, slug: string) =>
+    assemble(root)
+      .matrix?.stages.find((s) => s.slug === slug)
+      ?.cells.map((c) => c.state);
+
+  test("a code stage the run skipped at runtime does not make receipts required", () => {
+    // `unitMajorConstructionStageSlugs` excludes `[S]`; counting it turned every other
+    // stage's artifact-only cells unsettled.
+    const skippedCode = tree((s) =>
+      checkpoints(s).replace("- [-] code-generation — EXECUTE", "- [S] code-generation — EXECUTE"),
+    );
+    expect(cellsOf(skippedCode, "functional-design")).toEqual(["complete", "complete"]);
+    expect(cellsOf(tree(checkpoints), "functional-design")).toEqual(["unsettled", "unsettled"]);
+  });
+
+  test("a stage's action is the word after the em dash, not the word anywhere", () => {
+    const root = tree((s) =>
+      s.replace(
+        "- [x] functional-design — EXECUTE",
+        "- [x] functional-design — EXECUTE: do not SKIP the review",
+      ),
+    );
+    const fd = assemble(root)
+      .state.phases.flatMap((p) => p.stages)
+      .find((s) => s.slug === "functional-design");
+    expect(fd?.execute).toBe(true);
+  });
+
+  test("a completion that names its stage and unit only through Context is not a receipt", () => {
+    // The engine reads the raw Stage/Unit fields; the parser's Context inference must not
+    // be promoted to receipt authority.
+    const shard = [
+      "# Audit",
+      "**Event**: UNIT_STARTED\n**Timestamp**: 2026-10-09T00:01:00Z\n**Stage**: code-generation\n**Unit**: PU-A\n**Run floor**: unstarted#0",
+      "**Event**: UNIT_COMPLETED\n**Timestamp**: 2026-10-09T00:02:00Z\n**Context**: construction > PU-A > code-generation > x.md\n**Run floor**: unstarted#0",
+    ].join("\n---\n");
+    const events = parseAuditShard(shard, "h.md", (s) => s === "code-generation", 0);
+    expect(events[1]?.stage).toBe("code-generation");
+    expect(readUnitLifecycle(events).state("PU-A", "code-generation").state).toBe("unsettled");
+  });
+
+  test("a stage whose only unit rows are skips still shows the skip", () => {
+    // UNIT_SKIPPED does not count toward `inUse`, and the skip writer emits no UNIT_STARTED.
+    const lc = readUnitLifecycle([
+      {
+        event: "UNIT_SKIPPED",
+        stage: "code-generation",
+        unit: "PU-A",
+        fields: { "Run floor": "unstarted#0", Reason: "r" },
+      },
+    ]);
+    expect(lc.inUse("code-generation")).toBe(false);
+    expect(lc.state("PU-A", "code-generation")).toEqual({ state: "skipped", reason: "r" });
   });
 });

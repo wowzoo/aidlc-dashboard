@@ -251,34 +251,52 @@ function stageStartsUnderUnitFlooring(
   return ignored;
 }
 
+/**
+ * What every floor in one read shares: the two policy-flooring sets and the jump
+ * ordinals do not depend on the stage or unit, so they are computed once per read —
+ * recomputing them per (stage, unit) put an O(starts × changes²) pass behind every cell.
+ */
+interface Shared {
+  rows: readonly Row[];
+  stageFloored: Set<Row>;
+  unitFloored: Set<Row>;
+  jumpOrdinals: Map<Row, number>;
+  startOrdinals: Map<string, Map<Row, number>>;
+  floors: Map<string, string>;
+  stageIndex?: (s: string) => number;
+}
+
+function shared(rows: readonly Row[], p: ReceiptPolicy): Shared {
+  return {
+    rows,
+    stageFloored: p.unitMajor ? stageStartsUnderStageFlooring(rows) : new Set(),
+    unitFloored: p.unitMajor ? new Set() : stageStartsUnderUnitFlooring(rows, p.stageIndex),
+    jumpOrdinals: new Map(
+      rows
+        .filter((r) => r.event === "STAGE_JUMPED")
+        .sort(byTime)
+        .map((r, i) => [r, i + 1]),
+    ),
+    startOrdinals: new Map(),
+    floors: new Map(),
+    stageIndex: p.stageIndex,
+  };
+}
+
 /** `latestMainWorkflowStageRunFloorFromRows`, with `unitReceipts` = true. */
-function runFloor(
-  rowsInput: readonly Row[],
-  slug: string,
-  unitMajor: boolean,
-  unit: string | undefined,
-  stageIndex?: (s: string) => number,
-): string {
-  const stageFloored = unitMajor ? stageStartsUnderStageFlooring(rowsInput) : null;
-  const unitFloored = unitMajor ? null : stageStartsUnderUnitFlooring(rowsInput, stageIndex);
-  const startOrdinals = new Map(
-    sortAttempt(rowsInput.filter((r) => isMainStart(r, slug))).map((r, i) => [r, i + 1]),
-  );
-  const jumpOrdinals = new Map(
-    rowsInput
-      .filter((r) => r.event === "STAGE_JUMPED")
-      .sort(byTime)
-      .map((r, i) => [r, i + 1]),
-  );
-  const rows = rowsInput.filter((r) => {
-    if (r.event === "WORKFLOW_STARTED") return true;
-    if (r.event === "STAGE_JUMPED") return jumpReaches(r, slug, stageIndex);
-    if (r.event === "GATE_REJECTED") return rejectionMatches(r, slug, unit);
-    return (
-      isMainStart(r, slug) &&
-      (stageFloored === null || stageFloored.has(r)) &&
-      (unitFloored === null || !unitFloored.has(r))
+function runFloor(c: Shared, slug: string, unitMajor: boolean, unit: string | undefined): string {
+  let startOrdinals = c.startOrdinals.get(slug);
+  if (!startOrdinals) {
+    startOrdinals = new Map(
+      sortAttempt(c.rows.filter((r) => isMainStart(r, slug))).map((r, i) => [r, i + 1]),
     );
+    c.startOrdinals.set(slug, startOrdinals);
+  }
+  const rows = c.rows.filter((r) => {
+    if (r.event === "WORKFLOW_STARTED") return true;
+    if (r.event === "STAGE_JUMPED") return jumpReaches(r, slug, c.stageIndex);
+    if (r.event === "GATE_REJECTED") return rejectionMatches(r, slug, unit);
+    return isMainStart(r, slug) && (unitMajor ? c.stageFloored.has(r) : !c.unitFloored.has(r));
   });
   rows.sort(byTime);
   if (rows.length === 0) return "unstarted#0";
@@ -305,7 +323,7 @@ function runFloor(
       r.event === "STAGE_STARTED"
         ? (startOrdinals.get(r) ?? 0)
         : r.event === "STAGE_JUMPED"
-          ? (jumpOrdinals.get(r) ?? 0)
+          ? (c.jumpOrdinals.get(r) ?? 0)
           : (ordinals.get(r.event) ?? 0) + 1;
     ordinals.set(r.event, ordinal);
     floor = `${r.event}:${r.ts}#${ordinal}`;
@@ -314,17 +332,17 @@ function runFloor(
 }
 
 /** `unitLifecycleRunFloorForProject`: per-unit when scoped, or when the unit was reopened. */
-function unitFloor(rows: readonly Row[], slug: string, unit: string, p: ReceiptPolicy): string {
-  const ownReopen = rows.some(
+function unitFloor(c: Shared, slug: string, unit: string, p: ReceiptPolicy): string {
+  const ownReopen = c.rows.some(
     (r) => r.event === "GATE_REJECTED" && r.f.Unit === unit && gateStages(r).includes(slug),
   );
-  return runFloor(
-    rows,
-    slug,
-    p.unitMajor,
-    p.unitScoped || ownReopen ? unit : undefined,
-    p.stageIndex,
-  );
+  const floored = p.unitScoped || ownReopen ? unit : undefined;
+  const key = `${slug}\u0001${floored ?? ""}`;
+  const known = c.floors.get(key);
+  if (known !== undefined) return known;
+  const floor = runFloor(c, slug, p.unitMajor, floored);
+  c.floors.set(key, floor);
+  return floor;
 }
 
 export interface UnitReceipts {
@@ -353,6 +371,7 @@ export function readUnitReceipts(
     f: e.fields ?? {},
   }));
 
+  const ctx = shared(rows, p);
   const inUse = new Set(
     rows.filter((r) => IN_USE_ROWS.has(r.event) && r.f.Stage).map((r) => r.f.Stage as string),
   );
@@ -376,9 +395,7 @@ export function readUnitReceipts(
     // Under stage-major flooring the rows start at the latest stage start that counts.
     const starts = rows.filter((r) => isMainStart(r, slug));
     const startedAt = [...starts].sort(byTime).at(-1)?.ts ?? "";
-    const ignoredStarts = p.unitMajor
-      ? new Set<Row>()
-      : stageStartsUnderUnitFlooring(rows, p.stageIndex);
+    const ignoredStarts = ctx.unitFloored;
     const cutoff =
       ignoredStarts.size === 0
         ? startedAt
@@ -388,7 +405,7 @@ export function readUnitReceipts(
     const floorOf = (unit: string): string => {
       const known = floors.get(unit);
       if (known !== undefined) return known;
-      const f = unitFloor(rows, slug, unit, p);
+      const f = unitFloor(ctx, slug, unit, p);
       floors.set(unit, f);
       return f;
     };
@@ -448,7 +465,9 @@ export function readUnitReceipts(
       }
       if (r.f.Mode === "wave") {
         receipts.delete(unit);
-        wave.add(unit);
+        // `waveCompletionHolds` needs a well-formed recorded digest first; without one the
+        // engine certainly refuses the receipt, so only a well-formed one is a can't-tell.
+        if (/^sha256:[0-9a-f]{64}$/.test(r.f["Artifact Fingerprint"] ?? "")) wave.add(unit);
       } else {
         receipts.add(unit);
       }

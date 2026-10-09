@@ -251,7 +251,7 @@ const overview: OverviewStrings = {
   tipNotStarted: "not started",
 
   legendBase:
-    "\u2588 complete (receipt confirmed) · \u25a8 started, artifacts incomplete (hover a cell to see what is missing) · · not started",
+    "\u2588 complete (receipt confirmed where the stage uses receipts, else by artifacts) · \u25a8 started, artifacts incomplete (hover a cell to see what is missing) · · not started",
   legendUnsettled:
     " · \u25a9 every artifact present but no completion receipt (UNIT_COMPLETED) — the engine treats this unit as uncovered too",
   legendUnverifiedNoFloor:

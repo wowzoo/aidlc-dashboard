@@ -418,8 +418,26 @@ describe("construction matrix", () => {
     expect(row.total - row.notApplicable - row.skipped).toBe(1);
   });
 
+  test("a skip shows even on a stage whose only unit rows are skips", () => {
+    // Second review: the matrix read verdicts only when receipts were in force, and a skip
+    // does not put them in force — the skip writer emits no UNIT_STARTED.
+    const lc = readUnitLifecycle([
+      {
+        event: "UNIT_SKIPPED",
+        stage: "code-generation",
+        unit: "PU-A",
+        fields: { "Run floor": "unstarted#0", Reason: "r" },
+      },
+    ]);
+    const row = buildConstructionMatrix(dag, stages, () => [], catalog, lc)!.stages[0]!;
+    expect(row.cells.map((c) => c.state)).toEqual(["skipped", "absent"]);
+    expect(row.total - row.notApplicable - row.skipped).toBe(1);
+  });
+
   describe("unit receipts", () => {
     const S = "code-generation";
+    /** A well-formed wave fingerprint — without one the engine refuses the receipt outright. */
+    const FP = `sha256:${"a".repeat(64)}`;
     const T = "2026-01-01T00:00:00Z";
     const FLOOR = `STAGE_STARTED:${T}#1`;
     const E = (event: string, ts: string, o: Partial<LifecycleEvent> = {}): LifecycleEvent => ({
@@ -494,7 +512,10 @@ describe("construction matrix", () => {
       expect(
         why([
           E("STAGE_STARTED", T),
-          U("UNIT_COMPLETED", T, { unit: "api", fields: { Mode: "wave" } }),
+          U("UNIT_COMPLETED", T, {
+            unit: "api",
+            fields: { Mode: "wave", "Artifact Fingerprint": FP },
+          }),
         ]),
       ).toBe("wave-fingerprint");
 
@@ -546,9 +567,24 @@ describe("construction matrix", () => {
       expect(
         st([
           E("STAGE_STARTED", T),
-          U("UNIT_COMPLETED", T, { unit: "api", fields: { Mode: "wave" } }),
+          U("UNIT_COMPLETED", T, {
+            unit: "api",
+            fields: { Mode: "wave", "Artifact Fingerprint": FP },
+          }),
         ]),
       ).toBe("unverifiable");
+      // No recorded fingerprint, or a malformed one: the engine certainly refuses it.
+      for (const fp of [undefined, "sha256:short"]) {
+        expect(
+          st([
+            E("STAGE_STARTED", T),
+            U("UNIT_COMPLETED", T, {
+              unit: "api",
+              fields: { Mode: "wave", ...(fp ? { "Artifact Fingerprint": fp } : {}) },
+            }),
+          ]),
+        ).toBe("unsettled");
+      }
     });
 
     test("team ownership is unverifiable — the claim FILE decides, not the audit", () => {
