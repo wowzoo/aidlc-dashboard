@@ -143,23 +143,28 @@ const status: StatusStrings = {
     "The last record is the newest event in the audit log. If it keeps growing, the run is not writing anything",
   runningUnit: (unit) => `unit ${unit}`,
   runUnverified: "position unverified",
+  runConflict: (where) => `engine directive says ${where}`,
+  runConflictTip:
+    "The unit position in state.md (Unit Stage, Active Unit) and the engine directive matching the current state (active-directive.json) point to different places. Neither is the engine's routing authority, so this dashboard does not pick one",
   runUnverifiedTip:
     "Under unit-major, Current Stage stays on the first per-unit stage, so the run may be further on. state.md has no Unit Stage and no engine directive (active-directive.json) matches the current state, so Current Stage is shown",
   stuckNoRecord: "No block recorded",
   stuckClear: "✓ Not stuck",
   stuckEarlier: (stage) => `last block was in ${stage} · this clone`,
+  stuckStateChanged: "State changed since the last block — no block since",
   stuckNudged: "Nudged once — first block after progress",
-  stuckBlocked: (count, cap) => `⚠ Blocked ${count}× with no progress (limit ${cap})`,
+  stuckBlocked: (count, cap) =>
+    `⚠ ${count} blocks recorded with no progress (default limit ${cap})`,
   stuckReleased: (count, cap) =>
-    `⚠ Block limit reached ${count}/${cap} — the hook let the turn end`,
+    `⚠ ${count} blocks recorded — at the default limit of ${cap} the hook may have let the turn end`,
   stuckSource: "stop hook · this clone",
   stuckTip: (cap, autonomous) =>
     `The stop hook's block-count.json. The first block after progress writes 1, each further block without progress adds one, and only done, notice or park resets it to 0. At the limit the hook stops blocking and lets the turn end. The limit shown is the ${autonomous ? "autonomous" : "interactive"} default of ${cap}; CLAUDE_CODE_STOP_HOOK_BLOCK_CAP may have changed it`,
   humanGate: (stage) => `Approval pending: ${stage}`,
   humanGateSource: "gate open · state.md [?]",
-  humanRevising: (stage) => `${stage} being revised — gate rejected`,
+  humanRevising: (stage) => `${stage} in revision — gate rejected`,
   humanRevisingTip:
-    "You rejected the approval gate and the stage is being reworked (state.md [R]). The next move is the run's, so it is not counted as awaiting you",
+    "You rejected the approval gate (state.md [R]). This stretch covers both asking you what to change and the rework itself, so this row alone cannot say whose move it is — it is not counted as awaiting you",
   humanParked: (stage, byPerson) => `⏸ Parked — ${stage}${byPerson ? " · parked by a person" : ""}`,
   humanParkedTip: "The run is parked. It continues only once you ask the engine to resume",
   humanStateSource: "state.md · Runtime State",
@@ -170,6 +175,12 @@ const status: StatusStrings = {
   humanEngineAskSource: "active-directive.json",
   humanEngineAskTip:
     "The directive the engine last handed out asks you something. Only a directive whose digest matches the current state is read; most of these are asked in the conversation with no questions file",
+  humanTeamGateUnread: "Team unit gate — not read",
+  humanTeamGateUnreadTip:
+    "Under team ownership a unit's gate is decided from the audit by unit, gate scope and claim attempt, not by the state row. The claim state is not visible to this dashboard, so whether an approval is pending was not determined — this does not mean nothing is waiting",
+  humanCheckoutPark: "Unit park marker in this checkout — applicability unverified",
+  humanCheckoutParkTip:
+    "aidlc/.aidlc-unit-parked exists. Whether it applies to the intent shown is decided by a scope stamp this dashboard does not check, so it is not counted",
   humanEngineOnly: (file) => `Blank tag only the engine waits on · ${file}`,
   humanEngineOnlyTip:
     "The stop hook lets the turn end when the raw text of the running stage's questions file holds a blank [Answer]:. This dashboard reads that spot as answered (an example in a code block, a placeholder answered in another section), so it is not counted — but the engine may stop here",
@@ -179,7 +190,7 @@ const status: StatusStrings = {
   checksInFlight: (pending) => `⋯ ${plural(pending, "check")} running`,
   checksFailed: (failed) => `✗ ${plural(failed, "check failure")} recorded`,
   checksPassed: (passed) => `✓ ${plural(passed, "check")} passed`,
-  checksSource: "sensors · current stage · audit log",
+  checksSource: (stage) => `sensors · ${stage} (Current Stage) · audit log`,
   checksFailedTip:
     "Sensor failures recorded in the current stage. This roll-up cannot tell whether a later re-check passed",
 };

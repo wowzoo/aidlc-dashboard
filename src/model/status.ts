@@ -52,6 +52,11 @@ export type StuckReading =
    * run has left means no block has happened since the move.
    */
   | { state: "earlier-stage"; stage: string }
+  /**
+   * The record names a state digest that is not the current state's. The hook writes 1
+   * on its next block after any change, so no block has happened since — history.
+   */
+  | { state: "state-changed"; stage: string }
   /** count 1 — the hook pushed once since the last progress. Normal operation. */
   | { state: "nudged"; stage: string; cap: number }
   /** 2 ≤ count < cap — blocked again with no progress in between. */
@@ -124,6 +129,7 @@ function readStuck(m: StatusInput): StuckReading {
   const stage = signatureStage(guard.signature);
   const current = m.state.currentStage;
   if (current && stage && stage !== current) return { state: "earlier-stage", stage };
+  if (m.waits.guardRecordStale) return { state: "state-changed", stage };
   const cap = defaultStopCap(m.waits.autonomous);
   if (guard.count >= cap) return { state: "released", count: guard.count, stage, cap };
   if (guard.count === 1) return { state: "nudged", stage, cap };

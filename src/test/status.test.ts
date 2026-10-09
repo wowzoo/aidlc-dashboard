@@ -87,6 +87,15 @@ describe("status — readings", () => {
     });
   });
 
+  test("a block recorded against a state that has since changed is history", () => {
+    const m = withGuard({
+      signature: `code-generation::${"c".repeat(64)}::${"f".repeat(64)}`,
+      count: 2,
+    });
+    const st = buildStatus({ ...m, waits: { ...m.waits, guardRecordStale: true } });
+    expect(st.stuck).toEqual({ state: "state-changed", stage: "code-generation" });
+  });
+
   test("a block recorded in a stage the run has left is not a current block", () => {
     const st = buildStatus(withGuard({ signature: "functional-design::12", count: 5 }));
     expect(st.stuck).toEqual({ state: "earlier-stage", stage: "functional-design" });

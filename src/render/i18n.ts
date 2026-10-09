@@ -207,9 +207,13 @@ export interface StatusStrings {
   /** The position fell back to a Current Stage that can lag (unit-major). */
   readonly runUnverified: string;
   readonly runUnverifiedTip: string;
+  /** The current directive names another stage/unit than the unit cache. */
+  runConflict(where: string): string;
+  readonly runConflictTip: string;
   readonly stuckNoRecord: string;
   readonly stuckClear: string;
   stuckEarlier(stage: string): string;
+  readonly stuckStateChanged: string;
   readonly stuckNudged: string;
   stuckBlocked(count: number, cap: number): string;
   stuckReleased(count: number, cap: number): string;
@@ -231,13 +235,18 @@ export interface StatusStrings {
   readonly humanEngineAskTip: string;
   humanEngineOnly(file: string): string;
   readonly humanEngineOnlyTip: string;
+  readonly humanTeamGateUnread: string;
+  readonly humanTeamGateUnreadTip: string;
+  readonly humanCheckoutPark: string;
+  readonly humanCheckoutParkTip: string;
   readonly humanNone: string;
   readonly humanSource: string;
   readonly checksNone: string;
   checksInFlight(pending: number): string;
   checksFailed(failed: number): string;
   checksPassed(passed: number): string;
-  readonly checksSource: string;
+  /** Names the stage the checks are for — Current Stage, which can differ from the run line. */
+  checksSource(stage: string): string;
   readonly checksFailedTip: string;
 }
 

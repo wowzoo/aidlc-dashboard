@@ -58,10 +58,16 @@ export function renderRunLine(m: DashboardModel, s: Strings): string {
     ? `${st.run.stageDisplay} · ${x.runningUnit(st.run.unit)}`
     : st.run.stageDisplay;
   const where = phase ? `${phase} › ${stage}` : stage;
-  // Said, not implied: a Current Stage that can lag is not where the engine is.
+  // Said, not implied: a Current Stage that can lag is not where the engine is, and a
+  // unit cache the current directive contradicts is not either.
+  const conflict = m.waits.position.conflict;
   const unverified = st.run.verified
     ? ""
-    : ` <span class="rl-sub" title="${esc(x.runUnverifiedTip)}">· ${esc(x.runUnverified)}</span>`;
+    : conflict
+      ? ` <span class="rl-sub" title="${esc(x.runConflictTip)}">· ${esc(
+          x.runConflict(conflict.unit ? `${conflict.stage} · ${conflict.unit}` : conflict.stage),
+        )}</span>`
+      : ` <span class="rl-sub" title="${esc(x.runUnverifiedTip)}">· ${esc(x.runUnverified)}</span>`;
   return `<div class="runline" title="${esc(x.runTip)}"><span class="rl-dot run"></span><b>${esc(
     x.running,
   )}</b><span class="rl-sub">${esc(x.runningSub(where, dur(st.run.lastEventAgeSec)))}</span>${unverified}</div>`;
@@ -158,6 +164,22 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
       tone: "warn",
     });
   }
+  if (w?.teamGateUnread) {
+    rows.push({
+      label: esc(x.humanTeamGateUnread),
+      value: "—",
+      dashed: true,
+      tip: x.humanTeamGateUnreadTip,
+    });
+  }
+  if (w?.checkoutPark) {
+    rows.push({
+      label: esc(x.humanCheckoutPark),
+      value: "",
+      tone: "none",
+      tip: x.humanCheckoutParkTip,
+    });
+  }
   if (w?.revising) {
     rows.push({
       label: esc(x.humanRevising(w.revising)),
@@ -219,6 +241,14 @@ function stuckTab(r: StuckReading, s: Strings, autonomous: boolean): Tab {
     case "earlier-stage":
       row = {
         label: `${esc(x.stuckClear)}<span class="mr-sub"> · ${esc(x.stuckEarlier(r.stage))}</span>`,
+        value: "0",
+        tone: "ok",
+      };
+      count = { text: "0", tone: "ok" };
+      break;
+    case "state-changed":
+      row = {
+        label: `${esc(x.stuckStateChanged)}<span class="mr-sub"> · ${esc(r.stage)}</span>`,
         value: "0",
         tone: "ok",
       };
@@ -307,7 +337,7 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
       head: [s.cards.colCheck, s.cards.colWhen],
       max: 6,
       moreText: s.cards.moreRows,
-      note: x.checksSource,
+      note: x.checksSource(m.state.currentStage),
     }),
   };
 }

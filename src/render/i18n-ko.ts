@@ -132,22 +132,27 @@ const status: StatusStrings = {
     "마지막 기록은 감사 로그의 가장 최근 이벤트입니다. 이 값이 계속 커지면 run 이 아무것도 쓰지 않고 있다는 뜻입니다",
   runningUnit: (unit) => `유닛 ${unit}`,
   runUnverified: "위치 미확인",
+  runConflict: (where) => `엔진 지시는 ${where}`,
+  runConflictTip:
+    "state.md 의 유닛 위치(Unit Stage·Active Unit)와 지금 state 에 맞는 엔진 지시(active-directive.json)가 서로 다른 곳을 가리킵니다. 둘 다 엔진의 라우팅 근거가 아니라 어느 쪽이 맞는지 이 대시보드는 판정하지 않습니다",
   runUnverifiedTip:
     "unit-major 에서는 Current Stage 가 첫 per-unit stage 에 머무르므로 실제 위치가 더 뒤일 수 있습니다. state.md 의 Unit Stage 도, 지금 state 에 맞는 엔진 지시(active-directive.json)도 없어 Current Stage 로 표시했습니다",
   stuckNoRecord: "차단 기록 없음",
   stuckClear: "✓ 막힘 없음",
   stuckEarlier: (stage) => `마지막 차단은 ${stage} · 이 clone`,
+  stuckStateChanged: "마지막 차단 이후 state 가 바뀜 — 그 뒤로 차단 없음",
   stuckNudged: "한 번 재촉함 — 진행 후 첫 차단",
-  stuckBlocked: (count, cap) => `⚠ 진행 없이 ${count}회 연속 차단 (한도 ${cap})`,
-  stuckReleased: (count, cap) => `⚠ 재촉 한도 도달 ${count}/${cap} — hook 이 멈춤을 허용함`,
+  stuckBlocked: (count, cap) => `⚠ 진행 없이 ${count}회 연속 차단 기록 (기본 한도 ${cap})`,
+  stuckReleased: (count, cap) =>
+    `⚠ 차단 ${count}회 기록 — 기본 한도 ${cap} 에 닿아 hook 이 멈춤을 허용했을 수 있음`,
   stuckSource: "stop hook · 이 clone",
   stuckTip: (cap, autonomous) =>
     `stop hook 의 block-count.json 입니다. 진행한 뒤 처음 막으면 1, 진행 없이 다시 막을 때마다 1 씩 오르고, 완료·알림·일시정지 때만 0 이 됩니다. 한도에 닿으면 hook 이 더 막지 않고 멈춤을 허용합니다. 한도는 ${autonomous ? "자율" : "대화형"} 기본값 ${cap} 기준이며 CLAUDE_CODE_STOP_HOOK_BLOCK_CAP 으로 바뀌었을 수 있습니다`,
   humanGate: (stage) => `승인 대기 ${stage}`,
   humanGateSource: "게이트 열림 · state.md [?]",
-  humanRevising: (stage) => `${stage} 수정 중 — 게이트가 거절됨`,
+  humanRevising: (stage) => `${stage} 수정 구간 — 게이트가 거절됨`,
   humanRevisingTip:
-    "사용자가 승인 게이트를 거절해 stage 를 고치는 중입니다(state.md [R]). 다음 행동은 run 쪽이라 답변 대기로 세지 않습니다",
+    "사용자가 승인 게이트를 거절했습니다(state.md [R]). 이 구간에는 무엇을 고칠지 묻는 단계와 고치는 단계가 함께 들어 있어, 이 행만으로는 다음 차례가 누구인지 알 수 없습니다. 그래서 답변 대기로 세지 않습니다",
   humanParked: (stage, byPerson) => `⏸ 일시정지 — ${stage}${byPerson ? " · 사람이 세움" : ""}`,
   humanParkedTip: "run 이 park 되었습니다. 엔진에 resume 을 요청해야 다시 진행합니다",
   humanStateSource: "state.md · Runtime State",
@@ -158,6 +163,12 @@ const status: StatusStrings = {
   humanEngineAskSource: "active-directive.json",
   humanEngineAskTip:
     "엔진이 마지막으로 내준 지시가 사람에게 묻는 질문입니다. 지금 state 와 digest 가 맞는 지시만 읽으며, 대부분 질문 파일 없이 대화로만 묻습니다",
+  humanTeamGateUnread: "팀 유닛 게이트 — 판독하지 않음",
+  humanTeamGateUnreadTip:
+    "팀 소유에서는 유닛 게이트를 state 행이 아니라 감사 로그의 유닛·게이트 범위·claim 시도로 판정합니다. claim 상태는 이 대시보드가 볼 수 없어, 승인 대기 여부를 판정하지 않았습니다 — '대기 없음'이라는 뜻이 아닙니다",
+  humanCheckoutPark: "이 checkout 에 유닛 park 표시 — 적용 범위 미확인",
+  humanCheckoutParkTip:
+    "aidlc/.aidlc-unit-parked 가 있습니다. 이 park 가 지금 보는 intent 에 적용되는지는 scope stamp 로 정해지는데 이 대시보드는 그것을 확인하지 않아, 대기 건수에 넣지 않았습니다",
   humanEngineOnly: (file) => `엔진만 대기로 보는 빈 태그 · ${file}`,
   humanEngineOnlyTip:
     "stop hook 은 진행 중 stage 의 질문 파일 원문에서 빈 [Answer]: 를 찾으면 턴 종료를 허용합니다. 이 대시보드가 답한 것으로 읽은 자리(코드 블록 속 예시, 다른 절에서 답한 자리 등)이므로 답변 대기로 세지 않지만, 엔진이 여기서 멈출 수 있습니다",
@@ -167,7 +178,7 @@ const status: StatusStrings = {
   checksInFlight: (pending) => `⋯ 검사 진행 중 ${pending}건`,
   checksFailed: (failed) => `✗ 검사 실패 ${failed}건 기록`,
   checksPassed: (passed) => `✓ 검사 통과 ${passed}건`,
-  checksSource: "sensor · 현재 stage · 감사 로그",
+  checksSource: (stage) => `sensor · ${stage} (Current Stage) · 감사 로그`,
   checksFailedTip:
     "현재 stage 에서 기록된 sensor 실패 수입니다. 이후 재검사가 통과했는지는 이 집계만으로는 알 수 없습니다",
 };

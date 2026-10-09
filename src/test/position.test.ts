@@ -78,71 +78,125 @@ describe("state digest", () => {
   });
 });
 
-describe("directive marker", () => {
-  function record(marker: unknown, where = ".aidlc-engine/active-directive.json"): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-pos-"));
-    fs.mkdirSync(path.dirname(path.join(dir, where)), { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, where),
-      typeof marker === "string" ? marker : JSON.stringify(marker),
-    );
-    return dir;
-  }
-  const ask = {
+/** A v2 marker in the shape the engine's own parser accepts (checked against it). */
+const H = "a".repeat(64);
+function v2(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
     version: 2,
     kind: "ask",
     ask_type: "unit-paused",
     stage: "code-generation",
     unit: "unit-b",
+    state_sha256: ENGINE_DIGEST,
+    project_sha256: H,
+    intent_uuid: null,
+    state_present: true,
+    owner_session: "s1",
+    revision: 1,
+    owner_epoch: 0,
+    context_epoch: 0,
+    event_sequence: 3,
+    human_sequence: 1,
+    engine_sequence: 2,
+    conversation_sequence: 0,
+    stop_count: 0,
+    delivery: "issued",
+    needs_rehydrate: false,
+    active_attempt: {
+      command_kind: "next",
+      command_sha256: H,
+      issued_state_sha256: H,
+      session_id: "s1",
+      owner_epoch: 0,
+      context_epoch: 0,
+      status: "settled",
+    },
+    ...over,
   };
+}
 
+function markerRecord(marker: unknown, where = ".aidlc-engine/active-directive.json"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-pos-"));
+  fs.mkdirSync(path.dirname(path.join(dir, where)), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, where),
+    typeof marker === "string" ? marker : JSON.stringify(marker),
+  );
+  return dir;
+}
+
+describe("directive marker", () => {
   test("is read only when it was issued against the state as it is now", () => {
-    const ok = readDirectiveMarker(
-      record({ ...ask, state_sha256: ENGINE_DIGEST, delivery: "delivered" }),
-      STATE,
-    );
-    expect(ok).toEqual({
+    expect(readDirectiveMarker(markerRecord(v2()), STATE)).toEqual({
       marker: {
         kind: "ask",
         stage: "code-generation",
         unit: "unit-b",
         askType: "unit-paused",
-        delivery: "delivered",
+        delivery: "issued",
       },
     });
-    const stale = readDirectiveMarker(record({ ...ask, state_sha256: "0".repeat(64) }), STATE);
-    expect(stale).toEqual({ miss: "stale" });
+    expect(readDirectiveMarker(markerRecord(v2({ state_sha256: "0".repeat(64) })), STATE)).toEqual({
+      miss: "stale",
+    });
   });
 
   test("a superseded or rehydrate-pending marker is not current", () => {
-    expect(
-      readDirectiveMarker(
-        record({ ...ask, state_sha256: ENGINE_DIGEST, delivery: "superseded" }),
-        STATE,
-      ),
-    ).toEqual({ miss: "superseded" });
-    expect(
-      readDirectiveMarker(
-        record({ ...ask, state_sha256: ENGINE_DIGEST, needs_rehydrate: true }),
-        STATE,
-      ),
-    ).toEqual({ miss: "superseded" });
+    expect(readDirectiveMarker(markerRecord(v2({ delivery: "superseded" })), STATE)).toEqual({
+      miss: "superseded",
+    });
+    expect(readDirectiveMarker(markerRecord(v2({ needs_rehydrate: true })), STATE)).toEqual({
+      miss: "superseded",
+    });
   });
 
-  test("absent, malformed and legacy-path markers", () => {
+  test("a marker the engine's parser would refuse is not read", () => {
+    // Second review: the first cut accepted each of these (measured against the
+    // engine's own `parseActiveDirectiveMarker`, which refuses all four).
+    const incomplete = {
+      version: 2,
+      kind: "ask",
+      stage: "code-generation",
+      state_sha256: ENGINE_DIGEST,
+    };
+    for (const m of [incomplete, v2({ version: 3 }), v2({ stage: "../oops" }), v2({ unit: "" })]) {
+      expect(readDirectiveMarker(markerRecord(m), STATE)).toEqual({ miss: "unreadable" });
+    }
+    expect(readDirectiveMarker(markerRecord("{not json"), STATE)).toEqual({ miss: "unreadable" });
+  });
+
+  test("a v1 marker gives a position and never an ask", () => {
+    const v1 = {
+      version: 1,
+      kind: "ask",
+      ask_type: "scope-confirm",
+      stage: "code-generation",
+      state_sha256: ENGINE_DIGEST,
+    };
+    expect(readDirectiveMarker(markerRecord(v1), STATE)).toEqual({
+      marker: { kind: "", stage: "code-generation" },
+    });
+  });
+
+  test("the legacy file is read only when the new marker AND its lock are absent", () => {
     expect(
       readDirectiveMarker(fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-pos-")), STATE),
-    ).toEqual({
-      miss: "absent",
-    });
-    expect(readDirectiveMarker(record("{not json"), STATE)).toEqual({ miss: "unreadable" });
+    ).toEqual({ miss: "absent" });
+    const legacy = markerRecord(v2(), ".aidlc-active-directive.json");
+    expect("marker" in readDirectiveMarker(legacy, STATE)).toBe(true);
+    fs.mkdirSync(path.join(legacy, ".aidlc-engine", "active-directive.lock"), { recursive: true });
+    expect(readDirectiveMarker(legacy, STATE)).toEqual({ miss: "absent" });
+  });
+
+  test("a marker over 64 KiB is refused from the bytes read, not from a stat", () => {
     expect(
-      readDirectiveMarker(record({ kind: "ask", stage: "x", state_sha256: "short" }), STATE),
+      readDirectiveMarker(
+        markerRecord(v2({ message: "x".repeat(1000), pad: "y".repeat(70_000) })),
+        STATE,
+      ),
     ).toEqual({
       miss: "unreadable",
     });
-    const legacy = record({ ...ask, state_sha256: ENGINE_DIGEST }, ".aidlc-active-directive.json");
-    expect("marker" in readDirectiveMarker(legacy, STATE)).toBe(true);
   });
 });
 
@@ -350,15 +404,9 @@ describe("position, end to end", () => {
     fs.mkdirSync(path.join(root, RECORD_REL, ".aidlc-engine"), { recursive: true });
     fs.writeFileSync(
       path.join(root, RECORD_REL, ".aidlc-engine", "active-directive.json"),
-      JSON.stringify({
-        version: 2,
-        kind: "ask",
-        ask_type: "scope-confirm",
-        stage: "code-generation",
-        unit: "PU-A-core",
-        state_sha256: stateDigest(stateText),
-        delivery: "delivered",
-      }),
+      JSON.stringify(
+        v2({ ask_type: "scope-confirm", unit: "PU-A-core", state_sha256: stateDigest(stateText) }),
+      ),
     );
     const m = assemble(root);
     expect(m.waits.position.basis).toBe("directive");
@@ -401,6 +449,7 @@ describe("waits", () => {
       marker: { miss: "absent" },
       events,
       questions,
+      checkoutParkFile: false,
     });
 
   test("the gate is the state row's claim; the audit only says since when", () => {
@@ -498,7 +547,7 @@ describe("waits on the page", () => {
       "⏸ 일시정지 — code-generation",
       "⏸ 유닛 PU-B-ui 일시정지",
       "유닛 선점",
-      "수정 중",
+      "수정 구간",
       "엔진만 대기로 보는 빈 태그",
     ]) {
       expect(html).toContain(text);
@@ -506,5 +555,191 @@ describe("waits on the page", () => {
     // 1 current ask + park + paused unit + engine ask.
     expect(buildStatus(m).human?.current).toBe(1);
     expect(html).toContain('<b class="mc-n warn">4</b>');
+  });
+});
+
+describe("second-review regressions", () => {
+  const none = { miss: "absent" as const };
+  const base = {
+    currentStage: "functional-design",
+    unitStage: "",
+    activeUnit: "",
+    constructionIteration: "",
+  };
+  const marker = (stage: string, unit?: string) => ({
+    marker: { kind: "ask", stage, ...(unit ? { unit } : {}) },
+  });
+
+  test("a unit cache the current directive contradicts is not verified", () => {
+    expect(
+      resolvePosition({
+        ...base,
+        unitStage: "nfr-design",
+        activeUnit: "unit-a",
+        marker: marker("code-generation", "unit-b"),
+      }),
+    ).toEqual({
+      stage: "nfr-design",
+      unit: "unit-a",
+      basis: "unit-stage",
+      verified: false,
+      conflict: { stage: "code-generation", unit: "unit-b" },
+    });
+  });
+
+  test("unit-major with no catalogue cannot claim Current Stage is where the run is", () => {
+    expect(
+      resolvePosition({ ...base, constructionIteration: "unit-major", marker: none }).verified,
+    ).toBe(false);
+  });
+
+  const STATE = (rows: string, runtime = "", info = "") =>
+    `## Project Information\n${info}\n## Runtime State\n${runtime}\n## Current Status\n- **Current Stage**: code-generation\n\n## Stage Progress\n### CONSTRUCTION PHASE\n${rows}\n`;
+  const pos = {
+    stage: "code-generation",
+    unit: "unit-b",
+    basis: "unit-stage" as const,
+    verified: true,
+  };
+  const empty: QuestionsReport = {
+    files: [],
+    blocked: [],
+    totalQuestions: 0,
+    totalUnanswered: 0,
+    unclosed: [],
+  };
+  const w = (
+    stateText: string,
+    m: { marker: Record<string, unknown> } | { miss: "absent" },
+    extra: Partial<Parameters<typeof buildWaits>[0]> = {},
+  ) =>
+    buildWaits({
+      state: parseState(stateText),
+      position: pos,
+      marker: m as Parameters<typeof buildWaits>[0]["marker"],
+      events: [],
+      questions: empty,
+      checkoutParkFile: false,
+      ...extra,
+    });
+  const ROW = "- [-] code-generation — EXECUTE";
+  const ask = (over: Record<string, unknown>) => ({
+    marker: { kind: "ask", stage: "code-generation", unit: "unit-b", ...over },
+  });
+
+  test("an answered guard-recovery ask is not a wait; one awaiting feedback is", () => {
+    expect(
+      w(STATE(ROW), ask({ askType: "guard-recovery", guardRecovery: "ready" })).engineAsk,
+    ).toBeUndefined();
+    expect(
+      w(STATE(ROW), ask({ askType: "guard-recovery", guardRecovery: "awaiting-feedback" }))
+        .engineAsk,
+    ).toBeDefined();
+  });
+
+  test("a plan approval whose section is already in the file is that ask, answered or not", () => {
+    const file = {
+      rel: "construction/unit-b/code-generation/code-generation-questions.md",
+      phase: "construction",
+      stage: "code-generation",
+      unit: "unit-b",
+      questions: [
+        {
+          heading: "Plan Approval",
+          answer: "A. Approve Plan",
+          answered: true,
+          kind: "confirmation" as const,
+        },
+      ],
+      unanswered: [],
+      mtime: "",
+      unclosed: false,
+      rawBlank: false,
+    };
+    const qs = { ...empty, files: [file] };
+    expect(
+      w(STATE(ROW), ask({ askType: "plan-approval" }), { questions: qs }).engineAsk,
+    ).toBeUndefined();
+    // Another question blank in the same stage is not the plan approval.
+    const other = {
+      ...file,
+      questions: [{ heading: "Q1", answer: "", answered: false, kind: "question" as const }],
+    };
+    expect(
+      w(STATE(ROW), ask({ askType: "plan-approval" }), { questions: { ...empty, files: [other] } })
+        .engineAsk,
+    ).toBeDefined();
+  });
+
+  test("a paused unit hides only its own unit-paused ask", () => {
+    const paused = "- **Active Unit**: unit-a\n- **Unit State**: paused";
+    expect(
+      w(STATE(ROW, paused), ask({ askType: "unit-paused", unit: "unit-b" })).engineAsk,
+    ).toBeDefined();
+    expect(
+      w(STATE(ROW, paused), ask({ askType: "unit-paused", unit: "unit-a" })).engineAsk,
+    ).toBeUndefined();
+  });
+
+  test("the engine's park directive counts; a checkout park file alone is shown unverified", () => {
+    expect(w(STATE(ROW), { marker: { kind: "parked", stage: "code-generation" } }).parked).toEqual({
+      stage: "code-generation",
+      since: "",
+      byPerson: false,
+    });
+    const file = w(STATE(ROW), { miss: "absent" }, { checkoutParkFile: true });
+    expect(file.parked).toBeUndefined();
+    expect(file.checkoutPark).toBe(true);
+  });
+
+  test("a team unit gate is reported unread rather than as nothing waiting", () => {
+    const team = "- **Unit Ownership**: team\n- **Construction Iteration**: unit-major";
+    expect(w(STATE(ROW, team), { miss: "absent" }).teamGateUnread).toBe(true);
+    expect(w(STATE(ROW), { miss: "absent" }).teamGateUnread).toBe(false);
+  });
+
+  test("a team unit-major directive reads engine-only blanks without the [-] row", () => {
+    const team = "- **Unit Ownership**: team\n- **Construction Iteration**: unit-major";
+    const file = {
+      rel: "construction/unit-b/code-generation/code-generation-questions.md",
+      phase: "construction",
+      stage: "code-generation",
+      unit: "unit-b",
+      questions: [],
+      unanswered: [],
+      mtime: "",
+      unclosed: false,
+      rawBlank: true,
+    };
+    const qs = { ...empty, files: [file] };
+    const notActive = "- [ ] code-generation — EXECUTE";
+    expect(w(STATE(notActive, team), { miss: "absent" }, { questions: qs }).engineOnly).toEqual([
+      file.rel,
+    ]);
+    expect(w(STATE(notActive), { miss: "absent" }, { questions: qs }).engineOnly).toEqual([]);
+  });
+
+  test("a stop record made against another state is history, not a current block", () => {
+    const sig = (digest: string) => `code-generation::${digest}::${"f".repeat(64)}`;
+    const cur = "b".repeat(64);
+    expect(
+      w(
+        STATE(ROW),
+        { miss: "absent" },
+        { guard: { signature: sig("c".repeat(64)), stateDigest: cur } },
+      ).guardRecordStale,
+    ).toBe(true);
+    expect(
+      w(STATE(ROW), { miss: "absent" }, { guard: { signature: sig(cur), stateDigest: cur } })
+        .guardRecordStale,
+    ).toBe(false);
+    // A pre-2.9 signature carries no digest and cannot be dated.
+    expect(
+      w(
+        STATE(ROW),
+        { miss: "absent" },
+        { guard: { signature: "code-generation::40", stateDigest: cur } },
+      ).guardRecordStale,
+    ).toBe(false);
   });
 });

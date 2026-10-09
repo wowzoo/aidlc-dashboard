@@ -13,20 +13,36 @@
 //     row is `[?]` (aidlc-continue-workflow.ts `isHumanWaitStop`). The row is the
 //     authority; the audit (`pendingOrganicGate`, scan/gate-wait.ts) only says since
 //     when. An audit-open gate on a row that is not `[?]` is a stale stamp.
-//   - REVISING: a `[R]` row — the person rejected the gate and the stage is being
-//     reworked. Shown, not counted: the next move is the run's, not the person's.
+//   - TEAM UNIT GATE: under team ownership the engine reads a unit's gate from the
+//     audit by unit, gate scope and CLAIM ATTEMPT (`unitGateStatus`) and never moves
+//     the global row to `[?]`. The claim attempt lives in the checkout's claim state,
+//     which this reader cannot see, so it says the gate is unread instead of letting
+//     an absent `[?]` read as "nothing waiting".
+//   - REVISING: a `[R]` row — the person rejected the gate. The hook's own comment
+//     says the row covers both asking the person what to change and the rework, so it
+//     is shown, not counted, and the copy does not say whose move it is.
 //   - PARKED: `Parked` + `Parked At Stage` in `## Runtime State`, valid only while
 //     `Parked At Stage` is still the Current Stage — a park the run has moved past
 //     is a leftover. `Parked By: person` (2.11) marks one a person set.
+//     A current marker of kind `parked` is the engine's own park directive and counts
+//     too — it covers the checkout-local park (`aidlc/.aidlc-unit-parked`), which the
+//     state does not record. That file alone is shown but not counted: whether it
+//     applies to this intent is decided by a scope stamp this reader does not check.
 //   - UNIT PAUSED: `Unit State: paused`, with the engine's own reason and next action.
 //   - ENGINE ASK: a current `active-directive.json` of kind `ask` — 2.11 holds ten
 //     kinds of question there and writes a questions file for only one of them
-//     (plan approval), so without the marker nine of them are invisible.
+//     (plan approval), so without the marker nine of them are invisible. A current
+//     marker is not proof the ask is still open, so two answered shapes are dropped:
+//     a plan approval whose questions file already holds the section (the blocker
+//     list reads it, answered or not), and a guard-recovery ask whose response is
+//     `ready`. `delivery` is not read as "shown to the person" — ordinary publication
+//     leaves `issued`.
 //   - ENGINE-ONLY BLANK: the stop hook's raw test (`rawBlank`) on the active stage's
 //     own questions files, when no ask this dashboard reads explains it — a fenced
 //     example, a placeholder answered elsewhere. A diagnostic, not a count: what it
 //     proves is that the hook may let the turn end there, not that a person owes an
-//     answer.
+//     answer. The hook reads them only while the Current Stage row is `[-]` — except
+//     for a team unit-major directive, where it skips that row check.
 //
 // Read-only, never throws.
 
@@ -46,6 +62,15 @@ export interface Waits {
   unitPaused?: { unit: string; stage?: string; reason: string; nextAction: string };
   /** `askType` is absent on 2.10's untyped ask. */
   engineAsk?: { askType?: string; stage: string; unit?: string };
+  /** `aidlc/.aidlc-unit-parked` exists in this checkout — applicability unchecked. */
+  checkoutPark: boolean;
+  /** Team ownership with a unit position: the unit's gate is not read here. */
+  teamGateUnread: boolean;
+  /**
+   * The stop-hook record names the state it blocked on (2.10+ signatures) and that
+   * state is not the current one — the count is history, whatever its size.
+   */
+  guardRecordStale: boolean;
   /** Record-relative paths — see ENGINE-ONLY BLANK above. */
   engineOnly: string[];
   /** `Construction Autonomy Mode: autonomous` — the stop hook's cap and rules differ. */
@@ -58,6 +83,9 @@ export interface WaitsInput {
   marker: { marker: DirectiveMarker } | { miss: MarkerMiss };
   events: AuditEvent[];
   questions: QuestionsReport;
+  checkoutParkFile: boolean;
+  /** The block-count signature, and the digest of the current state. */
+  guard?: { signature: string; stateDigest: string };
 }
 
 function rowStatuses(state: AidlcState, slug: string): string[] {
@@ -92,7 +120,9 @@ export function buildWaits(w: WaitsInput): Waits {
   const parkedHere = rt.parked !== "" && rt.parkedAtStage !== "" && rt.parkedAtStage === current;
   const parked = parkedHere
     ? { stage: rt.parkedAtStage, since: rt.parked, byPerson: rt.parkedBy === "person" }
-    : undefined;
+    : marker?.kind === "parked"
+      ? { stage: marker.stage, since: "", byPerson: false }
+      : undefined;
 
   const unitPaused =
     rt.unitState === "paused" && rt.activeUnit
@@ -104,24 +134,33 @@ export function buildWaits(w: WaitsInput): Waits {
         }
       : undefined;
 
-  // A plan-approval ask also writes the questions file the blocker list already shows.
-  const askedInFile = (stage: string, unit?: string) =>
+  // A plan-approval ask also writes the questions file the blocker list reads — so a
+  // file holding the section, answered or not, is that ask; only one with no file is
+  // the marker's alone.
+  const planInFile = (stage: string, unit?: string) =>
     w.questions.files.some(
       (f) =>
-        f.stage === stage && (unit === undefined || f.unit === unit) && f.unanswered.length > 0,
+        f.stage === stage &&
+        f.unit === unit &&
+        f.questions.some((q) => q.kind === "confirmation" && /plan approval/i.test(q.heading)),
     );
+  const answered =
+    (marker?.askType === "plan-approval" && planInFile(marker.stage, marker.unit)) ||
+    (marker?.askType === "guard-recovery" && marker.guardRecovery === "ready") ||
+    // The same paused unit is already its own row.
+    (marker?.askType === "unit-paused" && unitPaused?.unit === marker.unit);
   const engineAsk =
-    marker?.kind === "ask" &&
-    !(marker.askType === "plan-approval" && askedInFile(marker.stage, marker.unit)) &&
-    // A paused unit is already its own row.
-    !(marker.askType === "unit-paused" && unitPaused)
+    marker?.kind === "ask" && !answered
       ? { askType: marker.askType, stage: marker.stage, unit: marker.unit }
       : undefined;
 
-  // The stop hook reads the active stage's own files only while its row is `[-]`, and
-  // under autonomy only a pending plan approval — which the blocker list reads already.
+  // The stop hook reads the active stage's own files only while its row is `[-]` (a
+  // team unit-major directive skips that check), and under autonomy only a pending
+  // plan approval — which the blocker list reads already.
+  const team = state.unitOwnership === "team";
+  const teamUnitMajor = team && state.constructionIteration === "unit-major" && !!position.unit;
   const engineOnly =
-    position.stage && !autonomous && rows.includes("active")
+    position.stage && !autonomous && (teamUnitMajor || rows.includes("active"))
       ? w.questions.files
           .filter(
             (f) =>
@@ -132,5 +171,26 @@ export function buildWaits(w: WaitsInput): Waits {
           .map((f) => f.rel)
       : [];
 
-  return { position, gate, revising, parked, unitPaused, engineAsk, engineOnly, autonomous };
+  // 2.10+ signatures are `<stage>::<state digest>::<directive fingerprint>`; a pre-2.9
+  // one (`<stage>::<audit lines>`) carries no digest, so it cannot be dated this way.
+  const sigDigest = w.guard?.signature.split("::")[1];
+  const guardRecordStale =
+    !!w.guard &&
+    !!sigDigest &&
+    /^[0-9a-f]{64}$/.test(sigDigest) &&
+    sigDigest !== w.guard.stateDigest;
+
+  return {
+    position,
+    gate,
+    revising,
+    parked,
+    unitPaused,
+    engineAsk,
+    engineOnly,
+    autonomous,
+    checkoutPark: w.checkoutParkFile && !parked,
+    teamGateUnread: team && !!position.unit,
+    guardRecordStale,
+  };
 }

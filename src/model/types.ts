@@ -119,7 +119,7 @@ export interface GateSummary {
   rejected: number;
   /** `Revision Count` from state.md — rework the run absorbed. */
   revisionCount?: number;
-  /** Stage sitting at an approval gate right now, per the audit. */
+  /** Stage sitting at an approval gate right now — the state row's `[?]` (model/waits.ts). */
   awaitingStage?: string;
   jumps: number;
 }

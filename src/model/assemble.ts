@@ -31,7 +31,12 @@ import { type StageStatus, parseState } from "../scan/parser";
 import { readQuestions } from "../scan/questions";
 import { resolveState } from "../scan/resolve";
 import { buildRework } from "../scan/rework";
-import { type RunPosition, readDirectiveMarker, resolvePosition } from "../scan/run-position";
+import {
+  type RunPosition,
+  readDirectiveMarker,
+  resolvePosition,
+  stateDigest,
+} from "../scan/run-position";
 import { readSensorReport } from "../scan/sensors";
 import { type StageCatalog, harnessDirsWithCatalog, readStageCatalog } from "../scan/stage-catalog";
 import { buildTiming } from "../scan/timing";
@@ -227,6 +232,10 @@ function buildBlockers(
           : undefined,
         // The stage the run is on, and — when the position names one — the unit: a
         // blank ask in another unit's copy of the same stage is not what holds it.
+        // With no unit known, every unit's copy counts: under unit-major that only
+        // happens on a position the run line already labels unverified, and filing
+        // them all as "earlier" would bring back the false "nothing waiting" this
+        // reading exists to remove. Over-claiming under a visible label beats hiding.
         isCurrentStage:
           position.stage !== undefined &&
           f.stage === position.stage &&
@@ -339,9 +348,19 @@ export function assemble(
     isPerUnit: catalog ? (s) => catalog?.bySlug.get(s)?.forEach === "unit-of-work" : undefined,
     marker,
   });
-  const waits = buildWaits({ state, position, marker, events: ledger.events, questions });
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
+  const waits = buildWaits({
+    state,
+    position,
+    marker,
+    events: ledger.events,
+    questions,
+    checkoutParkFile: fs.existsSync(path.join(root, "aidlc", ".aidlc-unit-parked")),
+    guard: health.stopGuard
+      ? { signature: health.stopGuard.signature, stateDigest: stateDigest(stateText) }
+      : undefined,
+  });
   const timing = buildTiming(ledger, now);
 
   // The deferral ledger needs to know where each assigned stage currently stands.
