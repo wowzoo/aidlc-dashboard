@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import { parseAuditShard } from "../scan/audit";
 import { readUnitLifecycle } from "../scan/matrix";
+import { parseState } from "../scan/parser";
 import { type ReceiptPolicy, readUnitReceipts } from "../scan/unit-receipts";
 
 const ORDER = ["functional-design", "nfr-design", "code-generation"];
@@ -264,5 +265,39 @@ describe("second-review regressions — receipts at the matrix boundary", () => 
     ]);
     expect(lc.inUse("code-generation")).toBe(false);
     expect(lc.state("PU-A", "code-generation")).toEqual({ state: "skipped", reason: "r" });
+  });
+});
+
+describe("2.11-only review regressions", () => {
+  test("a stage row with no suffix takes the scope's own action, as the engine does", () => {
+    // `unitMajorConstructionStageSlugs`: `suffix ?? mapping.stages[slug]`, for a known scope.
+    const grid = {
+      bugfix: { "nfr-design": "SKIP" as const, "code-generation": "EXECUTE" as const },
+    };
+    const state = (scope: string, row: string) =>
+      `- **Scope**: ${scope}\n\n## Stage Progress\n### CONSTRUCTION PHASE\n${row}\n`;
+    const exec = (scope: string, row: string) =>
+      parseState(state(scope, row), undefined, grid).phases.flatMap((p) => p.stages)[0]?.execute;
+    expect(exec("bugfix", "- [ ] nfr-design")).toBe(false);
+    expect(exec("bugfix", "- [ ] nfr-design SKIP")).toBe(false);
+    expect(exec("bugfix", "- [ ] nfr-design — EXECUTE: do not SKIP review")).toBe(true);
+    expect(exec("bugfix", "- [ ] code-generation")).toBe(true);
+    // A scope the grid does not know gives no default.
+    expect(exec("custom", "- [ ] nfr-design")).toBe(true);
+  });
+
+  test("under team ownership a unit with no Run floor at all is known not done", () => {
+    // The claim file can only decide rows that could be current; a row with no floor
+    // fails the engine's exact match whatever the claim says.
+    const e = ledger([
+      { Event: "UNIT_COMPLETED", Timestamp: at(1), Stage: "functional-design", Unit: "u1" },
+      unit("UNIT_COMPLETED", 1, "functional-design", "u2", "unstarted#0"),
+    ]);
+    const r = read(e, { team: true, unitScoped: true });
+    expect(r.state("u1", "functional-design").state).toBe("unsettled");
+    expect(r.state("u2", "functional-design")).toEqual({
+      state: "unverifiable",
+      reason: "team-claim",
+    });
   });
 });

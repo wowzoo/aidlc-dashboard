@@ -250,15 +250,19 @@ function receiptPolicy(
   // every other stage's artifact-only cells unsettled. Not reproduced: the scope's own
   // default for a stage the state has no row for, and an unknown scope (which the engine
   // reads as not applying) — both rare in a state the engine wrote.
-  const codeStage = (state.phases.find((p) => p.key === "construction")?.stages ?? []).some((s) => {
-    const c = catalog?.bySlug.get(s.slug);
-    return (
-      s.execute &&
-      s.status !== "skipped" &&
-      c?.forEach === "unit-of-work" &&
-      c.workspaceRequires === true
-    );
-  });
+  // `unitMajorConstructionStageSlugs` returns nothing for a scope the grid does not know.
+  const scopeKnown = catalog?.scopeGrid ? state.scope in catalog.scopeGrid : true;
+  const codeStage =
+    scopeKnown &&
+    (state.phases.find((p) => p.key === "construction")?.stages ?? []).some((s) => {
+      const c = catalog?.bySlug.get(s.slug);
+      return (
+        s.execute &&
+        s.status !== "skipped" &&
+        c?.forEach === "unit-of-work" &&
+        c.workspaceRequires === true
+      );
+    });
   return {
     unitMajor,
     teamOwnership: team,
@@ -421,7 +425,11 @@ export function assemble(
   // Display names come from the tree's own catalogue when it has one — the local table
   // in scan/parser.ts is a snapshot of the engine's stage roster and had already gone
   // stale (v2.7's `domain-design` / `contract-design` were missing).
-  const state = parseState(stateText, catalog ? (s) => catalog?.bySlug.get(s)?.name : undefined);
+  const state = parseState(
+    stateText,
+    catalog ? (s) => catalog?.bySlug.get(s)?.name : undefined,
+    catalog?.scopeGrid,
+  );
 
   const ledger = readAuditLedger(recordDir, isStage);
   if (ledger.events.length === 0) warnings.push({ code: "audit-empty" });
@@ -628,26 +636,14 @@ export function assemble(
   //
   // CONSTRUCTION LIVES AT TWO DEPTHS. `construction/` holds BOTH per-unit dirs
   // (`construction/PU-1-.../code-generation/`) and the global stage dirs
-  // (`construction/code-generation/`), and which one a stage uses is not
-  // knowable from the checkbox: `StageInfo.bolt` is set only when state.md wrote
-  // `#### Bolt:` sections, and a real run was observed with per-unit artifacts
-  // on disk and bolt undefined on every Construction row. So for Construction we
-  // scan the global dir AND every unit the matrix roster knows, then merge —
-  // whichever exists contributes. Without the merge those files are invisible.
+  // (`construction/code-generation/`), and the 2.11 state has one row per stage, not
+  // one per unit, so the row cannot say which. For Construction we scan the global dir
+  // AND every unit the matrix roster knows, then merge — whichever exists contributes.
+  // Without the merge those files are invisible.
   const artifacts: Record<string, StageArtifact[]> = {};
   const units = matrix ? matrix.units.map((u) => u.name) : [];
   for (const p of state.phases) {
     for (const s of p.stages) {
-      if (s.bolt) {
-        // Explicit Bolt section: one unambiguous path.
-        artifacts[`construction/${s.bolt}/${s.slug}`] ??= listStageArtifacts(
-          recordDir,
-          p.key,
-          s.slug,
-          s.bolt,
-        );
-        continue;
-      }
       const key = `${p.key}/${s.slug}`;
       if (artifacts[key]) continue;
       const merged = listStageArtifacts(recordDir, p.key, s.slug);

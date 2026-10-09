@@ -102,7 +102,7 @@ describe("Stage card", () => {
     expect(/<span class="mr-v">([^<]*)<\/span>/.exec(skipped)?.[1]).toBe("—");
   });
 
-  test("per-unit copies fold into one row: partly done and idle is pending, not active", () => {
+  test("repeated copies of a slug fold into one row: partly done and idle is pending, not active", () => {
     const phase = base.state.phases.find((p) => p.key.toLowerCase().includes("construction"))!;
     const copy = phase.stages.find((s) => s.slug === "functional-design")!;
     const m: DashboardModel = {
@@ -115,8 +115,8 @@ describe("Stage card", () => {
             : {
                 ...p,
                 stages: [
-                  { ...copy, bolt: "PU-A-core", status: "done" as const },
-                  { ...copy, bolt: "PU-B-ui", status: "pending" as const },
+                  { ...copy, status: "done" as const },
+                  { ...copy, status: "pending" as const },
                   ...p.stages.filter((s) => s.slug !== "functional-design"),
                 ],
               },
@@ -128,12 +128,11 @@ describe("Stage card", () => {
     const label = /<span class="mr-l">(.*?)<\/span><span class="mr-v">/.exec(row)?.[1] ?? "";
     expect(label).toContain("· Functional Design");
     expect(label).not.toContain("▶");
-    expect(label).toContain("유닛 1/2");
     // One row for the slug, not one per unit copy.
     expect(html.split('title="functional-design"').length - 1).toBe(1);
   });
 
-  const foldRow = (copies: { bolt: string; status: StageStatus }[]) => {
+  const foldRow = (copies: { status: StageStatus }[]) => {
     const phase = base.state.phases.find((p) => p.key.toLowerCase().includes("construction"))!;
     const copy = phase.stages.find((s) => s.slug === "functional-design")!;
     const m: DashboardModel = {
@@ -158,22 +157,9 @@ describe("Stage card", () => {
     return /<span class="mr-l">(.*?)<\/span><span class="mr-v">/.exec(row)?.[1] ?? "";
   };
 
-  test("a unit at its gate outranks a unit that is working: the fold shows awaiting", () => {
-    const label = foldRow([
-      { bolt: "PU-A-core", status: "active" },
-      { bolt: "PU-B-ui", status: "awaiting" },
-    ]);
+  test("a copy at its gate outranks one that is working: the fold shows awaiting", () => {
+    const label = foldRow([{ status: "active" }, { status: "awaiting" }]);
     expect(label.startsWith(`${STAGE_GLYPH.awaiting} `)).toBe(true);
-  });
-
-  test("a unit that skipped the stage leaves the units denominator, as it leaves the fold", () => {
-    const label = foldRow([
-      { bolt: "PU-A-core", status: "done" },
-      { bolt: "PU-B-ui", status: "done" },
-      { bolt: "PU-C-api", status: "skipped" },
-    ]);
-    expect(label.startsWith(`${STAGE_GLYPH.done} `)).toBe(true);
-    expect(label).toContain("유닛 2/2");
   });
 });
 

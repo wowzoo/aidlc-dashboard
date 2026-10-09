@@ -71,7 +71,6 @@ export interface CardStrings {
   /** Column header for work + conversation time. */
   readonly colWorkChat: string;
   readonly workChatTip: string;
-  unitsDone(done: number, total: number): string;
   readonly noStages: string;
   readonly colUnit: string;
   readonly colArtifacts: string;

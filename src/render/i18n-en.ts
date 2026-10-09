@@ -87,7 +87,7 @@ const warn: WarnStrings = {
     `Harness directories ${harnesses.join(" and ")} both exist — the usage panel was set to ${chosen === "claude" ? "Claude Code tokens" : "Kiro credit"} automatically. To see the other one, pass --usage ${chosen === "claude" ? "kiro" : "claude"}.`,
 
   engineVersionUnsupported: (harnessDir, found, supported) =>
-    `${found ? `Engine ${found}` : "No engine version stamp (aidlc-stamp.json)"} (${harnessDir}) — this dashboard reads AI-DLC ${supported}.x only. A record from another version is read by the ${supported} rules, so some panels may be empty or wrong.`,
+    `${found ? `Engine ${found}` : "No valid engine version stamp (aidlc-stamp.json)"} (${harnessDir}) — this dashboard reads AI-DLC ${supported} only. A record from another version is read by the ${supported} rules too, so some panels may be empty or wrong.`,
 
   questionsUnclosedBlock: (files) =>
     `${plural(files.length, "questions file")} with a code block or comment that is never closed — read as text rather than hidden, so no blocker is hidden by it. The engine may read it differently; check the file: ${files.join(", ")}`,
@@ -831,7 +831,6 @@ const cards: CardStrings = {
   colWorkChat: "work+chat",
   workChatTip:
     "Time the audit ledger classifies as work (event-dense stretches and delegation) plus conversation (between human turns). Waiting on a human, parked time and unclassified gaps are left out",
-  unitsDone: (done, total) => `units ${done}/${total}`,
   noStages: "No stages in this phase",
   colUnit: "unit",
   colArtifacts: "artifacts",

@@ -176,8 +176,8 @@ export interface MatrixUnit {
  *            receipt. A paused, stale or reopened unit lands here.
  * unverified — every contracted artifact is on disk and the receipt CANNOT BE CHECKED from
  *            the audit alone: team ownership (the claim file decides), wave mode (an
- *            artifact fingerprint decides), an `AMBIGUOUS` attempt floor, or a ledger
- *            predating the `Run floor` field. Kept apart from `unsettled` because merging
+ *            artifact fingerprint decides), or an `AMBIGUOUS` attempt floor on events
+ *            built without block positions. Kept apart from `unsettled` because merging
  *            them printed a red "not done" over every gap in this reader's reproduction of
  *            the engine — a fabricated blocker.
  * skipped  — the engine recorded UNIT_SKIPPED for this unit in this attempt: it does not

@@ -80,7 +80,7 @@ const warn: WarnStrings = {
     `harness 디렉터리 ${harnesses.join("·")} 가 공존 — 사용량 패널을 ${chosen === "claude" ? "Claude Code 토큰" : "Kiro 크레딧"}으로 자동 선택했습니다. 다른 쪽을 보려면 --usage ${chosen === "claude" ? "kiro" : "claude"} 를 지정하세요.`,
 
   engineVersionUnsupported: (harnessDir, found, supported) =>
-    `${found ? `엔진 ${found}` : "엔진 버전 표시(aidlc-stamp.json) 없음"} (${harnessDir}) — 이 대시보드는 AI-DLC ${supported}.x 기준으로만 읽습니다. 다른 버전의 기록은 ${supported} 규칙으로 읽으므로 일부 패널이 비거나 틀릴 수 있습니다.`,
+    `${found ? `엔진 ${found}` : "엔진 버전 표시(aidlc-stamp.json) 없음 또는 형식 오류"} (${harnessDir}) — 이 대시보드는 AI-DLC ${supported} 기준으로만 읽습니다. 다른 버전의 기록도 ${supported} 규칙으로 읽으므로 일부 패널이 비거나 틀릴 수 있습니다.`,
 
   questionsUnclosedBlock: (files) =>
     `닫히지 않은 코드 블록·주석이 있는 질문 파일 ${files.length}개 — 숨기지 않고 본문으로 읽었습니다(블로커를 감추지 않으려고). 엔진은 다르게 읽을 수 있으니 파일을 확인하세요: ${files.join(", ")}`,
@@ -797,7 +797,6 @@ const cards: CardStrings = {
   colWorkChat: "작업+대화",
   workChatTip:
     "감사 로그에서 작업(이벤트가 촘촘한 구간·위임)과 대화(사람 턴 사이) 로 분류된 시간의 합입니다. 사람 응답 대기·일시중지·분류 불가 구간은 넣지 않습니다",
-  unitsDone: (done, total) => `유닛 ${done}/${total}`,
   noStages: "이 phase 에는 stage 가 없습니다",
   colUnit: "unit",
   colArtifacts: "산출물",

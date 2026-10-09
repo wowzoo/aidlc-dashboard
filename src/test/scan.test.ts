@@ -249,12 +249,13 @@ describe("unit progress table", () => {
   });
 });
 
-describe("bolt status", () => {
-  test("a runtime skip leaves the Bolt and batch status like it leaves the count", () => {
-    // done/total already dropped `[S]`, but the status fold still waited on it, so a
-    // finished Bolt read 1/1 and "pending" at the same time.
+describe("the pre-2.11 Bolt grammar is not read", () => {
+  test("`#### Bolt:`, `Current Bolt` and `Bolt batches:` give a stage no unit", () => {
+    // The 2.11 state writes one row per stage; no 2.11 reader or writer knows these lines.
+    // `Per unit:` stays as inert text (2.11 still writes `Per unit: [TBD]`).
     const st = parseState(
       [
+        "- **Current Bolt**: unit-a",
         "## Stage Progress",
         "### CONSTRUCTION PHASE",
         "Per unit: unit-a",
@@ -264,8 +265,13 @@ describe("bolt status", () => {
         "- [S] nfr-design — EXECUTE",
       ].join("\n"),
     );
-    expect(st.constructionBolts?.[0]).toMatchObject({ done: 1, total: 1, status: "done" });
-    expect(st.constructionBatches?.[0]?.status).toBe("done");
+    const rows = st.phases.flatMap((p) => p.stages);
+    expect(rows.map((r) => [r.slug, r.status])).toEqual([
+      ["functional-design", "done"],
+      ["nfr-design", "skipped"],
+    ]);
+    expect(rows.some((r) => "bolt" in r)).toBe(false);
+    expect("constructionBolts" in st).toBe(false);
   });
 });
 

@@ -124,14 +124,15 @@ export function readWorkspaceSummary(root: string): WorkspaceSummary {
 
   let state: AidlcState;
   try {
-    // The catalogue is consulted for stage NAMES only, so that a card and the full page
-    // never print two different names for the same stage. Without one, `parseState` falls
-    // back to its own table and then to a title-cased slug — the documented degradation,
-    // not a wrong claim.
+    // The catalogue is consulted for stage NAMES and the scope grid, so that a card and
+    // the full page never print two different names — or two different denominators —
+    // for the same stage. Without one, `parseState` falls back to its own table and then
+    // to a title-cased slug — the documented degradation, not a wrong claim.
     const catalog = readStageCatalog(root);
     state = parseState(
       fs.readFileSync(statePath, "utf-8"),
       catalog ? (slug) => catalog.bySlug.get(slug)?.name : undefined,
+      catalog?.scopeGrid,
     );
   } catch {
     return { kind: "unreadable" };

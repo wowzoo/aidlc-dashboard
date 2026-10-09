@@ -24,6 +24,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ScopeGrid } from "./parser";
 
 /** Path of the catalogue INSIDE a harness dir. */
 const CATALOG_SUBPATH = path.join("tools", "data", "stage-graph.json");
@@ -160,6 +161,8 @@ export interface StageCatalog {
   stateVersion?: string;
   /** The harness's engine version (`aidlc-stamp.json`), when it declares one. */
   frameworkVersion?: string;
+  /** The compiled scope grid, when the harness ships one. */
+  scopeGrid?: ScopeGrid;
 }
 
 /** `export const CURRENT_STATE_VERSION = "8"` in the harness's own lib. */
@@ -251,35 +254,79 @@ export function readStageCatalog(root: string, harnessDir?: string): StageCatalo
       const f = readFrameworkVersion(root, harness);
       return f ? { frameworkVersion: f } : {};
     })(),
+    ...(() => {
+      const g = readScopeGrid(root, harness);
+      return g ? { scopeGrid: g } : {};
+    })(),
   };
 }
 
 /**
+ * `<harness>/tools/data/scope-grid.json` — the compiled per-scope EXECUTE/SKIP grid the
+ * engine derives its scope mapping from (`loadScopeMapping`; `scope-mapping.json` is
+ * retired). Only well-formed actions are kept. Undefined when absent or unreadable.
+ */
+function readScopeGrid(root: string, harness: string): ScopeGrid | undefined {
+  try {
+    const j: unknown = JSON.parse(
+      fs.readFileSync(path.join(root, harness, "tools", "data", "scope-grid.json"), "utf-8"),
+    );
+    if (!j || typeof j !== "object" || Array.isArray(j)) return undefined;
+    const out: ScopeGrid = {};
+    for (const [scope, def] of Object.entries(j as Record<string, unknown>)) {
+      const stages = (def as { stages?: unknown })?.stages;
+      if (!stages || typeof stages !== "object") continue;
+      const row: Record<string, "EXECUTE" | "SKIP"> = {};
+      for (const [slug, action] of Object.entries(stages as Record<string, unknown>)) {
+        if (action === "EXECUTE" || action === "SKIP") row[slug] = action;
+      }
+      out[scope] = row;
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The engine's release grammar (aidlc-runtime-paths.ts `FRAMEWORK_VERSION`). */
+const FRAMEWORK_VERSION_RE =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-preview\.\d{8}\.[1-9]\d*)?$/;
+
+/**
  * `frameworkVersion` from `<harness>/tools/data/aidlc-stamp.json` — the engine's own
- * projection identity (`{schemaVersion, frameworkVersion, distribution, harnessDir}`).
- * Undefined when the stamp is absent or unreadable.
+ * projection identity, validated as the engine validates it: `harnessDir` names this
+ * harness, `schemaVersion` is 1, `distribution` is a slug, and the version is a release
+ * id. A stamp failing any of these identifies nothing, so it reads as no stamp — a
+ * `frameworkVersion: "2.11.0"` alone must not silence the version warning.
  */
 function readFrameworkVersion(root: string, harness: string): string | undefined {
   try {
-    const j: unknown = JSON.parse(
+    const j = JSON.parse(
       fs.readFileSync(path.join(root, harness, "tools", "data", "aidlc-stamp.json"), "utf-8"),
-    );
-    const v = (j as { frameworkVersion?: unknown })?.frameworkVersion;
-    return typeof v === "string" && v.length > 0 ? v : undefined;
+    ) as Record<string, unknown>;
+    const v = j?.frameworkVersion;
+    const ok =
+      j?.harnessDir === harness &&
+      j?.schemaVersion === 1 &&
+      typeof j?.distribution === "string" &&
+      /^[a-z0-9][a-z0-9-]*$/.test(j.distribution) &&
+      typeof v === "string" &&
+      FRAMEWORK_VERSION_RE.test(v);
+    return ok ? (v as string) : undefined;
   } catch {
     return undefined;
   }
 }
 
 /**
- * The engine generation this dashboard reads: 2.11.x. Every rule it transcribes is the
- * 2.11.0 engine's; an older tree is read by the same rules, under a warning, rather than
- * by a second set of rules nobody can check any more.
+ * The engine release this dashboard reads: exactly 2.11.0, the source every rule here was
+ * transcribed from and checked against. Any other release — a later 2.11 patch included,
+ * since nothing here was checked against it — is read by the same rules, under a warning.
  */
-export const SUPPORTED_ENGINE = "2.11";
+export const SUPPORTED_ENGINE = "2.11.0";
 
 export function supportedEngine(frameworkVersion: string | undefined): boolean {
-  return frameworkVersion !== undefined && /^2\.11(?:\.|$)/.test(frameworkVersion);
+  return frameworkVersion === SUPPORTED_ENGINE;
 }
 
 /** Keep an artifact when it is kind-agnostic, or when it lists this unit's kind. */

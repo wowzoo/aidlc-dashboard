@@ -52,7 +52,6 @@ export const STAGE_DISPLAY: Record<string, string> = {
   "user-stories": "User Stories",
   "refined-mockups": "Refined Mockups",
   // Retired in v2.7 (→ domain-design). Kept so an older tree still reads.
-  "application-design": "Application Design",
   "domain-design": "Domain Design",
   "contract-design": "Contract Design",
   "units-generation": "Units Generation",
@@ -132,60 +131,6 @@ export interface StageInfo {
   status: StageStatus;
   /** false when the scope marker is SKIP (excluded from this run). */
   execute: boolean;
-  /**
-   * The Unit name of the `#### Bolt: <unit>` section this stage sits under, or
-   * undefined for stages outside any Bolt section — every phase except the
-   * per-unit Construction stages, plus the two global Construction stages
-   * (build-and-test / ci-pipeline). With per-unit × per-stage state the five
-   * Construction stage slugs repeat once per Bolt, so this is how the copies
-   * are told apart. Mirrors `CheckboxLine.bolt` in the engine (aidlc-lib.ts).
-   */
-  bolt?: string;
-}
-
-/**
- * One Construction Bolt (Unit of Work) and its five per-unit stages. Derived
- * from the `Per unit:` roster + the `#### Bolt:` sections in aidlc-state.md;
- * a roster Unit with no section yet (not entered) yields an empty `stages`
- * list and `pending` status. See design/per-bolt-progress.md.
- */
-export interface BoltInfo {
-  /** Unit slug, as listed on the `Per unit:` line. */
-  unit: string;
-  /** Title-cased display name derived from the slug. */
-  display: string;
-  /** Status derived from the Bolt's stages (active/awaiting/revising win). */
-  status: StageStatus;
-  /** The five per-unit stages, or empty when the Bolt is not yet entered. */
-  stages: StageInfo[];
-  /** Completed executable stages. */
-  done: number;
-  /** Total executable stages present (0 before the Bolt is entered). */
-  total: number;
-  /** True when this is the Bolt named by `Current Bolt`. */
-  isCurrent: boolean;
-}
-
-/**
- * One Bolt batch from the `Bolt batches:` line — the batch coordinate that
- * bolt-plan.md carries but the single-slug `#### Bolt:` grammar cannot. A batch
- * groups one OR several Units (e.g. B3 runs three Units in parallel); the
- * grouping is written by `set-units --batches` (aidlc-state.ts) and is inert to
- * the state machine. Members are the per-Unit `BoltInfo`s, in batch order.
- */
-export interface BatchInfo {
-  /** Batch label verbatim from bolt-plan.md (e.g. "B1", "B3"). */
-  label: string;
-  /** The Units in this batch, as BoltInfo, in the order the line lists them. */
-  units: BoltInfo[];
-  /** Status derived from member Units (active/awaiting/revising win). */
-  status: StageStatus;
-  /** Completed executable stages summed across the batch's Units. */
-  done: number;
-  /** Total executable stages summed across the batch's Units. */
-  total: number;
-  /** True when any member Unit is the `Current Bolt`. */
-  isCurrent: boolean;
 }
 
 export interface PhaseInfo {
@@ -265,21 +210,6 @@ export interface AidlcState {
   overallPct: number;
   /** True when the workflow Status field reads Completed / Complete. */
   complete: boolean;
-  /**
-   * Construction Bolts in `Per unit:` roster order, present only when the
-   * Construction block carries a `Per unit:` line (the Bolt-loop engine).
-   * Undefined on a stock-engine / pre-Bolt-loop state file, where Construction
-   * renders through the flat phase path. See design/per-bolt-progress.md.
-   */
-  constructionBolts?: BoltInfo[];
-  /**
-   * Construction Bolts grouped into batches per the `Bolt batches:` line, in
-   * batch order. Present only when that line exists; this is the Batch → Unit →
-   * Stage view (bolt-plan.md's B1..B4). See design/per-bolt-progress.md.
-   */
-  constructionBatches?: BatchInfo[];
-  /** The `Current Bolt` field value, when present. */
-  currentBolt?: string;
 }
 
 // Match the Markdown list field pattern used throughout aidlc-state.md:
@@ -292,23 +222,6 @@ function extractField(text: string, label: string): string {
   const m = text.match(re);
   return m?.[1] !== undefined ? m[1].replace(/\r$/, "").trim() : "";
 }
-
-// `#### Bolt: <unit-name>` section heading. Mirrors BOLT_HEADING_RE in the
-// engine (aidlc-lib.ts) so the panel groups Construction stages exactly as the
-// engine does.
-const BOLT_HEADING_RE = /^####\s+Bolt:\s+([a-z0-9][a-z0-9-]*)\s*$/;
-
-// The `Per unit: a, b, c` roster line under `### CONSTRUCTION PHASE`: the full,
-// ordered Unit list, present even before a Bolt has been entered.
-const PER_UNIT_RE = /^Per unit:\s*(.+)$/m;
-
-// The `Bolt batches: B1=[a], B2=[b, c]` line written by set-units --batches
-// (aidlc-state.ts). Inert metadata: the batch coordinate (bolt-plan.md's
-// B1..B4) that the single-slug `#### Bolt:` grammar cannot carry. One group
-// per batch; a group is `LABEL=[unit, unit]`. The line is the normalised form
-// the engine emits, so the parse mirrors it verbatim.
-const BOLT_BATCHES_RE = /^Bolt batches:\s*(.+)$/m;
-const BATCH_GROUP_RE = /([^\s=\[\],]+)\s*=\s*\[([^\]]*)\]/g;
 
 function stageStatusFromBox(box: string, isSkipMarker: boolean): StageStatus {
   if (box === "x") return "done";
@@ -359,35 +272,22 @@ function sliceSection(text: string, heading: string): string {
 export function parseStages(
   text: string,
   catalogName?: (slug: string) => string | undefined,
+  /** The scope's own action for a stage, for a row with no `— EXECUTE|SKIP` suffix. */
+  scopeAction?: (slug: string) => "EXECUTE" | "SKIP" | undefined,
 ): Map<string, StageInfo[]> {
   const byPhase = new Map<string, StageInfo[]>();
   const lines = text.split(/\r?\n/);
   let current: string | null = null;
-  // Enclosing `#### Bolt:` section, tracked only within a phase block. A Bolt
-  // section runs from its heading to the first BLANK LINE or any `#`–`###`
-  // heading — the exact boundary the engine uses (aidlc-lib.ts:2073), so the
-  // two global Construction stages (build-and-test / ci-pipeline), which follow
-  // the last Bolt section with no heading of their own, are NOT tagged.
-  let currentBolt: string | undefined;
-  // The em dash (—) separates slug from the EXECUTE/SKIP marker; we don't
-  // depend on it — we read the box + slug, then test the whole line for SKIP.
+  // The box and the slug; the action is read from the em-dash suffix below.
   const stageRe = /^-\s*\[(.)\]\s*([a-z0-9-]+)/;
   for (const line of lines) {
     const head = line.match(/^###\s+([A-Za-z]+)\s+PHASE/i);
     if (head) {
       current = head[1]!.toLowerCase();
-      currentBolt = undefined;
       if (!byPhase.has(current)) byPhase.set(current, []);
       continue;
     }
-    const boltHead = line.match(BOLT_HEADING_RE);
-    if (boltHead) {
-      currentBolt = boltHead[1];
-      continue;
-    }
     if (line.startsWith("## ")) current = null; // left the Stage Progress block
-    // A blank line or a `#`–`###` heading closes the current Bolt section.
-    if (line.trim() === "" || /^#{1,3}\s/.test(line)) currentBolt = undefined;
     if (!current) continue;
     const m = line.match(stageRe);
     if (!m) continue;
@@ -395,16 +295,16 @@ export function parseStages(
     const slug = m[2]!;
     // The engine reads the ACTION after the em dash (`parseStateStageSuffixes`:
     // `— (EXECUTE|SKIP)\b`), not the word anywhere on the line — `— EXECUTE: do not SKIP
-    // the review` is an executed stage. A row with no suffix has no plan action for the
-    // engine either (it falls back to the scope's default, which this reader does not
-    // have), so it is read as executing.
-    const isSkipMarker = /—\s*(EXECUTE|SKIP)\b/.exec(line)?.[1] === "SKIP";
+    // the review` is an executed stage — and, for a row with no suffix, the scope's own
+    // action from the compiled grid (`suffix ?? mapping.stages[slug]`). With neither
+    // (no catalogue, or a scope the grid does not know) the row reads as executing.
+    const suffix = /—\s*(EXECUTE|SKIP)\b/.exec(line)?.[1];
+    const isSkipMarker = (suffix ?? scopeAction?.(slug)) === "SKIP";
     byPhase.get(current)?.push({
       slug,
       display: stageDisplay(slug, catalogName),
       status: stageStatusFromBox(box, isSkipMarker),
       execute: !isSkipMarker,
-      ...(currentBolt !== undefined ? { bolt: currentBolt } : {}),
     });
   }
   return byPhase;
@@ -416,111 +316,6 @@ export function displayFromSlug(slug: string): string {
     .split("-")
     .map((w) => (w ? w[0]?.toUpperCase() + w.slice(1) : w))
     .join(" ");
-}
-
-/**
- * Derive a Bolt's overall status from its stages (active states win). Only stages
- * that run count — the same set as the done/total below, so a runtime skip (`[S]`
- * on an EXECUTE row) cannot leave a Bolt reading 1/1 and "pending" at once.
- */
-function boltStatusFromStages(stages: StageInfo[]): StageStatus {
-  const exec = stages.filter((s) => s.execute && s.status !== "skipped");
-  if (exec.length === 0) return "pending";
-  for (const s of exec) {
-    if (s.status === "active" || s.status === "awaiting" || s.status === "revising") {
-      return s.status;
-    }
-  }
-  if (exec.every((s) => s.status === "done")) return "done";
-  return "pending";
-}
-
-// A real Unit slug on the `Per unit:` line: kebab-case, exactly the shape the
-// engine's BOLT_HEADING_RE accepts. Anything else — most importantly the
-// `[TBD]` placeholder the stock stage-major engine leaves until a Bolt loop
-// fills the roster — is not a Unit and must not seed a phantom Bolt.
-const UNIT_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
-
-/**
- * Build the per-Bolt view from the parsed Construction stages + the `Per unit:`
- * roster. Returns undefined when there is no roster line (stock-engine state
- * file) OR the roster holds no real Unit slug (e.g. `Per unit: [TBD]` on the
- * stock stage-major engine), signalling the caller to keep the flat render.
- */
-function buildConstructionBolts(
-  text: string,
-  constructionStages: StageInfo[],
-  currentBolt: string,
-): BoltInfo[] | undefined {
-  const rosterMatch = text.match(PER_UNIT_RE);
-  if (!rosterMatch) return undefined;
-  const roster = (rosterMatch[1] ?? "")
-    .split(",")
-    .map((u) => u.trim())
-    .filter((u) => UNIT_SLUG_RE.test(u));
-  if (roster.length === 0) return undefined;
-
-  // Group the tagged Construction stages by their Bolt.
-  const byBolt = new Map<string, StageInfo[]>();
-  for (const s of constructionStages) {
-    if (s.bolt === undefined) continue;
-    if (!byBolt.has(s.bolt)) byBolt.set(s.bolt, []);
-    byBolt.get(s.bolt)?.push(s);
-  }
-
-  return roster.map((unit) => {
-    const stages = byBolt.get(unit) ?? [];
-    // Same denominator rule as the phase counts below: a skipped stage is not
-    // outstanding work, whether the skip came from scope (`— SKIP`) or runtime (`[S]`).
-    const executable = stages.filter((s) => s.execute && s.status !== "skipped");
-    return {
-      unit,
-      display: displayFromSlug(unit),
-      status: boltStatusFromStages(stages),
-      stages,
-      done: executable.filter((s) => s.status === "done").length,
-      total: executable.length,
-      isCurrent: unit === currentBolt,
-    };
-  });
-}
-
-/**
- * Group the per-Unit BoltInfos into batches per the `Bolt batches:` line.
- * Returns undefined when that line is absent. Each batch's Unit members are
- * looked up in `bolts` by slug, preserving the line's order; the batch's
- * done/total are the sums over its members, and its status is derived the same
- * way a single Bolt's is (active states win). See design/per-bolt-progress.md.
- */
-function buildConstructionBatches(text: string, bolts: BoltInfo[]): BatchInfo[] | undefined {
-  const lineMatch = text.match(BOLT_BATCHES_RE);
-  if (!lineMatch) return undefined;
-  const byUnit = new Map(bolts.map((b) => [b.unit, b]));
-
-  const batches: BatchInfo[] = [];
-  const batchLine = lineMatch[1] ?? "";
-  BATCH_GROUP_RE.lastIndex = 0;
-  let m = BATCH_GROUP_RE.exec(batchLine);
-  while (m !== null) {
-    const label = m[1]!;
-    const members = (m[2] ?? "")
-      .split(",")
-      .map((u) => u.trim())
-      .filter((u) => u.length > 0)
-      .map((u) => byUnit.get(u))
-      .filter((b): b is BoltInfo => b !== undefined);
-    const allStages = members.flatMap((b) => b.stages);
-    batches.push({
-      label,
-      units: members,
-      status: boltStatusFromStages(allStages),
-      done: members.reduce((n, b) => n + b.done, 0),
-      total: members.reduce((n, b) => n + b.total, 0),
-      isCurrent: members.some((b) => b.isCurrent),
-    });
-    m = BATCH_GROUP_RE.exec(batchLine);
-  }
-  return batches.length > 0 ? batches : undefined;
 }
 
 /** `## Runtime State` fields that say where the run is held. Empty string = not written. */
@@ -554,6 +349,9 @@ function readRuntimeFields(text: string): RuntimeFields {
   };
 }
 
+/** `tools/data/scope-grid.json`: per scope, each stage's plan action. */
+export type ScopeGrid = Record<string, Record<string, "EXECUTE" | "SKIP">>;
+
 export function parseState(
   text: string,
   /**
@@ -562,6 +360,8 @@ export function parseState(
    * file's snapshot of the engine — see `stageDisplay`.
    */
   catalogName?: (slug: string) => string | undefined,
+  /** The compiled scope grid (`scope → slug → action`), for rows with no suffix. */
+  scopeGrid?: ScopeGrid,
 ): AidlcState {
   const project = extractField(text, "Project");
   const projectType = extractField(text, "Project Type");
@@ -581,10 +381,12 @@ export function parseState(
   const activeAgent = extractField(text, "Active Agent");
   const lastUpdated = extractField(text, "Last Updated");
   const revisionCount = extractField(text, "Revision Count");
-  const currentBolt = extractField(text, "Current Bolt");
 
   const declared = parseDeclaredPhaseStatus(text);
-  const stagesByPhase = parseStages(text, catalogName);
+  // The grid row for THIS state's scope; an unknown scope gives no default, as the
+  // engine's `loadScopeMapping()[scope]` gives none.
+  const grid = scopeGrid?.[extractField(text, "Scope")];
+  const stagesByPhase = parseStages(text, catalogName, grid ? (slug) => grid[slug] : undefined);
 
   const phases: PhaseInfo[] = [];
   let overallDone = 0;
@@ -625,20 +427,6 @@ export function parseState(
   const overallPct = overallTotal > 0 ? Math.round((overallDone * 100) / overallTotal) : 0;
   const complete = status === "Completed" || status === "Complete";
 
-  // Per-Bolt Construction view — present only when a `Per unit:` roster exists.
-  // The overall done/total above are untouched (Option A): the Bolt dimension
-  // is a presentation layer over the same flat counts.
-  const constructionBolts = buildConstructionBolts(
-    text,
-    stagesByPhase.get("construction") ?? [],
-    currentBolt,
-  );
-  // Batch grouping (Batch → Unit → Stage) per the `Bolt batches:` line, layered
-  // over the per-Unit bolts. Present only when both exist.
-  const constructionBatches = constructionBolts
-    ? buildConstructionBatches(text, constructionBolts)
-    : undefined;
-
   return {
     project,
     projectType,
@@ -665,8 +453,6 @@ export function parseState(
     overallTotal,
     overallPct,
     complete,
-    ...(constructionBolts ? { constructionBolts, currentBolt } : {}),
-    ...(constructionBatches ? { constructionBatches } : {}),
   };
 }
 

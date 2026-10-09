@@ -43,10 +43,10 @@ const STAGE_TONE: Record<StageStatus, RowTone> = {
 };
 
 /**
- * One row per stage SLUG. Construction repeats its per-unit stages once per unit, and
- * the audit's timing is keyed by slug, so the card folds the copies into one row and
- * says how many units have finished it. The folded status is the most urgent one
- * present: a stage is only "done" when every executed copy is.
+ * One row per stage SLUG. The 2.11 state writes one row per stage, so a slug normally has
+ * one copy; a hand-edited state can repeat one, and the audit's timing is keyed by slug,
+ * so copies fold into one row. The folded status is the most urgent one present: a
+ * stage is only "done" when every executed copy is.
  */
 function foldStatus(copies: StageInfo[]): StageStatus {
   const run = copies.filter((c) => c.execute && c.status !== "skipped");
@@ -57,13 +57,12 @@ function foldStatus(copies: StageInfo[]): StageStatus {
   for (const st of ["awaiting", "revising", "active"] as const) {
     if (run.some((c) => c.status === st)) return st;
   }
-  // Some units finished it, the rest have not started, and none is on it now. That is
-  // NOT "active" — ▶ would claim the run is working on this stage when it is not. It
-  // stays pending, and the row's "units n/m" note carries the partial progress.
+  // Some copies finished, the rest have not started, and none is on it now. That is NOT
+  // "active" — ▶ would claim the run is working on this stage when it is not.
   return "pending";
 }
 
-function stageRows(phase: PhaseInfo, m: DashboardModel, s: Strings): Row[] {
+function stageRows(phase: PhaseInfo, m: DashboardModel): Row[] {
   const bySlug = new Map<string, StageInfo[]>();
   for (const st of phase.stages) {
     const list = bySlug.get(st.slug);
@@ -79,16 +78,9 @@ function stageRows(phase: PhaseInfo, m: DashboardModel, s: Strings): Row[] {
   return [...bySlug.entries()].map(([slug, copies]) => {
     const status = foldStatus(copies);
     const first = copies[0] as StageInfo;
-    // Same set foldStatus judges: a unit that skipped the stage is neither done nor
-    // outstanding, so it leaves the denominator too.
-    const units = copies.filter((c) => c.bolt !== undefined && c.execute && c.status !== "skipped");
-    const unitNote =
-      units.length > 1
-        ? ` · ${s.cards.unitsDone(units.filter((c) => c.status === "done").length, units.length)}`
-        : "";
     const t = timeOf(slug);
     return {
-      label: `${esc(STAGE_GLYPH[status])} ${esc(first.display)}<span class="mr-sub">${esc(unitNote)}</span>`,
+      label: `${esc(STAGE_GLYPH[status])} ${esc(first.display)}`,
       value: t === undefined ? "—" : hours(t),
       pct: t === undefined ? undefined : share(t, max),
       tone: STAGE_TONE[status],
@@ -110,7 +102,7 @@ export function renderStageCard(m: DashboardModel, s: Strings): string {
   const tabs = phases.map((p) => ({
     label: p.display,
     count: { text: `${p.done}/${p.total}` },
-    body: rowList(stageRows(p, m, s), {
+    body: rowList(stageRows(p, m), {
       head: [s.cards.colStage, s.cards.colWorkChat],
       headTip: s.cards.workChatTip,
       max: CARD_ROWS,

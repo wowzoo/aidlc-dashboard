@@ -116,8 +116,7 @@ function phaseBlocks(
     const count = p.skipped ? "skipped" : `${p.done}/${p.total}`;
     const stages = p.stages
       .map((st) => {
-        const key = st.bolt ? `construction/${st.bolt}/${st.slug}` : `${p.key}/${st.slug}`;
-        return stageRow(st, artifacts[key] ?? [], s);
+        return stageRow(st, artifacts[`${p.key}/${st.slug}`] ?? [], s);
       })
       .join("");
     return `<details class="phase"${p.declaredStatus === "Active" ? " open" : ""}>
@@ -184,9 +183,8 @@ export function cellTip(
           s.overview.tipUnsettled(present)
         : state === "unverified"
           ? // Not "not done" — "cannot be checked here". Merging this into unsettled put a
-            // red cell over every gap in this reader's reproduction of the engine. But the
-            // four causes do not agree on the ENGINE's verdict, so each says its own thing:
-            // with no `Run floor` the engine's answer is known and it is "uncovered".
+            // red cell over every gap in this reader's reproduction of the engine. Each cause
+            // says its own thing, because each is a different reason the audit cannot tell.
             s.overview.tipUnverified(reason ?? "ambiguous-floor", present)
           : state === "skipped"
             ? s.overview.tipSkipped(skipReason ?? "")

@@ -387,7 +387,13 @@ export function readUnitReceipts(
     const set = (unit: string, v: ReceiptVerdict) => verdicts.set(`${slug}\u0001${unit}`, v);
 
     if (p.team) {
-      for (const u of units) set(u, { state: "unverifiable", reason: "team-claim" });
+      // The claim match decides only rows that could be current at all: a unit none of
+      // whose rows carries a `Run floor` fails the engine's exact match whatever the
+      // claim file says, so it is known — not done.
+      for (const u of units) {
+        const anyFloor = lifecycle.some((r) => r.f.Unit === u && !!r.f["Run floor"]);
+        set(u, anyFloor ? { state: "unverifiable", reason: "team-claim" } : { state: "unsettled" });
+      }
       continue;
     }
 
