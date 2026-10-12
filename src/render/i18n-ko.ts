@@ -680,7 +680,7 @@ const usage: UsageStrings = {
   rowCachedPromptTip:
     "캐시 읽기 ÷ (입력 + 캐시 읽기 + 캐시 생성). 프롬프트 토큰 중 캐시에서 온 비율이며, 출력은 분모에 없습니다.",
   rowSessions: "세션",
-  rowMessages: "응답 메시지",
+  rowMessages: "API 응답",
   colModel: "모델",
   colShare: "비중",
   tokenChartEmpty: (w) => `${w} 일별 토큰 추이: 표시할 데이터 없음`,

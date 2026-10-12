@@ -711,7 +711,7 @@ const usage: UsageStrings = {
   rowCachedPromptTip:
     "cache read ÷ (input + cache read + cache create). The share of prompt tokens served from cache; output is not in the denominator.",
   rowSessions: "sessions",
-  rowMessages: "assistant messages",
+  rowMessages: "API responses",
   colModel: "model",
   colShare: "share",
   tokenChartEmpty: (w) => `Daily token trend, ${w}: no data to show`,

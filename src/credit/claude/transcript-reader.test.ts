@@ -30,6 +30,9 @@ interface LineOpts {
   cacheCreate?: number;
   thinking?: number;
   cwd?: string;
+  /** `message.id` — 같은 API 응답의 줄들이 공유한다. */
+  id?: string;
+  requestId?: string;
 }
 
 /** usage를 들고 있는 assistant 줄 하나. */
@@ -40,7 +43,9 @@ function line(o: LineOpts): string {
     sessionId: o.session ?? "s1",
     cwd: o.cwd ?? "/ws",
     isSidechain: o.sidechain ?? false,
+    ...(o.requestId ? { requestId: o.requestId } : {}),
     message: {
+      ...(o.id ? { id: o.id } : {}),
       model: o.model ?? "claude-opus-5",
       usage: {
         input_tokens: o.input ?? 10,
@@ -117,6 +122,7 @@ function tree(rootName = "ws"): Tree {
     dir,
     write(name, lines, mtime) {
       const p = path.join(dir, name);
+      fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, `${lines.join("\n")}\n`);
       if (mtime) fs.utimesSync(p, mtime, mtime);
       return p;
@@ -483,5 +489,82 @@ describe("readTranscripts", () => {
     });
     fs.writeFileSync(path.join(renamed, "a.jsonl"), `${huge}\n`);
     expect(findTranscriptDir(t.root, t.home)).toBe(renamed);
+  });
+});
+
+describe("API 응답 단위 집계", () => {
+  // Claude Code 는 응답 하나를 content block 마다 한 줄로 쓰고 usage 를 되풀이한다. 줄마다 더하면
+  // 거의 두 배가 된다(실측 +97.4%).
+  test("같은 message.id·requestId 의 줄들은 한 응답이고, 합계가 큰 줄 하나만 센다", () => {
+    const t = tree();
+    t.write("a.jsonl", [
+      line({ ts: "2026-08-25T10:00:00Z", id: "msg_1", requestId: "req_1", output: 3 }),
+      line({ ts: "2026-08-25T10:00:01Z", id: "msg_1", requestId: "req_1", output: 439 }),
+      line({ ts: "2026-08-25T10:00:01Z", id: "msg_1", requestId: "req_1", output: 439 }),
+      line({ ts: "2026-08-25T10:00:05Z", id: "msg_2", requestId: "req_2" }),
+    ]);
+    const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW });
+    expect(a.messages).toBe(2);
+    expect(a.totals.output).toBe(439 + 100);
+    expect(a.totals.cacheRead).toBe(2000);
+  });
+
+  // 세션 재개가 이전 대화를 새 파일에 다시 싣는다(실측 2개 디렉터리 86건).
+  test("파일을 넘는 같은 응답도 한 번만 센다", () => {
+    const t = tree();
+    const dup = line({ ts: "2026-08-25T10:00:00Z", id: "msg_1", requestId: "req_1" });
+    t.write("a.jsonl", [dup]);
+    t.write("b.jsonl", [
+      dup,
+      line({ ts: "2026-08-25T11:00:00Z", id: "msg_2", requestId: "req_2" }),
+    ]);
+    const memo = createMemo();
+    for (let i = 0; i < 2; i++) {
+      // 두 번째는 메모에서 나온다 — 메모가 중복 제거를 우회하지 않아야 한다.
+      const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW, memo });
+      expect(a.messages).toBe(2);
+      expect(a.totals.input).toBe(20);
+    }
+  });
+
+  test("id 가 없는 줄은 옛 동작대로 줄마다 센다", () => {
+    const t = tree();
+    t.write("a.jsonl", [
+      line({ ts: "2026-08-25T10:00:00Z" }),
+      line({ ts: "2026-08-25T10:00:00Z" }),
+    ]);
+    expect(readTranscripts(t.root, "7d", { home: t.home, now: NOW }).messages).toBe(2);
+  });
+});
+
+describe("서브에이전트 전사", () => {
+  test("<sessionId>/subagents/*.jsonl 을 읽고, 부모 세션이라 세션 수는 늘지 않는다", () => {
+    const t = tree();
+    t.write("s1.jsonl", [line({ ts: "2026-08-25T10:00:00Z", id: "m1", requestId: "r1" })]);
+    t.write("s1/subagents/agent-abc.jsonl", [
+      line({ ts: "2026-08-25T10:01:00Z", id: "m2", requestId: "r2", sidechain: true }),
+      line({ ts: "2026-08-25T10:02:00Z", id: "m3", requestId: "r3", sidechain: true }),
+    ]);
+    // meta 파일과 다른 서브디렉터리는 읽지 않는다.
+    t.write("s1/subagents/agent-abc.meta.json", ['{"agentType":"x"}']);
+    t.write("s1/tool-results/out.jsonl", [line({ ts: "2026-08-25T10:03:00Z", id: "m4" })]);
+    const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW });
+    expect(a.messages).toBe(3);
+    expect(a.sidechainMessages).toBe(2);
+    expect(a.sessions).toBe(1);
+    expect(a.filesRead).toBe(2);
+  });
+
+  test("서브에이전트 파일도 mtime 창과 바이트 상한을 똑같이 따른다", () => {
+    const t = tree();
+    t.write("s1.jsonl", [line({ ts: "2026-08-25T10:00:00Z", id: "m1" })]);
+    t.write(
+      "s1/subagents/agent-old.jsonl",
+      [line({ ts: "2026-07-01T10:00:00Z", id: "m2", sidechain: true })],
+      new Date("2026-07-01T10:00:00Z"),
+    );
+    const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW });
+    expect(a.filesSkipped).toBe(1);
+    expect(a.messages).toBe(1);
   });
 });
