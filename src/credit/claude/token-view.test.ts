@@ -229,7 +229,7 @@ describe("renderTokens", () => {
       KO,
     );
     expect(html).not.toContain("기간을 넓혀 보세요");
-    expect(html).toContain("과소 집계");
+    expect(html).toContain("빠짐없다고 볼 수 없습니다");
   });
 
   test("창 토글은 현재 창만 aria-checked 로 표시한다", () => {

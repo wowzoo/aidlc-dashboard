@@ -53,10 +53,23 @@
  * 그 줄들이 같은 `message.id`·`requestId` 와 같은 usage 를 되풀이한다(스트리밍 중간 줄은 output 만
  * 작다). 줄마다 더하면 거의 두 배가 된다 — 실측: 이 기계 프로젝트 디렉터리 68곳 전체에서 줄 단위
  * 합 340억 대 응답 단위 합 172억, **+97.4%**(디렉터리별 중앙값 +90%, 최대 +160%). 이 저장소
- * 본 전사만 보면 1,294.5M 대 660.1M. 그래서 키 `(message.id, requestId)` 로 묶어 **합계가 가장 큰
- * 줄 하나**를 쓴다. 같은 키는 파일을 넘어서도 나온다(2개 디렉터리 86건 — 세션 재개가 이전 대화를
- * 새 파일에 다시 싣는다) — 그래서 중복 제거는 파일 단위가 아니라 병합 시점에 한다. id 가 없는
- * 줄은 줄마다 따로 센다(옛 동작 그대로, 실측 0건).
+ * 본 전사만 보면 1,294.5M 대 660.1M. 그래서 `message.id` 로 묶어 **합계가 가장 큰 줄 하나**의
+ * usage 를 쓴다. 키에 `requestId` 를 더하지 않는 이유: 한 id 에 서로 다른 requestId 가 붙은 경우가
+ * 0건이었고, 한 사본에만 requestId 가 있으면 같은 응답이 둘로 갈린다. 같은 키 안에서 실측으로
+ * 바뀐 필드는 output·thinking(6,727건)과 cache_creation(2건)뿐이고 서로 반대 방향은 없었다 —
+ * 필드별 max 는 존재하지 않은 조합을 만들 수 있어 줄 하나를 고른다. 같은 키는 파일을 넘어서도
+ * 나온다(2개 디렉터리 86건 — 세션 재개가 이전 대화를 새 파일에 다시 싣는다) — 그래서 중복 제거는
+ * 파일 단위가 아니라 병합 시점에 한다. id 가 없는 줄은 줄마다 따로 센다(옛 동작, 실측 0건).
+ *
+ * 세 가지는 응답 선택과 따로 간다(Codex 검토, 재현 후 반영):
+ * - **시각은 그 응답에서 관측된 가장 늦은 줄**의 것이다. usage 가 같으면 먼저 본 줄이 남는데,
+ *   그 시각을 쓰면 창 경계 직후에 다시 적힌 응답이 통째로 창 밖으로 떨어진다.
+ * - **세션 수는 응답이 아니라 줄에서 센다.** 재개된 세션은 옛 응답을 자기 sessionId 로 다시 싣는다
+ *   (실측 75건) — 고른 줄의 sessionId 만 세면 그 세션이 사라진다. 옛 정의(창 안 usage 줄에서
+ *   관측된 sessionId)를 그대로 둔다.
+ * - **`model: "<synthetic>"` 은 API 응답이 아니다.** Claude Code 가 오류를 대화에 남기려 만든
+ *   레코드로(실측 27건, 전부 `isApiErrorMessage`, 토큰 0) 응답 수·모델 표·세션에 섞이면 안 된다.
+ *   오류 플래그나 0 토큰으로 거르지 않는 이유는 실제 사용량이 남은 오류 응답까지 지우기 때문이다.
  *
  * **서브에이전트 전사도 읽는다.** 서브에이전트 대화는 본 전사가 아니라
  * `<slug>/<sessionId>/subagents/agent-*.jsonl` 에 따로 남는다(같은 폴더의 `*.meta.json` 은 읽지
@@ -176,15 +189,14 @@ export interface TranscriptAggregate {
   sessionTime: SessionTimeAggregate | null;
 }
 
-/** API 응답 하나. 같은 키의 줄 여러 개 중 합계가 가장 큰 줄이다. */
+/** API 응답 하나. usage 는 같은 키의 줄 중 합계가 가장 큰 줄, 시각은 가장 늦은 줄의 것이다. */
 interface Response {
-  /** ISO 타임스탬프. */
+  /** ISO 타임스탬프 — 이 응답에서 관측된 가장 늦은 줄. */
   ts: string;
-  /** `YYYY-MM-DD` (로컬). */
+  /** `YYYY-MM-DD` (로컬, `ts` 기준). */
   day: string;
   model: string;
   totals: TokenTotals;
-  sessionId?: string;
   sidechain: boolean;
 }
 
@@ -196,6 +208,8 @@ interface FileAggregate {
    * 병합 때 어느 몫이 중복인지 더는 알 수 없다.
    */
   responses: Map<string, Response>;
+  /** 날짜 → 그 날짜의 usage 줄에서 관측된 sessionId. 세션 수는 응답이 아니라 줄에서 센다. */
+  sessionsByDay: Map<string, Set<string>>;
   /** 이 파일이 담은 `cost-state` 체크포인트. 실측 파일당 1~3건이라 배열로 둔다. 창 필터와
    *  sessionId 중복 제거는 **병합 시점**에 한다 — 한 세션이 파일 여러 개에 걸칠 수 있다. */
   costStates: SessionCost[];
@@ -480,7 +494,12 @@ function dayKey(ts: string): string | undefined {
 
 /** 파일 하나를 날짜 버킷으로 집계한다. 던지지 않는다. 열 수 없으면 undefined. */
 function parseFile(file: string): FileAggregate | undefined {
-  const agg: FileAggregate = { responses: new Map(), costStates: [], malformedLines: 0 };
+  const agg: FileAggregate = {
+    responses: new Map(),
+    sessionsByDay: new Map(),
+    costStates: [],
+    malformedLines: 0,
+  };
   let lineNo = 0;
 
   const ok = readLines(file, (line) => {
@@ -497,7 +516,6 @@ function parseFile(file: string): FileAggregate | undefined {
       timestamp?: unknown;
       sessionId?: unknown;
       isSidechain?: unknown;
-      requestId?: unknown;
       startTime?: unknown;
       totalDuration?: unknown;
       totalAPIDuration?: unknown;
@@ -543,32 +561,45 @@ function parseFile(file: string): FileAggregate | undefined {
     };
 
     const model = typeof rec.message?.model === "string" ? rec.message.model : "(unknown)";
+    if (model === "<synthetic>") return;
     const id = rec.message?.id;
-    const key =
-      typeof id === "string" && id.length > 0
-        ? `${id}\0${typeof rec.requestId === "string" ? rec.requestId : ""}`
-        : `${file}\0${lineNo}`;
-    const response: Response = {
+    const key = typeof id === "string" && id.length > 0 ? id : `${file}\0${lineNo}`;
+    merge(agg.responses, key, {
       ts: rec.timestamp,
       day,
       model,
       totals,
       sidechain: rec.isSidechain === true,
-      ...(typeof rec.sessionId === "string" ? { sessionId: rec.sessionId } : {}),
-    };
-    keepLarger(agg.responses, key, response);
+    });
+
+    if (typeof rec.sessionId === "string") {
+      let seen = agg.sessionsByDay.get(day);
+      if (seen === undefined) {
+        seen = new Set();
+        agg.sessionsByDay.set(day, seen);
+      }
+      seen.add(rec.sessionId);
+    }
   });
 
   return ok ? agg : undefined;
 }
 
 /**
- * 같은 키면 합계가 큰 쪽을 남긴다. 스트리밍 중간 줄은 output 만 작고 나머지는 같으므로(실측:
- * 서로 다른 줄 15건 모두 output 만 달랐다), 큰 쪽이 그 응답의 최종 usage 다.
+ * 같은 키의 줄을 하나로 합친다. usage 는 합계가 큰 줄의 것(스트리밍 중간 줄은 output·thinking 이
+ * 작다), 시각은 둘 중 늦은 쪽 — 헤더의 "시각은 가장 늦은 줄" 참조. 받은 객체를 고치지 않는다
+ * (메모에 든 파일 집계를 병합이 바꾸면 다음 폴링이 오염된다).
  */
-function keepLarger(into: Map<string, Response>, key: string, r: Response): void {
+function merge(into: Map<string, Response>, key: string, r: Response): void {
   const prev = into.get(key);
-  if (prev === undefined || totalOf(r.totals) > totalOf(prev.totals)) into.set(key, r);
+  if (prev === undefined) {
+    into.set(key, r);
+    return;
+  }
+  const usage = totalOf(r.totals) > totalOf(prev.totals) ? r : prev;
+  const late = r.ts > prev.ts ? r : prev;
+  if (usage === prev && late === prev) return;
+  into.set(key, { ...usage, ts: late.ts, day: late.day });
 }
 
 function memoGet(memo: TranscriptMemo | undefined, key: string): FileAggregate | undefined {
@@ -674,6 +705,7 @@ export function readTranscripts(
   const sessions = new Set<string>();
   // 파일을 넘는 응답 중복 제거(헤더 참조). 창 필터는 다 모은 뒤 날짜 단위로 건다.
   const responses = new Map<string, Response>();
+  const sessionsByDay = new Map<string, Set<string>>();
   // sessionId → 그 세션의 가장 늦은 체크포인트. 누적 총합은 자라기만 하므로 `totalMs` 가 가장 큰
   // 레코드가 최신이다. 파일 순서에 기대지 않는 이유는 한 세션이 파일 여러 개에 걸칠 수 있고
   // (재개), 그때 마지막 파일이 먼저 읽힐 수 있기 때문이다. 이걸 빼먹으면 세션이 이중 계산된다.
@@ -711,7 +743,12 @@ export function readTranscripts(
       if (prev === undefined || cs.totalMs > prev.totalMs) costBySession.set(cs.sessionId, cs);
     }
 
-    for (const [id, r] of agg.responses) keepLarger(responses, id, r);
+    for (const [id, r] of agg.responses) merge(responses, id, r);
+    for (const [day, ids] of agg.sessionsByDay) {
+      const seen = sessionsByDay.get(day);
+      if (seen === undefined) sessionsByDay.set(day, new Set(ids));
+      else for (const s of ids) seen.add(s);
+    }
   }
 
   // 파일 mtime보다 정밀한 2차 필터. 경계는 날짜 단위다 — 그 날의 마지막 응답이 창 안이면 하루를
@@ -734,10 +771,14 @@ export function readTranscripts(
     addTotals(merged.totals, r.totals);
     merged.messages++;
     if (r.sidechain) merged.sidechainMessages++;
-    if (r.sessionId !== undefined) sessions.add(r.sessionId);
     dayTotals.set(r.day, (dayTotals.get(r.day) ?? 0) + totalOf(r.totals));
     if (merged.firstAt === null || r.ts < merged.firstAt) merged.firstAt = r.ts;
     if (merged.lastAt === null || r.ts > merged.lastAt) merged.lastAt = r.ts;
+  }
+  for (const [day, ids] of sessionsByDay) {
+    const last = dayLast.get(day);
+    if (last !== undefined && Date.parse(last) < cutoffMs) continue;
+    for (const id of ids) sessions.add(id);
   }
 
   // 세션 시간: 창에 **온전히 든** 세션만 더하고, 걸친 세션은 세어 밝힌다(위 `straddling` 주석).

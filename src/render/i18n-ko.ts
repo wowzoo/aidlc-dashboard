@@ -702,7 +702,7 @@ const usage: UsageStrings = {
   noteNoTranscripts: (triedPath) =>
     `Claude Code 트랜스크립트를 찾지 못했습니다 (${triedPath}). 이 워크스페이스에서 Claude Code로 실행한 이력이 없거나, 다른 경로에서 실행되었습니다.`,
   noteFilesCapped: (count) =>
-    `트랜스크립트가 커서 오래된 ${count}개 파일을 읽지 않았습니다 — 아래 수치는 그만큼 과소 집계입니다.`,
+    `바이트 상한 때문에 트랜스크립트 파일 ${count}개를 읽지 않았습니다 — 아래 수치가 빠짐없다고 볼 수 없습니다.`,
   noteUnreadableFiles: (count) => `읽지 못한 트랜스크립트 파일 ${count}개.`,
   noteMalformedLines: (count) => `형식이 깨진 줄 ${count}개를 건너뛰었습니다.`,
 };

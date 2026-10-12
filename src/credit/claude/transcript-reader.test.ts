@@ -527,6 +527,64 @@ describe("API 응답 단위 집계", () => {
     }
   });
 
+  // usage 가 같으면 먼저 본 줄이 남는다 — 그 시각을 쓰면 창 경계 직후에 다시 적힌 응답이 통째로
+  // 창 밖으로 떨어진다.
+  test("응답의 시각은 관측된 가장 늦은 줄이다", () => {
+    const t = tree();
+    t.write("a.jsonl", [
+      line({ ts: "2026-08-19T11:59:59Z", id: "msg_1" }),
+      line({ ts: "2026-08-19T12:00:01Z", id: "msg_1" }),
+    ]);
+    // 7d 창은 2026-08-19T12:00:00Z 부터. 날짜 단위 포함이라 같은 날의 마지막 줄이 창 안이면 든다.
+    const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW });
+    expect(a.messages).toBe(1);
+    expect(a.lastAt).toBe("2026-08-19T12:00:01Z");
+  });
+
+  // 한 사본에만 requestId 가 있어도 같은 응답이다(한 id 에 다른 requestId 가 붙은 실측 0건).
+  test("requestId 가 한 사본에만 있어도 한 응답이다", () => {
+    const t = tree();
+    t.write("a.jsonl", [
+      line({ ts: "2026-08-25T10:00:00Z", id: "msg_1", requestId: "req_1" }),
+      line({ ts: "2026-08-25T10:00:00Z", id: "msg_1" }),
+    ]);
+    expect(readTranscripts(t.root, "7d", { home: t.home, now: NOW }).messages).toBe(1);
+  });
+
+  test("<synthetic> 레코드는 API 응답이 아니다", () => {
+    const t = tree();
+    t.write("a.jsonl", [
+      line({
+        ts: "2026-08-25T10:00:00Z",
+        id: "syn_1",
+        model: "<synthetic>",
+        session: "s-err",
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheCreate: 0,
+        thinking: 0,
+      }),
+      line({ ts: "2026-08-25T10:01:00Z", id: "msg_1" }),
+    ]);
+    const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW });
+    expect(a.messages).toBe(1);
+    expect(a.byModel.map((m) => m.model)).toEqual(["claude-opus-5"]);
+    expect(a.sessions).toBe(1);
+  });
+
+  // 재개된 세션은 옛 응답을 자기 sessionId 로 다시 싣는다 — 고른 줄의 세션만 세면 그 세션이 사라진다.
+  test("세션 수는 응답이 아니라 줄에서 센다", () => {
+    const t = tree();
+    const replayed = (session: string) =>
+      line({ ts: "2026-08-25T10:00:00Z", id: "msg_1", session });
+    t.write("a.jsonl", [replayed("s1")]);
+    t.write("b.jsonl", [replayed("s2")]);
+    const a = readTranscripts(t.root, "7d", { home: t.home, now: NOW });
+    expect(a.messages).toBe(1);
+    expect(a.sessions).toBe(2);
+  });
+
   test("id 가 없는 줄은 옛 동작대로 줄마다 센다", () => {
     const t = tree();
     t.write("a.jsonl", [
@@ -555,7 +613,7 @@ describe("서브에이전트 전사", () => {
     expect(a.filesRead).toBe(2);
   });
 
-  test("서브에이전트 파일도 mtime 창과 바이트 상한을 똑같이 따른다", () => {
+  test("서브에이전트 파일도 mtime 창을 똑같이 따른다", () => {
     const t = tree();
     t.write("s1.jsonl", [line({ ts: "2026-08-25T10:00:00Z", id: "m1" })]);
     t.write(

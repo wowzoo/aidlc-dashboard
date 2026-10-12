@@ -733,7 +733,7 @@ const usage: UsageStrings = {
   noteNoTranscripts: (triedPath) =>
     `No Claude Code transcripts found (${triedPath}). Either this workspace was never driven by Claude Code, or it ran from a different path.`,
   noteFilesCapped: (count) =>
-    `The transcripts are large, so ${count} older file(s) were not read — the figures below under-count by that much.`,
+    `${count} transcript file(s) were not read because of the byte cap — the figures below may be incomplete.`,
   noteUnreadableFiles: (count) => `${count} transcript file(s) could not be read.`,
   noteMalformedLines: (count) => `${count} malformed line(s) were skipped.`,
 };
