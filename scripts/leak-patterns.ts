@@ -193,10 +193,7 @@ export const CREDENTIALS: readonly LeakPattern[] = [
 ];
 
 /** Where customer work trees live. Machine-local; absent on a fresh clone. */
-const ACCOUNT_ROOTS = [
-  path.join(os.homedir(), "Development", "ai-dlc", "_accounts"),
-  path.join(os.homedir(), "Documents", "AI-DLC", "_accounts"),
-];
+const ACCOUNT_ROOTS = [path.join(os.homedir(), "Documents", "AI-DLC", "_accounts")];
 
 /**
  * Names too short or generic to match on without drowning the report in noise.
