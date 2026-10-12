@@ -359,4 +359,23 @@ describe("timeline — unit view", () => {
     const html = renderTimeline({ ...base, timing: { ...base.timing, units: [skipped] } }, ko);
     expect(html).toContain(ko.timeline.unitStageSkipped("infrastructure-design"));
   });
+
+  // A lone skip gives the units' window zero width; it must stay a tick.
+  test("a zero-length unit segment is a tick, never a full-width bar", () => {
+    const skipped = { ...unit("infrastructure-design", "PU-A", base.timing.firstTs!, 0) };
+    const html = renderTimeline({ ...base, timing: { ...base.timing, units: [skipped] } }, ko);
+    const block = html.slice(html.indexOf(ko.timeline.unitSummary(1, 1)));
+    expect(block).toContain('class="g-tick');
+    expect(block).not.toContain("width:100.00%");
+  });
+
+  // Every tooltip prints the ledger's UTC stamp; the axis must read the same clock.
+  test("the units' axis reads UTC, with the date where it changes", () => {
+    const a = unit("code-generation", "PU-A", "2026-01-01T22:00:00Z", 3600);
+    const b = unit("code-generation", "PU-B", "2026-01-02T01:00:00Z", 3600);
+    const html = renderTimeline({ ...base, timing: { ...base.timing, units: [a, b] } }, ko);
+    const block = html.slice(html.indexOf(ko.timeline.unitSummary(2, 1)));
+    expect(block).toContain(">01-01 22:00<");
+    expect(block).toContain(">01-02 00:00<");
+  });
 });

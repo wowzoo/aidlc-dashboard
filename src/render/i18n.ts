@@ -569,7 +569,9 @@ export interface TimelineStrings {
   /** One stage's units summed against that stage's bar; `stageHours` absent when no bar. */
   unitVsStage(stage: string, unitHours: string, stageHours?: string): string;
   readonly unitNote: string;
-  readonly inferredStartTip: string;
+  inferredStartTip(firstWrite: string, receipt?: string): string;
+  readonly inferredRowTip: string;
+  readonly durationUnknownTip: string;
   readonly colUnitTrack: string;
   unitStageSkipped(stage: string): string;
   /** Raw markup. */

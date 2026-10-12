@@ -2764,10 +2764,28 @@ None.
 });
 
 describe("unit view", () => {
-  const u = (ts: string, event: string, unit: string, stage = "cg", shard = "s.md") =>
-    ({ ts, event, stage, unit, fields: { Stage: stage, Unit: unit }, shard }) as AuditEvent;
+  const FLOOR = "WORKFLOW_STARTED:2026-01-01T00:00:00Z#1";
+  const u = (
+    ts: string,
+    event: string,
+    unit: string,
+    stage = "cg",
+    shard = "s.md",
+    floor = FLOOR,
+  ) =>
+    ({
+      ts,
+      event,
+      stage,
+      unit,
+      fields: { Stage: stage, Unit: unit, "Run floor": floor },
+      shard,
+    }) as AuditEvent;
   const ev = (ts: string, event: string, shard = "s.md") =>
     ({ ts, event, fields: {}, shard }) as AuditEvent;
+  /** A record write Context-attributed to (stage, unit), as the audit parser leaves it. */
+  const write = (ts: string, unit: string, stage = "cg", shard = "s.md") =>
+    ({ ts, event: "ARTIFACT_CREATED", stage, unit, fields: {}, shard }) as AuditEvent;
 
   test("a pause splits a unit into segments, and the pause is not counted", () => {
     const spans = buildUnitSpans(
@@ -2786,23 +2804,38 @@ describe("unit view", () => {
     expect(spans[0]?.endKind).toBe("completed");
   });
 
-  test("a restart supersedes, a skip is a tick, and an open segment ends at the last event", () => {
+  // Within one attempt the engine acknowledges a repeated start without a receipt; a
+  // start under a new floor is a reopened attempt.
+  test("a repeated start in one attempt is ignored; a start under a new floor supersedes", () => {
+    const reopened = "GATE_REJECTED:2026-01-01T00:30:00Z#1";
     const spans = buildUnitSpans(
       [
         u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A"),
         u("2026-01-01T00:10:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T00:30:00Z", "UNIT_STARTED", "A", "cg", "s.md", reopened),
         u("2026-01-01T00:20:00Z", "UNIT_SKIPPED", "B"),
-        ev("2026-01-01T00:30:00Z", "ARTIFACT_UPDATED"),
+        ev("2026-01-01T00:40:00Z", "ARTIFACT_UPDATED"),
       ],
-      "2026-01-01T00:30:00Z",
+      "2026-01-01T00:40:00Z",
     );
     const a = spans.find((x) => x.unit === "A")!;
-    const b = spans.find((x) => x.unit === "B")!;
     expect(a.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([
-      ["superseded", 600],
-      ["in-flight", 1200],
+      ["superseded", 1800],
+      ["in-flight", 600],
     ]);
+    const b = spans.find((x) => x.unit === "B")!;
     expect(b.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([["skipped", 0]]);
+  });
+
+  test("a skip closes an open segment", () => {
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T00:05:00Z", "UNIT_SKIPPED", "A"),
+      ],
+      "2026-01-01T00:05:00Z",
+    );
+    expect(spans[0]?.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([["skipped", 300]]);
   });
 
   // Under team ownership another clone's unit runs in the same hours; its events are not
@@ -2817,34 +2850,49 @@ describe("unit view", () => {
       ],
       "2026-01-01T00:30:00Z",
     );
-    // Merged, the 30 minutes would be two short observed gaps plus 26 unclassified
-    // minutes; on its own shard it is one unclassified 30-minute gap.
     expect(spans[0]?.unknownSec).toBe(1800);
     expect(spans[0]?.observedSec).toBe(0);
   });
 
+  // The row has to add up even where the running clone's events stop short of the end.
+  test("time the running shard's events do not cover is unclassified, not lost", () => {
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A", "cg", "a.md"),
+        u("2026-01-01T00:20:00Z", "UNIT_COMPLETED", "A", "cg", "b.md"),
+      ],
+      "2026-01-01T00:20:00Z",
+    );
+    const g = spans[0]!;
+    expect(g.elapsedSec).toBe(1200);
+    expect(g.humanWaitSec + g.parkedSec + g.observedSec + g.conversationSec + g.unknownSec).toBe(
+      1200,
+    );
+  });
+
   // The receipt-printing path writes both rows after the work; read literally, the unit
   // took 5 seconds.
-  test("a start receipt written after the work starts at the pair's first recorded event", () => {
-    const art = (ts: string, unit: string, shard = "s.md") =>
-      ({ ts, event: "ARTIFACT_CREATED", stage: "cg", unit, fields: {}, shard }) as AuditEvent;
+  test("a start receipt written after the work starts at the pair's first record write", () => {
     const spans = buildUnitSpans(
       [
         u("2026-01-01T00:00:00Z", "UNIT_COMPLETED", "A", "fd"),
-        art("2026-01-01T00:02:00Z", "A"),
-        art("2026-01-01T00:03:00Z", "B", "other.md"), // another pair, another clone
-        art("2026-01-01T00:20:00Z", "A"),
+        write("2026-01-01T00:02:00Z", "A"),
+        write("2026-01-01T00:03:00Z", "B", "cg", "other.md"), // another pair, another clone
+        // A gate or decision names the pair but is not its work.
+        {
+          ...u("2026-01-01T00:01:00Z", "UNIT_PAUSED", "Z"),
+          event: "PLAN_APPROVAL_RECORDED",
+        } as AuditEvent,
+        write("2026-01-01T00:20:00Z", "A"),
         u("2026-01-01T00:40:00Z", "UNIT_STARTED", "A"),
         u("2026-01-01T00:40:05Z", "UNIT_COMPLETED", "A"),
-        // After the receipt: the checkpoint gate is the stage's, not the unit's.
-        { ...art("2026-01-01T00:50:00Z", "A"), event: "GATE_APPROVED" } as AuditEvent,
       ],
-      "2026-01-01T00:50:00Z",
+      "2026-01-01T00:40:05Z",
     );
     const a = spans.find((x) => x.stage === "cg" && x.unit === "A")!;
-    expect(a.segments.map((g) => [g.startedAt, g.endedAt, g.startInferred])).toEqual([
-      ["2026-01-01T00:02:00Z", "2026-01-01T00:40:05Z", true],
-    ]);
+    expect(
+      a.segments.map((g) => [g.startedAt, g.endedAt, g.startInferred, g.receiptStartedAt]),
+    ).toEqual([["2026-01-01T00:02:00Z", "2026-01-01T00:40:05Z", true, "2026-01-01T00:40:00Z"]]);
     // A receipt that came first needs no inference.
     const plain = buildUnitSpans(
       [
@@ -2854,6 +2902,48 @@ describe("unit view", () => {
       "2026-01-01T00:05:00Z",
     );
     expect(plain[0]?.segments[0]?.startInferred).toBeUndefined();
+  });
+
+  // A reopen is an attempt boundary: the old attempt's writes are not the new one's start.
+  test("a write from before the receipt's run floor never moves a start", () => {
+    const reopened = "GATE_REJECTED:2026-01-01T02:00:00Z#1";
+    const spans = buildUnitSpans(
+      [
+        write("2026-01-01T01:00:00Z", "A"),
+        u("2026-01-01T03:00:00Z", "UNIT_STARTED", "A", "cg", "s.md", reopened),
+        u("2026-01-01T03:10:00Z", "UNIT_COMPLETED", "A", "cg", "s.md", reopened),
+      ],
+      "2026-01-01T03:10:00Z",
+    );
+    expect(spans[0]?.segments[0]?.startedAt).toBe("2026-01-01T03:00:00Z");
+    expect(spans[0]?.segments[0]?.startInferred).toBeUndefined();
+  });
+
+  test("any lifecycle row clears pending writes, a completion with nothing open included", () => {
+    const spans = buildUnitSpans(
+      [
+        write("2026-01-01T00:00:00Z", "A"),
+        u("2026-01-01T00:05:00Z", "UNIT_COMPLETED", "A"), // completion-only, consumes the write
+        u("2026-01-01T01:00:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T01:10:00Z", "UNIT_COMPLETED", "A"),
+      ],
+      "2026-01-01T01:10:00Z",
+    );
+    expect(spans[0]?.segments.map((g) => [g.startedAt, g.startInferred ?? false])).toEqual([
+      ["2026-01-01T00:00:00Z", true],
+      ["2026-01-01T01:00:00Z", false],
+    ]);
+  });
+
+  // A wave or recovery completion writes UNIT_COMPLETED with no start receipt.
+  test("a completion with no start stays visible, with an unknown duration when nothing was written", () => {
+    const spans = buildUnitSpans(
+      [u("2026-01-01T00:05:00Z", "UNIT_COMPLETED", "A")],
+      "2026-01-01T00:05:00Z",
+    );
+    expect(spans.length).toBe(1);
+    expect(spans[0]?.segments[0]?.durationUnknown).toBe(true);
+    expect(spans[0]?.endKind).toBe("completed");
   });
 
   test("buildTiming carries the unit view, and a run with no unit rows has none", () => {

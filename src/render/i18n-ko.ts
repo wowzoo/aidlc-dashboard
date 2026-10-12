@@ -530,21 +530,31 @@ const timeline: TimelineStrings = {
   파랑=진행중 · 점선=재진입으로 대체(그 시도는 끝났고 다시 시작됨). 0초 stage 는 막대가 아니라 눈금.
   <b>어느 stage 가 비쌌는지는 길이가 아니라 「작업 추정」 열로 읽으세요</b> — 가장 긴 막대가 대기로만 채워질 수 있습니다.`,
   colUnitStage: "유닛 · stage",
-  inferredStartTip:
-    "시작은 추정입니다: 이 stage 에서 그 유닛에 귀속된 첫 기록입니다. UNIT_STARTED receipt 는 작업이 끝난 뒤에 찍혀서, receipt 만 보면 이 유닛이 거의 시간을 쓰지 않은 것처럼 보입니다.",
+  inferredStartTip: (firstWrite, receipt) =>
+    receipt
+      ? `시작을 이 stage 에서 유닛의 첫 기록 쓰기(${firstWrite})로 앞당겼습니다. UNIT_STARTED receipt 는 ${receipt} 입니다. 기록상 가장 이른 근거이지 측정된 시작이 아닙니다.`
+      : `UNIT_STARTED receipt 가 없습니다(완료 receipt 만 있음). 시작은 이 stage 에서 유닛의 첫 기록 쓰기(${firstWrite})입니다. 기록상 가장 이른 근거이지 측정된 시작이 아닙니다.`,
+  inferredRowTip:
+    "구간 시작 중 하나 이상이 유닛의 첫 기록 쓰기에서 추정한 값입니다 — 막대 툴팁을 보세요.",
+  durationUnknownTip:
+    "시작 receipt 도, 이 stage 에서 유닛의 기록 쓰기도 없는 완료입니다. 길이를 알 수 없습니다.",
   unitSummary: (units, stages) => `유닛 보기 — stage ${stages}개, 유닛 구간 ${units}행`,
   unitVsStage: (stage, unitHours, stageHours) =>
     stageHours === undefined
-      ? `<b>${stage}</b>: 유닛 ${unitHours}`
-      : `<b>${stage}</b>: 유닛 ${unitHours} · stage 막대 ${stageHours}`,
-  unitStageSkipped: (stage) => `<b>${stage}</b>: 모든 유닛 건너뜀`,
+      ? `<b>${stage}</b>: 유닛 구간 합 ${unitHours}`
+      : `<b>${stage}</b>: 유닛 구간 합 ${unitHours} · stage 막대 ${stageHours}`,
+  unitStageSkipped: (stage) => `<b>${stage}</b>: 기록된 행이 모두 건너뜀`,
   colUnitTrack: "진입 구간 (유닛 구간 기준)",
   unitNote: `유닛 수명 행에서 읽은 값입니다. 구간은 <code>UNIT_STARTED</code> 또는 <code>UNIT_RESUMED</code> 에서
-  열리고 <code>UNIT_PAUSED</code>(점선) 또는 <code>UNIT_COMPLETED</code> 에서 닫히며, <code>UNIT_SKIPPED</code> 는
-  눈금입니다. 시작 receipt 가 작업 뒤에 찍혔으면 그 stage 에서 유닛의 첫 기록을 시작으로 씁니다(막대 툴팁에 표시).
-  구간 안의 분류는 그 유닛을 실행한 clone 의 이벤트로 계산합니다. unit-major 에서는 유닛들이 뒤 stage 를
-  도는 동안 엔진이 Current Stage 를 첫 유닛 단위 stage 에 두므로, 위의 stage 막대는 달력 점유이고 유닛 시간보다 훨씬
-  길 수도 — 뒤 stage 라면 짧을 수도 — 있습니다. 둘은 다른 질문에 답하며, 어느 쪽도 다른 쪽을 바로잡지 않습니다.`,
+  열리고 <code>UNIT_PAUSED</code>(점선) 또는 <code>UNIT_COMPLETED</code> 에서 닫힙니다. <code>UNIT_SKIPPED</code> 는 열린
+  구간을 닫고, 열린 구간이 없으면 눈금입니다. 이 보기는 완료까지이며, 그 뒤의 유닛 체크포인트 작업(검증, 유닛 끝 관문)은
+  들어 있지 않습니다. 시작 receipt 가 작업 뒤에 찍히거나 wave·복구 완료처럼 아예 없을 수 있어서, 같은 시도·같은 clone
+  안에서 그 stage 의 유닛 첫 기록 쓰기를 시작으로 쓸 수 있습니다(행의 <b>~</b>, 자세한 내용은 막대 툴팁). 기록상 가장 이른
+  근거이지 측정된 시작이 아닙니다. 구간 안의 분류는 그 유닛을 실행한 clone 의 이벤트로 계산하고, 그 이벤트가 덮지 못한
+  시간은 미분류입니다. stage 별 수치는 유닛 구간의 <b>합</b>이라 겹치는 유닛은 두 번 셉니다. unit-major 에서는 유닛들이
+  뒤 stage 를 도는 동안 엔진이 Current Stage 를 첫 유닛 단위 stage 에 두므로, 위의 stage 막대는 달력 점유이고 유닛
+  구간보다 훨씬 길 수도 — 뒤 stage 라면 짧을 수도 — 있습니다. 둘은 다른 질문에 답하며, 어느 쪽도 다른 쪽을 바로잡지
+  않습니다.`,
   observedCaveat: `관측 실행은 5분 미만 이벤트 간격과 명시적 위임 구간의 합이며, 순수 모델·CPU 실행 시간이 아님.
   <b>대화</b>는 사람 턴에서 바로 다음 사람 턴까지 — 엔진의 대화 응답은 감사 기록을 남기지 않으므로 그 구간에는
   엔진 작업과 사람이 읽고 입력한 시간이 함께 들어 있고, 원장에 경계가 없어 <b>어느 쪽으로도 계상하지 않습니다</b>.`,

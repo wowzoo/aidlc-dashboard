@@ -558,23 +558,33 @@ const timeline: TimelineStrings = {
   <b>Read which stage was expensive from the «work estimate» column, not from bar length</b> — the longest bar can be
   all waiting.`,
   colUnitStage: "unit · stage",
-  inferredStartTip:
-    "Start inferred: the unit's first recorded event in this stage. Its UNIT_STARTED receipt came later, after the work, so the receipt alone would draw this unit as almost no time.",
+  inferredStartTip: (firstWrite, receipt) =>
+    receipt
+      ? `Start moved back to the unit's first record write in this stage (${firstWrite}); its UNIT_STARTED receipt is at ${receipt}. Earliest recorded evidence, not a measured start.`
+      : `No UNIT_STARTED receipt (a completion-only receipt); the start is the unit's first record write in this stage (${firstWrite}). Earliest recorded evidence, not a measured start.`,
+  inferredRowTip:
+    "At least one segment's start is inferred from the unit's first record write — see the bar's tooltip.",
+  durationUnknownTip:
+    "A completion with no start receipt and no record write of the unit in this stage: the duration is unknown.",
   unitSummary: (units, stages) =>
     `Unit view — ${units} unit segment row${units === 1 ? "" : "s"} across ${stages} stage${stages === 1 ? "" : "s"}`,
   unitVsStage: (stage, unitHours, stageHours) =>
     stageHours === undefined
-      ? `<b>${stage}</b>: units ${unitHours}`
-      : `<b>${stage}</b>: units ${unitHours} · stage bar ${stageHours}`,
-  unitStageSkipped: (stage) => `<b>${stage}</b>: every unit skipped`,
+      ? `<b>${stage}</b>: Σ unit segments ${unitHours}`
+      : `<b>${stage}</b>: Σ unit segments ${unitHours} · stage bar ${stageHours}`,
+  unitStageSkipped: (stage) => `<b>${stage}</b>: every recorded row is a skip`,
   colUnitTrack: "occupancy (units' window)",
   unitNote: `Read from the unit lifecycle rows: a segment opens at <code>UNIT_STARTED</code> or
   <code>UNIT_RESUMED</code> and closes at <code>UNIT_PAUSED</code> (dotted) or <code>UNIT_COMPLETED</code>;
-  <code>UNIT_SKIPPED</code> is a tick. When the start receipt was written after the work, the segment starts at the
-  unit's first recorded event in that stage instead (named in the bar's tooltip). A segment's split is classified on the events of the clone that ran the unit.
-  Under unit-major the engine keeps Current Stage on the first per-unit stage while units walk the later ones, so a
-  stage bar above is calendar occupancy and can be far longer — or, for a later stage, shorter — than its units'
-  time. The two are different questions; neither corrects the other.`,
+  <code>UNIT_SKIPPED</code> closes an open segment and is otherwise a tick. The view runs THROUGH completion — the unit
+  checkpoint work after it (verification, the unit-end gate) is not in it. A start receipt can be written after the
+  work, and a wave or recovery completion has none, so a segment may start at the unit's first record write in the
+  stage instead, within the same attempt and clone (<b>~</b> on the row, details in the bar's tooltip): that is the
+  earliest recorded evidence, not a measured start. A segment's split is classified on the events of the clone that ran
+  the unit; what that clone's events do not cover is unclassified. The per-stage figure is a SUM of unit segments, so
+  overlapping units count twice. Under unit-major the engine keeps Current Stage on the first per-unit stage while units
+  walk the later ones, so a stage bar above is calendar occupancy and can be far longer — or, for a later stage,
+  shorter — than its units' segments. The two answer different questions; neither corrects the other.`,
   observedCaveat: `Observed execution is the sum of sub-5-minute event gaps and explicit delegation spans, not pure
   model or CPU time. <b>Conversation</b> runs from one human turn to the next — the engine's chat reply leaves no audit
   event, so that stretch holds engine work together with the human reading and typing, and with no boundary in the

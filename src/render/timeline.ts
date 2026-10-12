@@ -23,6 +23,9 @@ function trackGeometry(
   runStart: number,
   runSpan: number,
 ): { left: number; width: number; tick: boolean } {
+  // A zero-length segment is a tick whatever the track, or a lone skip on a units'
+  // window of zero width would paint a full-width bar.
+  if (elapsedSec <= 0 && runSpan <= 0) return { left: 0, width: 0, tick: true };
   if (runSpan <= 0) return { left: 0, width: 100, tick: false };
   const left = ((Date.parse(startedAt) - runStart) / 1000 / runSpan) * 100;
   const width = (elapsedSec / runSpan) * 100;
@@ -110,14 +113,21 @@ function trackBars(
         return `<span class="g-tick k-${kindClass(segment.endKind)}" style="left:${g.left.toFixed(
           2,
         )}%" title="${esc(
-          `${segmentTip(name, segment, s)}\n${s.timeline.zeroSecondTip}`,
+          `${segmentTip(name, segment, s)}\n${
+            "durationUnknown" in segment && segment.durationUnknown
+              ? s.timeline.durationUnknownTip
+              : s.timeline.zeroSecondTip
+          }`,
         )}"></span>`;
       }
       return `<span class="g-bar k-${kindClass(segment.endKind)}" style="left:${g.left.toFixed(
         2,
       )}%;width:${g.width.toFixed(2)}%" title="${esc(
         "startInferred" in segment && segment.startInferred
-          ? `${segmentTip(name, segment, s)}\n${s.timeline.inferredStartTip}`
+          ? `${segmentTip(name, segment, s)}\n${s.timeline.inferredStartTip(
+              shortTs(segment.startedAt),
+              segment.receiptStartedAt ? shortTs(segment.receiptStartedAt) : undefined,
+            )}`
           : segmentTip(name, segment, s),
       )}">${fill}</span>`;
     })
@@ -125,8 +135,8 @@ function trackBars(
 }
 
 /** The numeric cells every Gantt row shares, after the track. */
-function splitCells(g: GapSplit & { elapsedSec: number }): string {
-  return `<td class="g-n">${esc(mins(g.elapsedSec))}</td>
+function splitCells(g: GapSplit & { elapsedSec: number }, durationUnknown = false): string {
+  return `<td class="g-n">${durationUnknown ? "—" : esc(mins(g.elapsedSec))}</td>
   <td class="g-n wait">${esc(mins(g.humanWaitSec))}</td>
   <td class="g-n parked">${esc(mins(g.parkedSec))}</td>
   <td class="g-n work">${esc(mins(g.observedSec))}</td>
@@ -176,10 +186,16 @@ function unitBlock(t: TimingReport, s: Strings): string {
   const rows = t.units
     .map((u: UnitSpan) => {
       const name = `${u.stage} · ${u.unit}`;
+      const inferred = u.segments.some((g) => g.startInferred);
       return `<tr>
-  <th class="g-name" title="${esc(name)}">${esc(u.unit)}<span class="mute"> · ${esc(u.stage)}</span></th>
+  <th class="g-name" title="${esc(name)}">${esc(u.unit)}<span class="mute"> · ${esc(u.stage)}</span>${
+    inferred ? `<span class="prov-mark" title="${esc(x.inferredRowTip)}">~</span>` : ""
+  }</th>
   <td class="g-track"><div class="g-track-line">${trackBars(name, u.segments, runStart, runSpan, s)}</div></td>
-  ${splitCells(u)}
+  ${splitCells(
+    u,
+    u.segments.every((g) => g.durationUnknown),
+  )}
 </tr>`;
     })
     .join("\n");
@@ -491,11 +507,17 @@ function axis(runStart: number, runSpan: number, silenceSec: number, s: Strings)
   const pad = (n: number): string => String(n).padStart(2, "0");
   const byTime = runSpan < 36 * 3600;
   const marks: string[] = [];
+  let lastDay = "";
   for (let i = 0; i <= ticks; i++) {
+    // UTC, the clock every tooltip on this panel prints (`shortTs` reads the ledger's own
+    // `…Z` stamp) — a server-local axis under UTC tooltips put two times on one instant.
     const at = new Date(runStart + (runSpan * 1000 * i) / ticks);
-    const label = byTime
-      ? `${pad(at.getHours())}:${pad(at.getMinutes())}`
-      : `${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+    const day = `${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}`;
+    const time = `${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}`;
+    // A time-of-day axis names the date where it changes, so a midnight crossing does not
+    // repeat one clock reading for two days.
+    const label = !byTime ? day : day !== lastDay ? `${day} ${time}` : time;
+    lastDay = day;
     marks.push(
       `<span class="ax-t" style="left:${((i / ticks) * 100).toFixed(2)}%">${esc(label)}</span>`,
     );
