@@ -455,6 +455,7 @@ const timeline: TimelineStrings = {
     "awaiting-approval": "awaiting approval",
     "in-flight": "in flight",
     superseded: "superseded by re-entry",
+    paused: "paused",
   },
   segmentTip: (stage, endKind, from, to, split) =>
     `${stage} — ${endKind}\n${from} → ${to}\n${split}`,
@@ -556,6 +557,24 @@ const timeline: TimelineStrings = {
   (that attempt ended and the stage started again). A 0-second stage gets a tick, not a bar.
   <b>Read which stage was expensive from the «work estimate» column, not from bar length</b> — the longest bar can be
   all waiting.`,
+  colUnitStage: "unit · stage",
+  inferredStartTip:
+    "Start inferred: the unit's first recorded event in this stage. Its UNIT_STARTED receipt came later, after the work, so the receipt alone would draw this unit as almost no time.",
+  unitSummary: (units, stages) =>
+    `Unit view — ${units} unit segment row${units === 1 ? "" : "s"} across ${stages} stage${stages === 1 ? "" : "s"}`,
+  unitVsStage: (stage, unitHours, stageHours) =>
+    stageHours === undefined
+      ? `<b>${stage}</b>: units ${unitHours}`
+      : `<b>${stage}</b>: units ${unitHours} · stage bar ${stageHours}`,
+  unitStageSkipped: (stage) => `<b>${stage}</b>: every unit skipped`,
+  colUnitTrack: "occupancy (units' window)",
+  unitNote: `Read from the unit lifecycle rows: a segment opens at <code>UNIT_STARTED</code> or
+  <code>UNIT_RESUMED</code> and closes at <code>UNIT_PAUSED</code> (dotted) or <code>UNIT_COMPLETED</code>;
+  <code>UNIT_SKIPPED</code> is a tick. When the start receipt was written after the work, the segment starts at the
+  unit's first recorded event in that stage instead (named in the bar's tooltip). A segment's split is classified on the events of the clone that ran the unit.
+  Under unit-major the engine keeps Current Stage on the first per-unit stage while units walk the later ones, so a
+  stage bar above is calendar occupancy and can be far longer — or, for a later stage, shorter — than its units'
+  time. The two are different questions; neither corrects the other.`,
   observedCaveat: `Observed execution is the sum of sub-5-minute event gaps and explicit delegation spans, not pure
   model or CPU time. <b>Conversation</b> runs from one human turn to the next — the engine's chat reply leaves no audit
   event, so that stretch holds engine work together with the human reading and typing, and with no boundary in the

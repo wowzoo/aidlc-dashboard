@@ -221,7 +221,9 @@ export type StageEndKind =
   | "skipped"
   | "awaiting-approval"
   | "in-flight"
-  | "superseded";
+  | "superseded"
+  /** A unit segment closed by `UNIT_PAUSED` — unit spans only; a stage never pauses. */
+  | "paused";
 
 export interface StageSegment extends GapSplit {
   startedAt: string;
@@ -241,6 +243,51 @@ export interface StageSpan extends GapSplit {
   /** Separate entries after a backward jump; gaps between entries are excluded. */
   segments: StageSegment[];
   workload: Workload;
+}
+
+/**
+ * One unit's time in one per-unit stage, read from the unit lifecycle rows.
+ *
+ * WHY A SECOND VIEW. Under unit-major the engine keeps `Current Stage` on the block's
+ * first per-unit stage while the units walk the later ones (aidlc-orchestrate.ts), so
+ * that stage's `STAGE_STARTED → STAGE_COMPLETED` covers every later stage the units
+ * walked. A stage bar is calendar occupancy and says so; it cannot say how long each
+ * unit spent where. The ledger can: `UNIT_STARTED` / `UNIT_PAUSED` / `UNIT_RESUMED` /
+ * `UNIT_COMPLETED` / `UNIT_SKIPPED` carry `Stage` and `Unit` (audit-format.md), so a
+ * unit segment opens at a start or resume and closes at a pause or completion.
+ *
+ * A segment's split is classified on the events of the shard that opened it, inside its
+ * window — the shard is the clone that ran the unit, and under team ownership another
+ * clone's unit runs in the same hours. `UNIT_SKIPPED` is a zero-length segment (a tick),
+ * a start while the segment is open supersedes it, and a segment still open at the end
+ * ends at the last event, as a stage does.
+ *
+ * A RECEIPT CAN BE MINTED AFTER THE WORK. The protocol brackets a unit with `unit start`
+ * before its body (stage-protocol-construction.md, "Unit lifecycle receipts"), but when a
+ * unit's files and review are recorded without a receipt, `next` prints the receipt
+ * commands instead of the body — so both rows land at the end. Measured on a 2.10 tree:
+ * every code-generation unit had `UNIT_STARTED` 0–5s before `UNIT_COMPLETED`, while its
+ * plan, plan approval, writes and review ran over the 43 minutes before. Read literally,
+ * the view drew those units as 0 minutes. So a segment opened by `UNIT_STARTED` starts at
+ * the FIRST event attributed to the same (stage, unit) in the same shard since that pair
+ * last closed, when one comes earlier — `startInferred` says so on screen. The end stays
+ * the receipt's: work after `UNIT_COMPLETED` (a checkpoint gate) is the stage's, not the
+ * unit's, and a resume is a recorded boundary that needs no inference.
+ */
+export interface UnitSegment extends StageSegment {
+  /** The start is the pair's first attributed event, not its later `UNIT_STARTED`. */
+  startInferred?: boolean;
+}
+
+export interface UnitSpan extends GapSplit {
+  stage: string;
+  unit: string;
+  startedAt: string;
+  endedAt: string;
+  endKind: StageEndKind;
+  /** Sum of the segments, pauses excluded. */
+  elapsedSec: number;
+  segments: UnitSegment[];
 }
 
 /**
@@ -314,6 +361,8 @@ export interface WorkerSpan {
 export interface TimingReport {
   /** Stages in first-seen (run) order. */
   stages: StageSpan[];
+  /** Unit segments by (stage, unit), in first-start order. Empty when no unit row exists. */
+  units: UnitSpan[];
   /**
    * Gap split over the MERGED timeline. Correct for a single-clone run; for a
    * parallel one it under-reports idle (see WorkerSpan). `parallel` below says
@@ -705,6 +754,136 @@ export function buildWorkers(events: AuditEvent[]): WorkerSpan[] {
   return out.sort((a, b) => b.events - a.events);
 }
 
+/** Sum a GapSplit field over segments. */
+function sumSplit(segments: readonly GapSplit[]): GapSplit {
+  const sum = (pick: (g: GapSplit) => number): number => segments.reduce((n, g) => n + pick(g), 0);
+  const humanWaitSec = sum((g) => g.humanWaitSec);
+  const parkedSec = sum((g) => g.parkedSec);
+  const observedSec = sum((g) => g.observedSec);
+  const unknownSec = sum((g) => g.unknownSec);
+  const delegatedSec = sum((g) => g.delegatedSec);
+  const unknown = segments.flatMap((g) => g.unknown);
+  return {
+    humanWaitSec,
+    parkedSec,
+    inferredParkSec: sum((g) => g.inferredParkSec),
+    observedSec,
+    conversationSec: sum((g) => g.conversationSec),
+    unknownSec,
+    delegatedSec,
+    parkAnomalies: sum((g) => g.parkAnomalies),
+    unknown,
+    idleSec: humanWaitSec + parkedSec,
+    agentSec: delegatedSec,
+    workSec: observedSec + unknownSec,
+    suspect: unknown,
+  };
+}
+
+/**
+ * The unit view — see `UnitSpan`. `events` is the analysed window, time-ordered;
+ * `lastTs` is its last event, where a still-open segment ends.
+ */
+export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): UnitSpan[] {
+  interface Open {
+    startedAt: string;
+    shard: string;
+    startInferred?: boolean;
+  }
+  interface Raw extends Open {
+    endedAt: string;
+    endKind: StageEndKind;
+  }
+  const open = new Map<string, Open>();
+  const raw = new Map<string, Raw[]>();
+  const order: { key: string; stage: string; unit: string }[] = [];
+  // pair → shard → the first event attributed to that pair since it last closed: the
+  // inferred start of a receipt minted after the work (see `UnitSegment`).
+  const firstSince = new Map<string, Map<string, string>>();
+  const keyOf = (stage: string, unit: string): string => `${stage}\0${unit}`;
+  const close = (key: string, endedAt: string, endKind: StageEndKind): void => {
+    const current = open.get(key);
+    if (!current) return;
+    raw.get(key)!.push({ ...current, endedAt, endKind });
+    open.delete(key);
+    firstSince.delete(key);
+  };
+
+  for (const e of events) {
+    if (!e.event.startsWith("UNIT_")) {
+      const stage = e.fields.Stage || e.stage;
+      const unit = e.fields.Unit || e.unit;
+      if (!stage || !unit) continue;
+      const key = keyOf(stage, unit);
+      if (open.has(key)) continue;
+      const byShard = firstSince.get(key) ?? new Map<string, string>();
+      if (!byShard.has(e.shard)) byShard.set(e.shard, e.ts);
+      firstSince.set(key, byShard);
+      continue;
+    }
+    const stage = e.fields.Stage;
+    const unit = e.fields.Unit;
+    if (!stage || !unit) continue;
+    const key = keyOf(stage, unit);
+    if (!raw.has(key)) {
+      raw.set(key, []);
+      order.push({ key, stage, unit });
+    }
+    if (e.event === "UNIT_STARTED") {
+      close(key, e.ts, "superseded");
+      const earlier = firstSince.get(key)?.get(e.shard);
+      open.set(
+        key,
+        earlier !== undefined && earlier < e.ts
+          ? { startedAt: earlier, shard: e.shard, startInferred: true }
+          : { startedAt: e.ts, shard: e.shard },
+      );
+      firstSince.delete(key);
+    } else if (e.event === "UNIT_RESUMED") {
+      if (!open.has(key)) open.set(key, { startedAt: e.ts, shard: e.shard });
+      firstSince.delete(key);
+    } else if (e.event === "UNIT_PAUSED") {
+      close(key, e.ts, "paused");
+    } else if (e.event === "UNIT_COMPLETED") {
+      close(key, e.ts, "completed");
+    } else if (e.event === "UNIT_SKIPPED") {
+      if (open.has(key)) close(key, e.ts, "skipped");
+      else {
+        raw.get(key)!.push({ startedAt: e.ts, endedAt: e.ts, endKind: "skipped", shard: e.shard });
+        firstSince.delete(key);
+      }
+    }
+  }
+  for (const key of open.keys()) close(key, lastTs, "in-flight");
+
+  const out: UnitSpan[] = [];
+  for (const { key, stage, unit } of order) {
+    const list = raw.get(key)!;
+    if (list.length === 0) continue;
+    const segments: UnitSegment[] = list.map((g) => ({
+      startedAt: g.startedAt,
+      endedAt: g.endedAt,
+      endKind: g.endKind,
+      ...(g.startInferred ? { startInferred: true } : {}),
+      elapsedSec: secs(g.startedAt, g.endedAt),
+      ...classifyGaps(
+        events.filter((e) => e.shard === g.shard && e.ts >= g.startedAt && e.ts <= g.endedAt),
+      ),
+    }));
+    out.push({
+      stage,
+      unit,
+      startedAt: segments[0]!.startedAt,
+      endedAt: segments[segments.length - 1]!.endedAt,
+      endKind: segments[segments.length - 1]!.endKind,
+      elapsedSec: segments.reduce((n, g) => n + g.elapsedSec, 0),
+      segments,
+      ...sumSplit(segments),
+    });
+  }
+  return out.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+}
+
 /** The local 00/06/12/18 boundary at or before `ms`. */
 function binFloor(ms: number): number {
   const d = new Date(ms);
@@ -774,6 +953,7 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
   if (ledger.events.length === 0) {
     return {
       stages: [],
+      units: [],
       total: classifyGaps([]),
       sinceLastEventSec: 0,
       elapsedSec: 0,
@@ -931,6 +1111,7 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
   }
 
   const workers = buildWorkers(actual);
+  const units = buildUnitSpans(actual, lastActualTs);
   const elapsedSec = secs(firstTs, endTs);
   const personElapsedSec = workers.reduce((n, w) => n + w.elapsedSec, 0);
 
@@ -967,6 +1148,7 @@ export function buildTiming(ledger: AuditLedger, nowTs?: string): TimingReport {
 
   return {
     stages,
+    units,
     total,
     firstTs,
     lastTs: endTs,

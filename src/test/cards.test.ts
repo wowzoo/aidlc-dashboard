@@ -14,10 +14,11 @@ import {
   renderUnitCard,
   renderUnresolvedCard,
 } from "../render/cards";
-import { esc } from "../render/common";
+import { esc, hours } from "../render/common";
 import { strings } from "../render/i18n";
 import { STAGE_GLYPH } from "../render/overview";
 import { renderPage } from "../render/page";
+import { renderTimeline } from "../render/timeline";
 import type { MatrixCell } from "../scan/matrix";
 import type { StageStatus } from "../scan/parser";
 
@@ -293,3 +294,69 @@ function treeText(m: DashboardModel): string[] {
     ...m.blockers.map((b) => b.heading),
   ];
 }
+
+describe("timeline — unit view", () => {
+  const ko = strings("ko");
+  const unit = (stage: string, unitName: string, startedAt: string, sec: number) => {
+    const endedAt = new Date(Date.parse(startedAt) + sec * 1000).toISOString().replace(".000", "");
+    const split = {
+      humanWaitSec: 0,
+      parkedSec: 0,
+      inferredParkSec: 0,
+      observedSec: sec,
+      conversationSec: 0,
+      unknownSec: 0,
+      delegatedSec: 0,
+      parkAnomalies: 0,
+      unknown: [],
+      idleSec: 0,
+      agentSec: 0,
+      workSec: sec,
+      suspect: [],
+    };
+    return {
+      stage,
+      unit: unitName,
+      startedAt,
+      endedAt,
+      endKind: "completed" as const,
+      elapsedSec: sec,
+      segments: [{ startedAt, endedAt, endKind: "completed" as const, elapsedSec: sec, ...split }],
+      ...split,
+    };
+  };
+
+  test("no unit rows, no unit block", () => {
+    expect(base.timing.units).toEqual([]);
+    expect(renderTimeline(base, ko)).not.toContain(ko.timeline.unitNote);
+  });
+
+  // The point of the block: a unit-major stage bar is calendar occupancy, so each stage
+  // the units touched sets their summed time beside that bar.
+  test("each unit gets a row, and each stage sets its units' time beside its bar", () => {
+    const sp = base.timing.stages.find((t) => t.stage === "code-generation")!;
+    const m: DashboardModel = {
+      ...base,
+      timing: {
+        ...base.timing,
+        units: [
+          unit("code-generation", "PU-A", sp.startedAt, 600),
+          unit("code-generation", "PU-B", sp.startedAt, 1200),
+        ],
+      },
+    };
+    const html = renderTimeline(m, ko);
+    expect(html).toContain(ko.timeline.unitSummary(2, 1));
+    expect(html).toContain("PU-A");
+    expect(html).toContain("PU-B");
+    expect(html).toContain(ko.timeline.unitVsStage("code-generation", "30m", hours(sp.elapsedSec)));
+  });
+
+  test("a stage whose units were all skipped says so instead of 0 hours", () => {
+    const skipped = { ...unit("infrastructure-design", "PU-A", base.timing.firstTs!, 0) };
+    skipped.endKind = "skipped" as never;
+    skipped.segments = skipped.segments.map((g) => ({ ...g, endKind: "skipped" as never }));
+    const html = renderTimeline({ ...base, timing: { ...base.timing, units: [skipped] } }, ko);
+    expect(html).toContain(ko.timeline.unitStageSkipped("infrastructure-design"));
+  });
+});

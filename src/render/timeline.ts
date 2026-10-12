@@ -4,7 +4,15 @@
 // execution, or unknown. Unknown is deliberately not painted as execution.
 
 import type { DashboardModel } from "../model/types";
-import type { GapSplit, StageEndKind, StageSpan, TimingReport } from "../scan/timing";
+import type {
+  GapSplit,
+  StageEndKind,
+  StageSegment,
+  StageSpan,
+  TimingReport,
+  UnitSegment,
+  UnitSpan,
+} from "../scan/timing";
 import { esc, hours, mins, pill, section, shortTs } from "./common";
 import type { Strings } from "./i18n";
 
@@ -32,6 +40,7 @@ function kindClass(kind: StageEndKind): string {
   if (kind === "skipped") return "skip";
   if (kind === "awaiting-approval") return "await";
   if (kind === "superseded") return "sup";
+  if (kind === "paused") return "pause";
   return "live";
 }
 
@@ -57,8 +66,15 @@ function segmentTip(
   );
 }
 
-function ganttRow(sp: StageSpan, runStart: number, runSpan: number, s: Strings): string {
-  const bars = sp.segments
+/** The bars of one row — a stage's or a unit's segments on the run track. */
+function trackBars(
+  name: string,
+  segments: readonly (StageSegment | UnitSegment)[],
+  runStart: number,
+  runSpan: number,
+  s: Strings,
+): string {
+  return segments
     .map((segment) => {
       const g = trackGeometry(segment.startedAt, segment.elapsedSec, runStart, runSpan);
       // FILL THE BAR WITH THE SPLIT, not with the end kind. Bar width is calendar
@@ -94,16 +110,33 @@ function ganttRow(sp: StageSpan, runStart: number, runSpan: number, s: Strings):
         return `<span class="g-tick k-${kindClass(segment.endKind)}" style="left:${g.left.toFixed(
           2,
         )}%" title="${esc(
-          `${segmentTip(sp.stage, segment, s)}\n${s.timeline.zeroSecondTip}`,
+          `${segmentTip(name, segment, s)}\n${s.timeline.zeroSecondTip}`,
         )}"></span>`;
       }
       return `<span class="g-bar k-${kindClass(segment.endKind)}" style="left:${g.left.toFixed(
         2,
       )}%;width:${g.width.toFixed(2)}%" title="${esc(
-        segmentTip(sp.stage, segment, s),
+        "startInferred" in segment && segment.startInferred
+          ? `${segmentTip(name, segment, s)}\n${s.timeline.inferredStartTip}`
+          : segmentTip(name, segment, s),
       )}">${fill}</span>`;
     })
     .join("");
+}
+
+/** The numeric cells every Gantt row shares, after the track. */
+function splitCells(g: GapSplit & { elapsedSec: number }): string {
+  return `<td class="g-n">${esc(mins(g.elapsedSec))}</td>
+  <td class="g-n wait">${esc(mins(g.humanWaitSec))}</td>
+  <td class="g-n parked">${esc(mins(g.parkedSec))}</td>
+  <td class="g-n work">${esc(mins(g.observedSec))}</td>
+  <td class="g-n conv">${esc(mins(g.conversationSec))}</td>
+  <td class="g-n unknown">${esc(mins(g.unknownSec))}</td>
+  <td class="g-n attn"><b>${esc(mins(g.workSec))}</b></td>`;
+}
+
+function ganttRow(sp: StageSpan, runStart: number, runSpan: number, s: Strings): string {
+  const bars = trackBars(sp.stage, sp.segments, runStart, runSpan, s);
   // Abbreviated so the column stays one line; the full text is the cell tooltip.
   const t = s.timeline;
   const load = [
@@ -120,15 +153,73 @@ function ganttRow(sp: StageSpan, runStart: number, runSpan: number, s: Strings):
   return `<tr>
   <th class="g-name">${esc(sp.stage)}</th>
   <td class="g-track"><div class="g-track-line">${bars}</div></td>
-  <td class="g-n">${esc(mins(sp.elapsedSec))}</td>
-  <td class="g-n wait">${esc(mins(sp.humanWaitSec))}</td>
-  <td class="g-n parked">${esc(mins(sp.parkedSec))}</td>
-  <td class="g-n work">${esc(mins(sp.observedSec))}</td>
-  <td class="g-n conv">${esc(mins(sp.conversationSec))}</td>
-  <td class="g-n unknown">${esc(mins(sp.unknownSec))}</td>
-  <td class="g-n attn"><b>${esc(mins(sp.workSec))}</b></td>
+  ${splitCells(sp)}
   <td class="g-load" title="${esc(load)}">${esc(load)}</td>
 </tr>`;
+}
+
+/**
+ * The unit view — one row per (stage, unit) from the unit lifecycle rows, on the same
+ * track as the stage Gantt. See `UnitSpan` for why it exists: under unit-major one
+ * stage's bar covers every later stage the units walked, so the stage table cannot say
+ * where each unit's time went. Each stage the units touched also gets one line setting
+ * the units' summed time beside that stage's bar, because the two answer different
+ * questions and the gap between them is the point.
+ */
+function unitBlock(t: TimingReport, s: Strings): string {
+  if (t.units.length === 0) return "";
+  const x = s.timeline;
+  // The units' own window, not the run's: Construction is often a sliver at the end of
+  // the run track, which drew every unit bar as a dot.
+  const runStart = Math.min(...t.units.map((u) => Date.parse(u.startedAt)));
+  const runSpan = (Math.max(...t.units.map((u) => Date.parse(u.endedAt))) - runStart) / 1000;
+  const rows = t.units
+    .map((u: UnitSpan) => {
+      const name = `${u.stage} · ${u.unit}`;
+      return `<tr>
+  <th class="g-name" title="${esc(name)}">${esc(u.unit)}<span class="mute"> · ${esc(u.stage)}</span></th>
+  <td class="g-track"><div class="g-track-line">${trackBars(name, u.segments, runStart, runSpan, s)}</div></td>
+  ${splitCells(u)}
+</tr>`;
+    })
+    .join("\n");
+  const byStage = new Map<string, { sec: number; skippedOnly: boolean }>();
+  for (const u of t.units) {
+    const row = byStage.get(u.stage) ?? { sec: 0, skippedOnly: true };
+    row.sec += u.elapsedSec;
+    row.skippedOnly &&= u.segments.every((g) => g.endKind === "skipped");
+    byStage.set(u.stage, row);
+  }
+  const compare = [...byStage]
+    .map(([stage, { sec, skippedOnly }]) => {
+      if (skippedOnly) return x.unitStageSkipped(esc(stage));
+      const bar = t.stages.find((sp) => sp.stage === stage);
+      return x.unitVsStage(
+        esc(stage),
+        esc(hours(sec)),
+        bar ? esc(hours(bar.elapsedSec)) : undefined,
+      );
+    })
+    .join(" · ");
+  return `<details open><summary>${esc(x.unitSummary(t.units.length, byStage.size))}</summary>
+<div class="timeline-table-wrap"><table class="tbl gantt">
+  <thead><tr><th>${esc(x.colUnitStage)}</th><th class="g-track-h">${esc(x.colUnitTrack)}${axis(
+    runStart,
+    runSpan,
+    0,
+    s,
+  )}</th><th>${esc(x.colTotalMin)}</th><th>${esc(x.colWait)}</th><th>${esc(
+    x.colParked,
+  )}</th><th>${esc(x.colObserved)}</th><th title="${esc(x.colConversationTip)}">${esc(
+    x.colConversation,
+  )}</th><th>${esc(x.colUnknown)}</th><th title="${esc(x.colWorkEstimateTip)}">${esc(
+    x.colWorkEstimate,
+  )}</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table></div>
+<p class="note">${compare}</p>
+<p class="note">${x.unitNote}</p>
+</details>`;
 }
 
 function pct(value: number, total: number): string {
@@ -385,23 +476,37 @@ ${par ? `<p class="note">${x.parallelismNote}</p>` : ""}
  * (which bars no longer cover, since 1차) had nothing to name it.
  */
 function trackAxis(t: TimingReport, runStart: number, runSpan: number, s: Strings): string {
-  if (!t.firstTs || runSpan <= 0) return "";
+  if (!t.firstTs) return "";
+  return axis(runStart, runSpan, t.sinceLastEventSec, s);
+}
+
+/**
+ * Five ticks over `runSpan` seconds from `runStart`, plus the unrecorded tail as a band.
+ * Dates where the track spans days; times of day where it spans less — five "10-06"
+ * labels under a 19-hour track said nothing.
+ */
+function axis(runStart: number, runSpan: number, silenceSec: number, s: Strings): string {
+  if (runSpan <= 0) return "";
   const ticks = 4;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const byTime = runSpan < 36 * 3600;
   const marks: string[] = [];
   for (let i = 0; i <= ticks; i++) {
     const at = new Date(runStart + (runSpan * 1000 * i) / ticks);
-    const label = `${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+    const label = byTime
+      ? `${pad(at.getHours())}:${pad(at.getMinutes())}`
+      : `${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
     marks.push(
       `<span class="ax-t" style="left:${((i / ticks) * 100).toFixed(2)}%">${esc(label)}</span>`,
     );
   }
   // The silence gets its own shaded band so it is visibly outside the bars.
   const silence =
-    t.sinceLastEventSec > 0
-      ? `<span class="ax-gap" style="left:${(
-          ((runSpan - t.sinceLastEventSec) / runSpan) * 100
-        ).toFixed(2)}%;width:${((t.sinceLastEventSec / runSpan) * 100).toFixed(2)}%" title="${esc(
-          s.timeline.axisSilenceTip(hours(t.sinceLastEventSec)),
+    silenceSec > 0
+      ? `<span class="ax-gap" style="left:${(((runSpan - silenceSec) / runSpan) * 100).toFixed(
+          2,
+        )}%;width:${((silenceSec / runSpan) * 100).toFixed(2)}%" title="${esc(
+          s.timeline.axisSilenceTip(hours(silenceSec)),
         )}"></span>`
       : "";
   return `<div class="g-axis">${silence}${marks.join("")}</div>`;
@@ -515,6 +620,7 @@ ${workerTable(t, s)}`;
 </table></div>
 <p class="note">${x.ganttLegend}</p>
 <p class="note warn">${x.observedCaveat}</p>
+${unitBlock(t, s)}
 ${
   unknown
     ? `<details><summary>${esc(

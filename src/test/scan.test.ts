@@ -34,6 +34,7 @@ import {
   type GapSplit,
   buildBins,
   buildTiming,
+  buildUnitSpans,
   buildWorkers,
   classifyGaps,
   shardLabel,
@@ -2759,6 +2760,112 @@ None.
         ownerStatus: "unassigned",
       });
     });
+  });
+});
+
+describe("unit view", () => {
+  const u = (ts: string, event: string, unit: string, stage = "cg", shard = "s.md") =>
+    ({ ts, event, stage, unit, fields: { Stage: stage, Unit: unit }, shard }) as AuditEvent;
+  const ev = (ts: string, event: string, shard = "s.md") =>
+    ({ ts, event, fields: {}, shard }) as AuditEvent;
+
+  test("a pause splits a unit into segments, and the pause is not counted", () => {
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A"),
+        ev("2026-01-01T00:01:00Z", "ARTIFACT_UPDATED"),
+        u("2026-01-01T00:02:00Z", "UNIT_PAUSED", "A"),
+        u("2026-01-01T05:00:00Z", "UNIT_RESUMED", "A"),
+        u("2026-01-01T05:03:00Z", "UNIT_COMPLETED", "A"),
+      ],
+      "2026-01-01T05:03:00Z",
+    );
+    expect(spans.length).toBe(1);
+    expect(spans[0]?.segments.map((g) => g.endKind)).toEqual(["paused", "completed"]);
+    expect(spans[0]?.elapsedSec).toBe(300);
+    expect(spans[0]?.endKind).toBe("completed");
+  });
+
+  test("a restart supersedes, a skip is a tick, and an open segment ends at the last event", () => {
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T00:10:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T00:20:00Z", "UNIT_SKIPPED", "B"),
+        ev("2026-01-01T00:30:00Z", "ARTIFACT_UPDATED"),
+      ],
+      "2026-01-01T00:30:00Z",
+    );
+    const a = spans.find((x) => x.unit === "A")!;
+    const b = spans.find((x) => x.unit === "B")!;
+    expect(a.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([
+      ["superseded", 600],
+      ["in-flight", 1200],
+    ]);
+    expect(b.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([["skipped", 0]]);
+  });
+
+  // Under team ownership another clone's unit runs in the same hours; its events are not
+  // this unit's gaps.
+  test("a segment's split reads only the shard that ran the unit", () => {
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A", "cg", "a.md"),
+        ev("2026-01-01T00:02:00Z", "ARTIFACT_UPDATED", "b.md"),
+        ev("2026-01-01T00:04:00Z", "ARTIFACT_UPDATED", "b.md"),
+        u("2026-01-01T00:30:00Z", "UNIT_COMPLETED", "A", "cg", "a.md"),
+      ],
+      "2026-01-01T00:30:00Z",
+    );
+    // Merged, the 30 minutes would be two short observed gaps plus 26 unclassified
+    // minutes; on its own shard it is one unclassified 30-minute gap.
+    expect(spans[0]?.unknownSec).toBe(1800);
+    expect(spans[0]?.observedSec).toBe(0);
+  });
+
+  // The receipt-printing path writes both rows after the work; read literally, the unit
+  // took 5 seconds.
+  test("a start receipt written after the work starts at the pair's first recorded event", () => {
+    const art = (ts: string, unit: string, shard = "s.md") =>
+      ({ ts, event: "ARTIFACT_CREATED", stage: "cg", unit, fields: {}, shard }) as AuditEvent;
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_COMPLETED", "A", "fd"),
+        art("2026-01-01T00:02:00Z", "A"),
+        art("2026-01-01T00:03:00Z", "B", "other.md"), // another pair, another clone
+        art("2026-01-01T00:20:00Z", "A"),
+        u("2026-01-01T00:40:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T00:40:05Z", "UNIT_COMPLETED", "A"),
+        // After the receipt: the checkpoint gate is the stage's, not the unit's.
+        { ...art("2026-01-01T00:50:00Z", "A"), event: "GATE_APPROVED" } as AuditEvent,
+      ],
+      "2026-01-01T00:50:00Z",
+    );
+    const a = spans.find((x) => x.stage === "cg" && x.unit === "A")!;
+    expect(a.segments.map((g) => [g.startedAt, g.endedAt, g.startInferred])).toEqual([
+      ["2026-01-01T00:02:00Z", "2026-01-01T00:40:05Z", true],
+    ]);
+    // A receipt that came first needs no inference.
+    const plain = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A"),
+        u("2026-01-01T00:05:00Z", "UNIT_COMPLETED", "A"),
+      ],
+      "2026-01-01T00:05:00Z",
+    );
+    expect(plain[0]?.segments[0]?.startInferred).toBeUndefined();
+  });
+
+  test("buildTiming carries the unit view, and a run with no unit rows has none", () => {
+    const events = [
+      { ...ev("2026-01-01T00:00:00Z", "STAGE_STARTED"), stage: "cg", fields: { Stage: "cg" } },
+      u("2026-01-01T00:01:00Z", "UNIT_STARTED", "A"),
+      u("2026-01-01T00:04:00Z", "UNIT_COMPLETED", "A"),
+    ] as AuditEvent[];
+    expect(buildTiming({ events, counts: new Map(), shards: [] }).units.length).toBe(1);
+    expect(
+      buildTiming({ events: events.slice(0, 1), counts: new Map(), shards: [] }).units,
+    ).toEqual([]);
   });
 });
 

@@ -418,6 +418,8 @@ details summary { cursor:pointer; font-size:var(--fs-2); color:var(--mute); marg
 .g-bar.k-live { box-shadow:0 0 0 1px var(--accent) inset; }
 /* A superseded attempt is over: dashed outline, dimmed, never the "running" colour. */
 .g-bar.k-sup { box-shadow:none; outline:1px dashed var(--mute); outline-offset:-1px; opacity:.6; }
+/* A paused unit segment: the unit stopped and will resume — dotted, in the waiting colour. */
+.g-bar.k-pause { box-shadow:none; outline:1px dotted var(--warn); outline-offset:-1px; }
 /* Track axis: dates under the header, plus the unrecorded tail as a shaded band. */
 .g-axis { position:relative; height:14px; min-width:260px; margin-top:3px; font-weight:400; }
 .ax-t { position:absolute; top:0; transform:translateX(-50%); color:var(--mute);
@@ -428,7 +430,7 @@ details summary { cursor:pointer; font-size:var(--fs-2); color:var(--mute); marg
 /* A 0-second stage: a tick at its instant, never a bar wide enough to read as time. */
 .g-tick { position:absolute; top:-1px; width:2px; height:13px; background:var(--mute); cursor:help; }
 .g-tick.k-done { background:var(--accent2); } .g-tick.k-live { background:var(--accent); }
-.g-tick.k-await { background:var(--warn); }
+.g-tick.k-await { background:var(--warn); } .g-tick.k-pause { background:var(--warn); }
 .g-n.attn { color:var(--fg); }
 .g-where { color:var(--accent); font-size:var(--fs-1); }
 i.lg { display:inline-block; width:9px; height:9px; border-radius:2px; vertical-align:-1px; }
