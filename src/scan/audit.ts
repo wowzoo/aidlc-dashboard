@@ -43,15 +43,19 @@
 // which stops every receipt stamped before the copy from settling. `copiedAuditBlocks`
 // is the engine's rule, transcribed, and the ledger skips what it names.
 //
-// A SHARD REACHED THROUGH A SYMLINK IS REFUSED, as the engine's `readAuditShardTexts`
-// and `auditShards` refuse it (2.11.0 aidlc-lib.ts, `assertNoSymlinkInChainOrThrow` +
-// `readAppendOnlyFileNoFollowOrThrow`): no directory between the workspace root and the
-// shard, and not the shard itself, may be a symlink, and a shard must be a regular file.
-// The root is the anchor, not part of the chain, so a symlinked workspace root — the
-// usual way to point this reader at a copy — is still read. A reader that followed links
-// counted rows the engine never sees. Refusals are listed in `refused`, never silent.
-// Measured 2026-10-14 over the 150 records on this machine: none has a link in that
-// chain, so no page changes on them.
+// A SHARD REACHED THROUGH A SYMLINK IS REFUSED, as the engine's `auditShards` and
+// `readAuditShardTexts` refuse it (2.11.0 aidlc-lib.ts — `assertNoSymlinkInChainOrThrow`,
+// `boundaryRelativePartsOrThrow`, `readAppendOnlyFileNoFollowOrThrow`): no directory
+// between the workspace root and the shard, and not the shard itself, may be a
+// symlink; a shard must be a regular file, still the one its pathname names; and the
+// chain is checked again after the read. The root is the anchor, not part of the
+// chain, so a symlinked workspace root is still read — the engine never checks its
+// anchor. A reader that followed links counted rows the engine never sees. Refusals
+// are listed in `refused`; other failures (a shard that vanished, one unreadable for
+// another reason) are skipped as before. This is parity for the AUDIT only: the
+// engine's own state, questions and heartbeat reads follow links, and so do ours.
+// Measured 2026-10-14 over the 150 records on this machine: events and shards read
+// are identical to the reader before, and nothing is refused.
 //
 // Node fs only, never throws: an unreadable shard is skipped, not fatal.
 
@@ -91,9 +95,10 @@ export interface AuditLedger {
   /** Shard basenames read, for provenance ("2 clones"). */
   shards: string[];
   /**
-   * Paths (relative to the anchor) the engine would refuse and this reader therefore
-   * did not read: a symlinked shard or directory on the chain, or a `.md` that is not
-   * a regular file. A refused audit dir appears once, for every shard under it.
+   * Paths (relative to the anchor) this reader refused, by the engine's rules (see the
+   * header): a shard or audit dir reached through a symlink or outside the anchor, or
+   * a `.md` that is not a regular file. A refused audit dir appears once, standing for
+   * every shard beneath it — none is listed.
    * Always set by `readAuditLedger`; optional for ledgers built by hand in tests.
    */
   refused?: string[];
@@ -289,31 +294,63 @@ export function copiedAuditBlocks(
   return skip;
 }
 
-/** Absolute paths of the audit shards in a record dir, sorted for determinism. */
-/** Does any component of `rel`, walked down from `anchor`, exist as a symlink? */
-function linkInChain(anchor: string, rel: string): boolean {
+/**
+ * The components of `rel`, or `undefined` when it escapes its anchor — the engine's
+ * `boundaryRelativePartsOrThrow`, which splits on BOTH slash families (`win32.parse`)
+ * on every platform, so a POSIX name holding `\` is cut there as the engine cuts it.
+ */
+function boundaryParts(rel: string): string[] | undefined {
+  if (path.win32.parse(rel).root !== "") return undefined;
+  const parts: string[] = [];
+  let cursor = rel;
+  while (cursor !== "" && cursor !== ".") {
+    const parsed = path.win32.parse(cursor);
+    if (parsed.root !== "") return undefined;
+    if (parsed.base !== "" && parsed.base !== ".") parts.unshift(parsed.base);
+    if (parsed.dir === "" || parsed.dir === ".") break;
+    if (parsed.dir === cursor) return undefined;
+    cursor = parsed.dir;
+  }
+  return parts.includes("..") ? undefined : parts;
+}
+
+/**
+ * Is the chain from `anchor` down `rel` clean — inside the anchor, and with no
+ * component that exists as a symlink? `assertNoSymlinkInChainOrThrow`: a component
+ * that does not exist redirects nothing.
+ */
+function chainIsClean(anchor: string, rel: string): boolean {
+  const parts = boundaryParts(rel);
+  if (parts === undefined) return false;
   let current = anchor;
-  for (const part of rel.split(path.sep)) {
-    if (part === "" || part === ".") continue;
+  for (const part of parts) {
     current = path.join(current, part);
     try {
-      if (fs.lstatSync(current).isSymbolicLink()) return true;
-    } catch {
-      // Does not exist (yet) — nothing to redirect through.
-    }
+      if (fs.lstatSync(current).isSymbolicLink()) return false;
+    } catch {}
   }
-  return false;
+  return true;
+}
+
+/** Does anything — a dangling link included — sit at `p`? */
+function present(p: string): boolean {
+  try {
+    fs.lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * The `.md` files of `recordDir/audit/`, sorted, unless the chain from `anchor` to that
- * dir holds a symlink (or leaves `anchor`), in which case the dir is refused whole.
+ * dir is not clean, in which case the dir is refused whole (`auditShards`).
  */
 function shardPaths(recordDir: string, anchor: string, refused: string[]): string[] {
   const dir = path.join(recordDir, "audit");
   const rel = path.relative(anchor, dir);
-  if (path.isAbsolute(rel) || rel.split(path.sep).includes("..") || linkInChain(anchor, rel)) {
-    if (fs.existsSync(dir)) refused.push(rel);
+  if (!chainIsClean(anchor, rel)) {
+    if (present(dir)) refused.push(rel);
     return [];
   }
   let entries: string[];
@@ -330,26 +367,45 @@ function shardPaths(recordDir: string, anchor: string, refused: string[]): strin
 
 const NO_FOLLOW = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
 
+type ShardRead = { kind: "read"; content: string } | { kind: "refused" } | { kind: "failed" };
+
 /**
- * A shard's text, or `"refused"` when the engine would not read it: a symlink (the open
- * does not follow one; `lstat` covers a platform without `O_NOFOLLOW`) or not a regular
- * file. `undefined` for any other failure — a vanished shard is skipped, as before.
+ * One shard, read as `readAuditShardTexts` reads it: opened without following a link
+ * (`lstat` covers a platform without `O_NOFOLLOW`), a regular file, the descriptor
+ * still the file the pathname names (a replaced file is refused, not read through the
+ * old descriptor), and — after the read — the chain from the RESOLVED anchor still
+ * clean, so a directory swapped for a link after the listing does not lend its rows.
+ * The chain is also checked before the open. `failed` for anything else — a vanished shard is skipped, as before.
  */
-function readShard(p: string): string | "refused" | undefined {
+function readShard(p: string, anchor: string): ShardRead {
+  // Checked first as well, so a name the chain refuses is named rather than lost to a
+  // failure further on (Bun's `realpathSync` cuts a POSIX name at `\` too).
+  if (!chainIsClean(anchor, path.relative(anchor, p))) return { kind: "refused" };
   let fd: number;
   try {
     fd = fs.openSync(p, fs.constants.O_RDONLY | NO_FOLLOW | fs.constants.O_NONBLOCK);
   } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "ELOOP" ? "refused" : undefined;
+    return (e as NodeJS.ErrnoException).code === "ELOOP" ? { kind: "refused" } : { kind: "failed" };
   }
+  let content: string;
   try {
-    if (!fs.fstatSync(fd).isFile() || fs.lstatSync(p).isSymbolicLink()) return "refused";
-    return fs.readFileSync(fd, "utf-8");
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || fs.lstatSync(p).isSymbolicLink()) return { kind: "refused" };
+    const current = fs.statSync(fs.realpathSync(p));
+    if (current.dev !== st.dev || current.ino !== st.ino) return { kind: "refused" };
+    content = fs.readFileSync(fd, "utf-8");
   } catch {
-    return undefined;
+    return { kind: "failed" };
   } finally {
     fs.closeSync(fd);
   }
+  try {
+    if (!chainIsClean(fs.realpathSync(anchor), path.relative(anchor, p)))
+      return { kind: "refused" };
+  } catch {
+    return { kind: "failed" };
+  }
+  return { kind: "read", content };
 }
 
 /**
@@ -371,9 +427,9 @@ export function readAuditLedger(
   const refused: string[] = [];
 
   for (const p of shardPaths(recordDir, anchor, refused)) {
-    const content = readShard(p);
-    if (content === "refused") refused.push(path.relative(anchor, p));
-    else if (content !== undefined) read.push({ shard: path.basename(p), content });
+    const r = readShard(p, anchor);
+    if (r.kind === "refused") refused.push(path.relative(anchor, p));
+    else if (r.kind === "read") read.push({ shard: path.basename(p), content: r.content });
   }
   const copied = copiedAuditBlocks(read);
   read.forEach(({ shard, content }, index) => {

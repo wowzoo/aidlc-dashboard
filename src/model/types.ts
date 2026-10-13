@@ -176,8 +176,9 @@ export type Warning =
   | { code: "catalog-read-failed"; harnessDir: string }
   | { code: "catalog-not-found" }
   | { code: "audit-empty" }
-  /** Shards (or an audit dir) the engine refuses — reached through a symlink, or not a
-   *  regular file — and so not read; paths relative to the workspace root. */
+  /** Audit shards or a whole audit dir refused by the engine's rules — reached through
+   *  a symlink or outside the workspace root, or not a regular file — and so not read;
+   *  paths relative to the workspace root. Replaces `audit-empty`, which it explains. */
   | { code: "audit-shard-refused"; paths: string[] }
   /** All three are REQUIRED: the harness version is read off the catalogue, so a
    *  mismatch can only be detected when the catalogue — and its dir — is in hand.

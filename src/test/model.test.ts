@@ -439,6 +439,7 @@ describe("render", () => {
         paths: [path.relative(root, shard)],
       });
       expect(after.totalEvents).toBeLessThan(before.totalEvents);
+      expect(renderBody(after)).toContain(path.relative(root, shard));
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

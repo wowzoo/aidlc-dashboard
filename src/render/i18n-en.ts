@@ -54,7 +54,7 @@ const warn: WarnStrings = {
 
   auditEmpty: "The audit ledger is empty — the hooks may never have fired",
   auditShardRefused: (paths) =>
-    `${plural(paths.length, "audit path")} not read, because the engine refuses them — reached through a symlink, or not a regular file (a symlinked workspace root is fine): ${paths.join(", ")}`,
+    `${plural(paths.length, "audit path")} not read, by the engine's rules — reached through a symlink, outside the workspace root, or not a regular file (a symlinked root itself is fine). Audit-derived figures cover only what was read: ${paths.join(", ")}`,
 
   stateVersionMismatch: (stateVersion, harnessVersion, harnessDir) =>
     `state.md declares State Version ${stateVersion}, but the harness supports ${harnessVersion} (${harnessDir}/tools/aidlc-lib.ts) — the engine refuses next, report and doctor on this combination. Contract judgements cannot be made against a different generation, so they were withheld`,

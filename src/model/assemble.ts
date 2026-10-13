@@ -432,11 +432,11 @@ export function assemble(
   );
 
   const ledger = readAuditLedger(recordDir, isStage, root);
-  // Before `audit-empty`, which a refusal can cause: the page names the cause first.
+  // A refusal explains an empty readable ledger; `audit-empty` guesses at hooks that
+  // never fired, so it is kept for the emptiness nothing else explains.
   if (ledger.refused && ledger.refused.length > 0) {
     warnings.push({ code: "audit-shard-refused", paths: ledger.refused });
-  }
-  if (ledger.events.length === 0) warnings.push({ code: "audit-empty" });
+  } else if (ledger.events.length === 0) warnings.push({ code: "audit-empty" });
 
   const sensors = readSensorReport(recordDir, ledger);
   const questions = readQuestions(recordDir, { isStage });

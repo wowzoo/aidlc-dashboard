@@ -226,6 +226,39 @@ describe("audit shard", () => {
       });
     });
 
+    test("a dangling audit-dir link is refused, not mistaken for an absent dir", () => {
+      withTree((root, record, elsewhere) => {
+        fs.rmdirSync(path.join(record, "audit"));
+        fs.symlinkSync(path.join(elsewhere, "gone"), path.join(record, "audit"));
+        expect(readAuditLedger(record, undefined, root).refused).toEqual([
+          path.join("aidlc", "spaces", "default", "intents", "r1", "audit"),
+        ]);
+      });
+    });
+
+    test("a shard whose text is exactly the word `refused` is read", () => {
+      withTree((root, record) => {
+        fs.writeFileSync(path.join(record, "audit", "host-aaaa.md"), "refused");
+        const ledger = readAuditLedger(record, undefined, root);
+        expect(ledger.shards).toEqual(["host-aaaa.md"]);
+        expect(ledger.refused).toEqual([]);
+      });
+    });
+
+    test("components are cut on both slash families, as the engine cuts them", () => {
+      if (path.sep !== "/") return;
+      withTree((root, record) => {
+        // A POSIX name holding `..\` reads to the engine as a `..` component.
+        fs.writeFileSync(path.join(record, "audit", "..\\x.md"), SHARD);
+        fs.writeFileSync(path.join(record, "audit", "host-aaaa.md"), SHARD);
+        const ledger = readAuditLedger(record, undefined, root);
+        expect(ledger.shards).toEqual(["host-aaaa.md"]);
+        expect(ledger.refused).toEqual([
+          path.join("aidlc", "spaces", "default", "intents", "r1", "audit", "..\\x.md"),
+        ]);
+      });
+    });
+
     test("without an anchor the chain is checked from the record dir down", () => {
       withTree((_root, record, elsewhere) => {
         fs.writeFileSync(path.join(elsewhere, "copy.md"), SHARD);
