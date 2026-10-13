@@ -6,7 +6,7 @@
       "name": "aidlc-dashboard",
       "devDependencies": {
         "@biomejs/biome": "1.9.4",
-        "@types/bun": "1.4.3",
+        "@types/bun": ">=1.4.0",
         "@types/node": "^20.11.0",
         "happy-dom": "20.14.5",
         "typescript": "^5.4.0",
