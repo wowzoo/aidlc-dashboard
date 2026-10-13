@@ -44,7 +44,9 @@ $binDir = if ($env:AIDLC_BIN_DIR) { $env:AIDLC_BIN_DIR } else { Join-Path $HOME 
 $bin = Join-Path $binDir 'aidlc-dashboard.cmd'
 
 function Say([string]$m) { Write-Host $m }
-function Die([string]$m) { Write-Host "✗ $m" -ForegroundColor Red; exit 1 }
+# `throw`, not `exit`: under `irm | iex` the script runs in the caller's session, so
+# `exit` closed the user's PowerShell window before they could read why it failed.
+function Die([string]$m) { throw "✗ $m" }
 
 # ---- which version ----------------------------------------------------------
 if ($env:AIDLC_VERSION) {
@@ -86,7 +88,7 @@ if ($env:AIDLC_VERSION) {
   }
   if (-not $tag) {
     Die @"
-최신 릴리스를 확인할 수 없다 (네트워크 또는 GitHub API 한도).
+최신 릴리스를 확인할 수 없다 (네트워크, GitHub API 한도, 또는 저장소에 접근할 수 없음 — 비공개 저장소는 익명 요청에 404 를 준다).
   버전을 지정하면 이 조회를 건너뛴다:
     `$env:AIDLC_VERSION='1.7.0'; irm <install.ps1 URL> | iex
 "@
@@ -105,7 +107,7 @@ try {
   try {
     Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
   } catch {
-    Die "내려받기 실패: $url ($_)"
+    Die "내려받기 실패: $url — 버전이 없거나 저장소에 접근할 수 없다 ($_)"
   }
   if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
     Die "내려받은 파일이 비어 있다: $url"
@@ -131,19 +133,41 @@ try {
   # ---- install --------------------------------------------------------------
   # Swap, not overwrite: the new tree is complete before it is put in place, so a
   # failure above leaves the existing install untouched.
+  #
+  # `data\` never passes through $tmp — the same defect install.sh had, reproduced
+  # there: it moved into the new tree first, the next move failed, and `finally`
+  # deleted $tmp with the credit history in it. Old tree aside, new tree in place,
+  # THEN `data\` crosses; every failure leaves it on disk and says where.
   $parent = Split-Path -Parent $dir
   if ($parent -and -not (Test-Path $parent)) {
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
   }
   if (Test-Path $dir) {
-    $data = Join-Path $dir 'data'
+    $old = "$dir.old.$PID"
+    try {
+      Move-Item -LiteralPath $dir -Destination $old
+    } catch {
+      Die "기존 설치를 옮길 수 없다: $dir — 아무것도 바꾸지 않았다. ($_)"
+    }
+    try {
+      Move-Item -LiteralPath $src -Destination $dir
+    } catch {
+      try {
+        Move-Item -LiteralPath $old -Destination $dir
+      } catch {
+        Die "새 설치를 놓지 못했고 되돌리지도 못했다 — 기존 설치는 $old 에 그대로 있다. ($_)"
+      }
+      Die "새 설치를 놓을 수 없다: $dir — 기존 설치를 되돌렸다. ($_)"
+    }
+    $data = Join-Path $old 'data'
     if (Test-Path $data) {
       Say '▸ 기존 data\ 보존 (수집한 크레딧 이력)'
-      Move-Item -LiteralPath $data -Destination (Join-Path $src 'data')
+      try {
+        Move-Item -LiteralPath $data -Destination (Join-Path $dir 'data')
+      } catch {
+        Die "data\ 를 옮기지 못했다 — 수집한 이력은 $data 에 그대로 있다. 직접 $(Join-Path $dir 'data') 로 옮길 것. ($_)"
+      }
     }
-    $old = "$dir.old.$PID"
-    Move-Item -LiteralPath $dir -Destination $old
-    Move-Item -LiteralPath $src -Destination $dir
     Remove-Item -LiteralPath $old -Recurse -Force
     Say "▸ 갱신: $dir"
   } else {

@@ -59,7 +59,7 @@ if [ "$VERSION" = "latest" ]; then
       sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
   fi
   if [ -z "${TAG:-}" ]; then
-    die "최신 릴리스를 확인할 수 없다 (네트워크 또는 GitHub API 한도).
+    die "최신 릴리스를 확인할 수 없다 (네트워크, GitHub API 한도, 또는 저장소에 접근할 수 없음 — 비공개 저장소는 익명 요청에 404 를 준다).
   버전을 지정하면 이 조회를 건너뛴다:
     AIDLC_VERSION=1.7.0 sh install.sh
   또는 파이프로:
@@ -79,7 +79,7 @@ TMP=$(mktemp -d) || die "임시 디렉터리를 만들 수 없다."
 # Clean up on any exit, including the failure paths below.
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-curl -fsSL -o "$TMP/$ASSET" "$URL" || die "내려받기 실패: $URL"
+curl -fsSL -o "$TMP/$ASSET" "$URL" || die "내려받기 실패: $URL (버전이 없거나 저장소에 접근할 수 없다)"
 [ -s "$TMP/$ASSET" ] || die "내려받은 파일이 비어 있다: $URL"
 
 unzip -q "$TMP/$ASSET" -d "$TMP/x" || die "압축을 풀 수 없다 ($ASSET)."
@@ -92,18 +92,27 @@ SRC="$TMP/x/aidlc-dashboard"
 # ---- install ----------------------------------------------------------------
 # Swap, not overwrite: the new tree is assembled complete, then put in place. A
 # failure above leaves the existing install untouched.
+#
+# `data/` is the collected credit history (SQLite). It is written INTO the install
+# dir at runtime, so it has to survive an upgrade — this is the one thing a
+# re-install must not throw away. So it NEVER passes through $TMP: it moved there
+# first once, and when the next `mv` failed the EXIT trap deleted $TMP and the history
+# with it (reproduced: a read-only parent dir, `mv "$DIR" "$OLD"` refused, usage.db
+# gone). The old tree is set aside whole, the new one put in place, and only then
+# does `data/` cross from old to new — every failure leaves it on disk, and says where.
 mkdir -p "$(dirname "$DIR")"
 if [ -e "$DIR" ]; then
-  # `data/` is the collected credit history (SQLite). It is written INTO the
-  # install dir at runtime, so it has to survive an upgrade — this is the one
-  # thing a re-install must not throw away.
-  if [ -d "$DIR/data" ]; then
-    say "▸ 기존 data/ 보존 (수집한 크레딧 이력)"
-    mv "$DIR/data" "$SRC/data"
-  fi
   OLD="$DIR.old.$$"
-  mv "$DIR" "$OLD"
-  mv "$SRC" "$DIR"
+  mv "$DIR" "$OLD" || die "기존 설치를 옮길 수 없다: $DIR — 아무것도 바꾸지 않았다."
+  if ! mv "$SRC" "$DIR"; then
+    mv "$OLD" "$DIR" || die "새 설치를 놓지 못했고 되돌리지도 못했다 — 기존 설치는 $OLD 에 그대로 있다."
+    die "새 설치를 놓을 수 없다: $DIR — 기존 설치를 되돌렸다."
+  fi
+  if [ -d "$OLD/data" ]; then
+    say "▸ 기존 data/ 보존 (수집한 크레딧 이력)"
+    mv "$OLD/data" "$DIR/data" ||
+      die "data/ 를 옮기지 못했다 — 수집한 이력은 $OLD/data 에 그대로 있다. 직접 $DIR/data 로 옮길 것."
+  fi
   rm -rf "$OLD"
   say "▸ 갱신: $DIR"
 else
