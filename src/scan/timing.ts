@@ -18,7 +18,9 @@
 // one run: 58 of 79 minutes). So each gap between consecutive events is sorted:
 //
 //   HUMAN  a gate-opening event followed by one of the engine's answer receipts
-//          (GATE_CLOSE — HUMAN_TURN is only one of eight).
+//          (GATE_CLOSE — HUMAN_TURN is only one of eight) that answers THAT ask:
+//          same clone, and a receipt that names one names the same stage
+//          (`answersAsk`).
 //   PARKED every clone PRESENT at that moment is between WORKFLOW_PARKED and
 //          WORKFLOW_UNPARKED, plus an inferred session break when an old ledger has
 //          no balanced park pair.
@@ -50,9 +52,14 @@
 // it is excluded from `idleSec` and `workSec` both.
 
 import type { AuditEvent, AuditLedger } from "./audit";
+import { answeredBy as decisionAnsweredBy } from "./decision-wait";
 
-/** Events that open a human wait: after one of these, a gap to a receipt is IDLE. */
-const GATE_OPEN = new Set(["DECISION_RECORDED", "QUESTION_ASKED", "STAGE_AWAITING_APPROVAL"]);
+/**
+ * Events that open a human wait: after one of these, a gap to a receipt is IDLE.
+ * `QUESTION_ASKED` used to be a third; 2.11.0's `audit-format.md` has no such event,
+ * and none of the 150 records on this machine carries one.
+ */
+const GATE_OPEN = new Set(["DECISION_RECORDED", "STAGE_AWAITING_APPROVAL"]);
 
 /**
  * Events that CLOSE a human wait — the engine's documented answer receipts. Every one
@@ -93,6 +100,48 @@ const GATE_CLOSE = new Set([
   "CONSTRUCTION_POLICY_RECORDED",
   "PLAN_APPROVAL_RECORDED",
 ]);
+
+/** A `Gate Stages` list, as the writers join it (`", "`). */
+function stageList(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+/**
+ * Does receipt `b` answer the ask `a` opened? Being next to it in the merged ledger
+ * is not enough — the rule used to read only the two event names, so another
+ * clone's turn, or a receipt for a different stage, closed a wait it had nothing to
+ * do with. The pairing is the engine's own:
+ *
+ *   - SAME CLONE, always. Two clones' rows adjacent in the merged ledger are two
+ *     developers; one answering does not end the other's wait. This is also all the
+ *     identity `HUMAN_TURN` has — it is presence evidence on that clone, naming no
+ *     stage.
+ *   - A gate (`STAGE_AWAITING_APPROVAL`) is answered by the gate decision for it: a
+ *     `GATE_APPROVED`/`GATE_REJECTED` whose `Stage` or `Gate Stages` names the stage
+ *     (`pendingGate` clears on the same rows). A recorded answer to some OTHER
+ *     question is not that.
+ *   - A decision (`DECISION_RECORDED`) is answered as `scan/decision-wait.ts` pairs
+ *     it: a row of the same stage that `decisionAnsweredBy` accepts — so a gate
+ *     decision closes only the two gate-answered checkpoints, with their key.
+ *
+ * Measured over the 150 records on this machine (4 of them multi-clone): of 676
+ * gate→receipt gaps, none crossed clones or stages, so no figure moved there: what
+ * changes is which pairs the rule is able to claim, not what it found on those trees.
+ */
+function answersAsk(a: AuditEvent, b: AuditEvent): boolean {
+  if (a.shard !== b.shard) return false;
+  if (b.event === "HUMAN_TURN") return true;
+  const stage = a.fields.Stage;
+  if (stage === undefined) return false;
+  if (a.event === "STAGE_AWAITING_APPROVAL") {
+    if (b.event !== "GATE_APPROVED" && b.event !== "GATE_REJECTED") return false;
+    return b.fields.Stage === stage || stageList(b.fields["Gate Stages"]).includes(stage);
+  }
+  return b.fields.Stage === stage && decisionAnsweredBy(a, b);
+}
 
 /**
  * Session-resume markers. A gap ENDING in one of these was the human being away,
@@ -630,7 +679,12 @@ export function classifyGaps(
     if (present.length > 0 && parkedPresent.length === present.length) {
       parkedSec += gap;
       bucket = "parked";
-    } else if (GATE_OPEN.has(a.event) && GATE_CLOSE.has(b.event) && gap >= IDLE_FLOOR_SEC) {
+    } else if (
+      GATE_OPEN.has(a.event) &&
+      GATE_CLOSE.has(b.event) &&
+      gap >= IDLE_FLOOR_SEC &&
+      answersAsk(a, b)
+    ) {
       humanWaitSec += gap;
       bucket = "humanWait";
     } else if (SESSION_RESUME.has(b.event) && gap >= IDLE_FLOOR_SEC) {

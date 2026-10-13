@@ -1686,20 +1686,21 @@ describe("gap classification", () => {
     expect(g.workSec).toBe(0);
   });
 
-  test("a gate closes on any of the engine's answer receipts, not just HUMAN_TURN", () => {
+  test("a wait closes on the engine's answer receipts, not just HUMAN_TURN", () => {
     // audit-format.md lists all of these as authority-bearing receipts only their
     // owning tool may emit — each one means a human acted. Reading HUMAN_TURN alone
     // left an approved gate, a summary confirmation and an answered question in
     // UNKNOWN; the approval case is the least ambiguous wait the engine produces.
-    for (const close of [
-      "GATE_APPROVED",
-      "GATE_REJECTED",
-      "SUMMARY_CONFIRMATION_RECORDED",
-      "QUESTION_ANSWERED",
-    ]) {
+    const at = { Stage: "rv" };
+    for (const [open, close] of [
+      ["STAGE_AWAITING_APPROVAL", "GATE_APPROVED"],
+      ["STAGE_AWAITING_APPROVAL", "GATE_REJECTED"],
+      ["DECISION_RECORDED", "SUMMARY_CONFIRMATION_RECORDED"],
+      ["DECISION_RECORDED", "QUESTION_ANSWERED"],
+    ] as const) {
       const g = classifyGaps([
-        ev("2026-01-01T00:00:00Z", "STAGE_AWAITING_APPROVAL"),
-        ev("2026-01-01T01:00:00Z", close),
+        evf("2026-01-01T00:00:00Z", open, at),
+        evf("2026-01-01T01:00:00Z", close, at),
       ]);
       expect({ close, human: g.humanWaitSec, unknown: g.unknownSec }).toEqual({
         close,
@@ -1707,6 +1708,80 @@ describe("gap classification", () => {
         unknown: 0,
       });
     }
+  });
+
+  test("a receipt closes only the ask it answers", () => {
+    // The rule used to read the two event names alone, so any receipt next to an
+    // ask in the merged ledger closed it.
+    const wait = (a: AuditEvent, b: AuditEvent) => classifyGaps([a, b]).humanWaitSec;
+    const at = (ts: string, event: string, fields: Record<string, string>, shard = "s") => ({
+      ...evf(ts, event, fields),
+      shard,
+    });
+    const t0 = "2026-01-01T00:00:00Z";
+    const t1 = "2026-01-01T01:00:00Z";
+    // Another clone's turn or approval is another developer.
+    expect(wait(at(t0, "DECISION_RECORDED", { Stage: "rv" }), at(t1, "HUMAN_TURN", {}, "x"))).toBe(
+      0,
+    );
+    expect(
+      wait(
+        at(t0, "STAGE_AWAITING_APPROVAL", { Stage: "rv" }),
+        at(t1, "GATE_APPROVED", { Stage: "rv" }, "x"),
+      ),
+    ).toBe(0);
+    // A receipt for another stage answers another ask.
+    expect(
+      wait(
+        at(t0, "STAGE_AWAITING_APPROVAL", { Stage: "rv" }),
+        at(t1, "GATE_APPROVED", { Stage: "fd" }),
+      ),
+    ).toBe(0);
+    expect(
+      wait(
+        at(t0, "DECISION_RECORDED", { Stage: "rv" }),
+        at(t1, "QUESTION_ANSWERED", { Stage: "fd" }),
+      ),
+    ).toBe(0);
+    // A gate is answered by its gate decision, not by a recorded answer to a question.
+    expect(
+      wait(
+        at(t0, "STAGE_AWAITING_APPROVAL", { Stage: "rv" }),
+        at(t1, "QUESTION_ANSWERED", { Stage: "rv" }),
+      ),
+    ).toBe(0);
+    // ...and a decision by its own answer: a gate decision closes only the two
+    // gate-answered checkpoints, with their key (`scan/decision-wait.ts`).
+    expect(
+      wait(at(t0, "DECISION_RECORDED", { Stage: "rv" }), at(t1, "GATE_APPROVED", { Stage: "rv" })),
+    ).toBe(0);
+    const unitAsk = { Stage: "cg", Checkpoint: "Construction Unit Approval", Unit: "u1" };
+    const unitGate = { Stage: "cg", Checkpoint: "construction-unit", Unit: "u1" };
+    expect(wait(at(t0, "DECISION_RECORDED", unitAsk), at(t1, "GATE_APPROVED", unitGate))).toBe(
+      3600,
+    );
+    expect(
+      wait(
+        at(t0, "DECISION_RECORDED", unitAsk),
+        at(t1, "GATE_APPROVED", { ...unitGate, Unit: "u2" }),
+      ),
+    ).toBe(0);
+    // A unit-end checkpoint names its last stage in Stage and all of them in Gate Stages.
+    expect(
+      wait(
+        at(t0, "STAGE_AWAITING_APPROVAL", { Stage: "fd" }),
+        at(t1, "GATE_APPROVED", { Stage: "cg", "Gate Stages": "fd, nfr, cg" }),
+      ),
+    ).toBe(3600);
+  });
+
+  test("an ask with no Stage is not paired with a receipt that names one", () => {
+    // Both are required fields in 2.11; a row missing one cannot be shown to answer it.
+    const g = classifyGaps([
+      ev("2026-01-01T00:00:00Z", "STAGE_AWAITING_APPROVAL"),
+      evf("2026-01-01T01:00:00Z", "GATE_APPROVED", { Stage: "rv" }),
+    ]);
+    expect(g.humanWaitSec).toBe(0);
   });
 
   test("a receipt with no gate in front of it is CONVERSATION, not a wait", () => {
@@ -1986,6 +2061,8 @@ describe("gap classification", () => {
       ev("2026-01-01T00:10:00Z", "SUBAGENT_COMPLETED"),
       ev("2026-01-01T00:20:00Z", "GATE_OPENED"),
       ev("2026-01-01T00:30:00Z", "HUMAN_TURN"),
+      ev("2026-01-01T00:40:00Z", "QUESTION_ASKED"),
+      ev("2026-01-01T00:50:00Z", "HUMAN_TURN"),
     ]);
     expect(g.delegatedSec).toBe(0);
     expect(g.humanWaitSec).toBe(0);
@@ -1993,8 +2070,8 @@ describe("gap classification", () => {
 
   test("a recorded plan approval closes the wait like any other answer receipt", () => {
     const g = classifyGaps([
-      ev("2026-01-01T00:00:00Z", "DECISION_RECORDED"),
-      ev("2026-01-01T00:30:00Z", "PLAN_APPROVAL_RECORDED"),
+      evf("2026-01-01T00:00:00Z", "DECISION_RECORDED", { Stage: "cg" }),
+      evf("2026-01-01T00:30:00Z", "PLAN_APPROVAL_RECORDED", { Stage: "cg" }),
     ]);
     expect(g.humanWaitSec).toBe(1800);
   });
@@ -2980,8 +3057,8 @@ describe("time bins", () => {
     const events = [
       ev(local(1), "WORKFLOW_STARTED"),
       ev(local(1, 2), "ARTIFACT_CREATED"),
-      ev(local(1, 4), "STAGE_AWAITING_APPROVAL"),
-      ev(local(7), "GATE_APPROVED"),
+      { ...ev(local(1, 4), "STAGE_AWAITING_APPROVAL"), fields: { Stage: "rv" } },
+      { ...ev(local(7), "GATE_APPROVED"), fields: { Stage: "rv" } },
       ev(local(7, 1), "HUMAN_TURN"),
       ev(local(7, 30), "HUMAN_TURN"),
       ev(local(8), "WORKFLOW_PARKED"),

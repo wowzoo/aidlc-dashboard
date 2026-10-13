@@ -67,7 +67,12 @@ export interface OpenDecision {
   since: string;
 }
 
-function answeredBy(open: AuditEvent | undefined, e: AuditEvent): boolean {
+/**
+ * `decisionAnsweredBy`: does `e` answer the open decision `open`? The stage is the
+ * caller's to match — the engine filters rows by stage before asking. Also read by
+ * the gap classifier (`scan/timing.ts`), so a wait it times is this pairing's.
+ */
+export function answeredBy(open: AuditEvent | undefined, e: AuditEvent): boolean {
   if (CLOSING.has(e.event)) return true;
   if (!open || !GATE_ANSWER.has(e.event)) return false;
   const checkpoint = open.fields.Checkpoint ?? "";
