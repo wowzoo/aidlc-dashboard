@@ -145,6 +145,7 @@ describe("every code has copy", () => {
     "catalog-read-failed": { code: "catalog-read-failed", harnessDir: ".kiro" },
     "catalog-not-found": { code: "catalog-not-found" },
     "audit-empty": { code: "audit-empty" },
+    "audit-shard-refused": { code: "audit-shard-refused", paths: ["aidlc/x/audit/a.md"] },
     "state-version-mismatch": {
       code: "state-version-mismatch",
       stateVersion: "7",

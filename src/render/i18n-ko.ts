@@ -46,6 +46,8 @@ const warn: WarnStrings = {
     "산출물 계약 판정과 stage 귀속이 근사값으로 하락. harness 트리가 다른 곳에 있으면 --harness 로 지정할 것",
 
   auditEmpty: "감사 기록 비어 있음 — hook 미발화 가능성",
+  auditShardRefused: (paths) =>
+    `엔진이 읽지 않는 감사 shard ${paths.length}곳을 읽지 않았습니다 — symlink 를 거치거나 일반 파일이 아닙니다(워크스페이스 루트 자체의 symlink 는 괜찮습니다): ${paths.join(", ")}`,
 
   stateVersionMismatch: (stateVersion, harnessVersion, harnessDir) =>
     `state.md 은 State Version ${stateVersion}, harness 는 ${harnessVersion} 을 지원합니다 (${harnessDir}/tools/aidlc-lib.ts) — 엔진은 이 조합에서 next·report·doctor 를 모두 거부합니다. 다른 세대의 계약으로 판정할 수 없어 산출물 계약 판정을 내렸습니다`,

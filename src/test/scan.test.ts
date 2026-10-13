@@ -147,6 +147,95 @@ describe("audit shard", () => {
     expect(ev.length).toBe(2);
     expect(ev[0]?.stage).toBe("intent-capture");
   });
+  // The engine's `readAuditShardTexts` refuses a shard reached through a symlink —
+  // the shard itself or any directory between the workspace root and it — and a `.md`
+  // that is not a regular file. The root itself may be a link: the chain starts there.
+  describe("a shard reached through a symlink is refused, as the engine refuses it", () => {
+    const withTree = (fn: (root: string, record: string, elsewhere: string) => void) => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-link-"));
+      try {
+        const root = path.join(tmp, "ws");
+        const record = path.join(root, "aidlc", "spaces", "default", "intents", "r1");
+        const elsewhere = path.join(tmp, "elsewhere");
+        fs.mkdirSync(path.join(record, "audit"), { recursive: true });
+        fs.mkdirSync(elsewhere);
+        fn(root, record, elsewhere);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    };
+
+    test("a symlinked shard is not read, and is named", () => {
+      withTree((root, record, elsewhere) => {
+        fs.writeFileSync(path.join(record, "audit", "host-aaaa.md"), SHARD);
+        fs.writeFileSync(path.join(elsewhere, "copy.md"), SHARD);
+        fs.symlinkSync(path.join(elsewhere, "copy.md"), path.join(record, "audit", "host-bbbb.md"));
+        const ledger = readAuditLedger(record, undefined, root);
+        expect(ledger.shards).toEqual(["host-aaaa.md"]);
+        expect(ledger.events.length).toBe(2);
+        expect(ledger.refused).toEqual([
+          path.join("aidlc", "spaces", "default", "intents", "r1", "audit", "host-bbbb.md"),
+        ]);
+      });
+    });
+
+    test("a symlinked audit dir, or a symlinked dir above the record, refuses every shard", () => {
+      withTree((root, record, elsewhere) => {
+        fs.writeFileSync(path.join(elsewhere, "host-aaaa.md"), SHARD);
+        fs.rmdirSync(path.join(record, "audit"));
+        fs.symlinkSync(elsewhere, path.join(record, "audit"));
+        const ledger = readAuditLedger(record, undefined, root);
+        expect(ledger.events).toEqual([]);
+        expect(ledger.refused).toEqual([
+          path.join("aidlc", "spaces", "default", "intents", "r1", "audit"),
+        ]);
+      });
+      withTree((root, _record, elsewhere) => {
+        // `intents` → a copy elsewhere: the record is real, the chain to it is not.
+        const intents = path.join(root, "aidlc", "spaces", "default", "intents");
+        fs.renameSync(intents, path.join(elsewhere, "intents"));
+        fs.symlinkSync(path.join(elsewhere, "intents"), intents);
+        fs.writeFileSync(path.join(intents, "r1", "audit", "host-aaaa.md"), SHARD);
+        const ledger = readAuditLedger(path.join(intents, "r1"), undefined, root);
+        expect(ledger.events).toEqual([]);
+        expect(ledger.refused?.length).toBe(1);
+      });
+    });
+
+    test("a symlinked workspace root is still read — the chain starts below it", () => {
+      withTree((root, record, elsewhere) => {
+        fs.writeFileSync(path.join(record, "audit", "host-aaaa.md"), SHARD);
+        const link = path.join(elsewhere, "ws-link");
+        fs.symlinkSync(root, link);
+        const viaLink = path.join(link, path.relative(root, record));
+        const ledger = readAuditLedger(viaLink, undefined, link);
+        expect(ledger.events.length).toBe(2);
+        expect(ledger.refused).toEqual([]);
+      });
+    });
+
+    test("a `.md` that is not a regular file is refused", () => {
+      withTree((root, record) => {
+        fs.mkdirSync(path.join(record, "audit", "notes.md"));
+        fs.writeFileSync(path.join(record, "audit", "host-aaaa.md"), SHARD);
+        const ledger = readAuditLedger(record, undefined, root);
+        expect(ledger.shards).toEqual(["host-aaaa.md"]);
+        expect(ledger.refused).toEqual([
+          path.join("aidlc", "spaces", "default", "intents", "r1", "audit", "notes.md"),
+        ]);
+      });
+    });
+
+    test("without an anchor the chain is checked from the record dir down", () => {
+      withTree((_root, record, elsewhere) => {
+        fs.writeFileSync(path.join(elsewhere, "copy.md"), SHARD);
+        fs.symlinkSync(path.join(elsewhere, "copy.md"), path.join(record, "audit", "host-bbbb.md"));
+        const ledger = readAuditLedger(record);
+        expect(ledger.events).toEqual([]);
+        expect(ledger.refused).toEqual([path.join("audit", "host-bbbb.md")]);
+      });
+    });
+  });
 });
 
 describe("Context attribution", () => {

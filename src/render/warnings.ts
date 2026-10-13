@@ -25,6 +25,8 @@ export function warningTextIn(w: Warning, s: Strings): string {
       return t.catalogNotFound;
     case "audit-empty":
       return t.auditEmpty;
+    case "audit-shard-refused":
+      return t.auditShardRefused(w.paths);
     case "state-version-mismatch":
       return t.stateVersionMismatch(w.stateVersion, w.harnessVersion, w.harnessDir);
     case "state-version-unreadable":

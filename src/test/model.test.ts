@@ -420,6 +420,30 @@ describe("render", () => {
     }
   });
 
+  test("a shard the engine refuses is left out, and the page names it", () => {
+    // Swap the second clone's shard for a symlink to a copy of itself: the engine reads
+    // the ledger without it, so this reader must too — and say so.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-link-"));
+    const audit = path.join(root, "aidlc/spaces/default/intents/260101-demo-migration/audit");
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const before = assemble(root);
+      expect(codes(before)).not.toContain("audit-shard-refused");
+      const shard = path.join(audit, "other-clone-99887766aabb.md");
+      const copy = path.join(root, "elsewhere.md");
+      fs.renameSync(shard, copy);
+      fs.symlinkSync(copy, shard);
+      const after = assemble(root);
+      expect(after.warnings).toContainEqual({
+        code: "audit-shard-refused",
+        paths: [path.relative(root, shard)],
+      });
+      expect(after.totalEvents).toBeLessThan(before.totalEvents);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("a declared State Version mismatch BLOCKS the contract, it does not just warn", () => {
     // Warning and then handing the matrix the same catalogue was the worst of both: the
     // page said the two sources disagree and then judged the cells against the newer

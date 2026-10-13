@@ -431,7 +431,11 @@ export function assemble(
     catalog?.scopeGrid,
   );
 
-  const ledger = readAuditLedger(recordDir, isStage);
+  const ledger = readAuditLedger(recordDir, isStage, root);
+  // Before `audit-empty`, which a refusal can cause: the page names the cause first.
+  if (ledger.refused && ledger.refused.length > 0) {
+    warnings.push({ code: "audit-shard-refused", paths: ledger.refused });
+  }
   if (ledger.events.length === 0) warnings.push({ code: "audit-empty" });
 
   const sensors = readSensorReport(recordDir, ledger);

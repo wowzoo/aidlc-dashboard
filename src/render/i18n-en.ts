@@ -53,6 +53,8 @@ const warn: WarnStrings = {
     "artifact-contract judgements and stage attribution fall back to approximations. If the harness tree lives elsewhere, point --harness at it",
 
   auditEmpty: "The audit ledger is empty — the hooks may never have fired",
+  auditShardRefused: (paths) =>
+    `${plural(paths.length, "audit path")} not read, because the engine refuses them — reached through a symlink, or not a regular file (a symlinked workspace root is fine): ${paths.join(", ")}`,
 
   stateVersionMismatch: (stateVersion, harnessVersion, harnessDir) =>
     `state.md declares State Version ${stateVersion}, but the harness supports ${harnessVersion} (${harnessDir}/tools/aidlc-lib.ts) — the engine refuses next, report and doctor on this combination. Contract judgements cannot be made against a different generation, so they were withheld`,

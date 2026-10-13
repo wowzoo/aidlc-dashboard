@@ -43,6 +43,16 @@
 // which stops every receipt stamped before the copy from settling. `copiedAuditBlocks`
 // is the engine's rule, transcribed, and the ledger skips what it names.
 //
+// A SHARD REACHED THROUGH A SYMLINK IS REFUSED, as the engine's `readAuditShardTexts`
+// and `auditShards` refuse it (2.11.0 aidlc-lib.ts, `assertNoSymlinkInChainOrThrow` +
+// `readAppendOnlyFileNoFollowOrThrow`): no directory between the workspace root and the
+// shard, and not the shard itself, may be a symlink, and a shard must be a regular file.
+// The root is the anchor, not part of the chain, so a symlinked workspace root — the
+// usual way to point this reader at a copy — is still read. A reader that followed links
+// counted rows the engine never sees. Refusals are listed in `refused`, never silent.
+// Measured 2026-10-14 over the 150 records on this machine: none has a link in that
+// chain, so no page changes on them.
+//
 // Node fs only, never throws: an unreadable shard is skipped, not fatal.
 
 import * as fs from "node:fs";
@@ -80,6 +90,13 @@ export interface AuditLedger {
   counts: Map<string, number>;
   /** Shard basenames read, for provenance ("2 clones"). */
   shards: string[];
+  /**
+   * Paths (relative to the anchor) the engine would refuse and this reader therefore
+   * did not read: a symlinked shard or directory on the chain, or a `.md` that is not
+   * a regular file. A refused audit dir appears once, for every shard under it.
+   * Always set by `readAuditLedger`; optional for ledgers built by hand in tests.
+   */
+  refused?: string[];
   /** Earliest / latest timestamp seen, undefined for an empty ledger. */
   firstTs?: string;
   lastTs?: string;
@@ -273,8 +290,32 @@ export function copiedAuditBlocks(
 }
 
 /** Absolute paths of the audit shards in a record dir, sorted for determinism. */
-function shardPaths(recordDir: string): string[] {
+/** Does any component of `rel`, walked down from `anchor`, exist as a symlink? */
+function linkInChain(anchor: string, rel: string): boolean {
+  let current = anchor;
+  for (const part of rel.split(path.sep)) {
+    if (part === "" || part === ".") continue;
+    current = path.join(current, part);
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) return true;
+    } catch {
+      // Does not exist (yet) — nothing to redirect through.
+    }
+  }
+  return false;
+}
+
+/**
+ * The `.md` files of `recordDir/audit/`, sorted, unless the chain from `anchor` to that
+ * dir holds a symlink (or leaves `anchor`), in which case the dir is refused whole.
+ */
+function shardPaths(recordDir: string, anchor: string, refused: string[]): string[] {
   const dir = path.join(recordDir, "audit");
+  const rel = path.relative(anchor, dir);
+  if (path.isAbsolute(rel) || rel.split(path.sep).includes("..") || linkInChain(anchor, rel)) {
+    if (fs.existsSync(dir)) refused.push(rel);
+    return [];
+  }
   let entries: string[];
   try {
     entries = fs.readdirSync(dir);
@@ -287,21 +328,52 @@ function shardPaths(recordDir: string): string[] {
     .map((f) => path.join(dir, f));
 }
 
+const NO_FOLLOW = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+
+/**
+ * A shard's text, or `"refused"` when the engine would not read it: a symlink (the open
+ * does not follow one; `lstat` covers a platform without `O_NOFOLLOW`) or not a regular
+ * file. `undefined` for any other failure — a vanished shard is skipped, as before.
+ */
+function readShard(p: string): string | "refused" | undefined {
+  let fd: number;
+  try {
+    fd = fs.openSync(p, fs.constants.O_RDONLY | NO_FOLLOW | fs.constants.O_NONBLOCK);
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ELOOP" ? "refused" : undefined;
+  }
+  try {
+    if (!fs.fstatSync(fd).isFile() || fs.lstatSync(p).isSymbolicLink()) return "refused";
+    return fs.readFileSync(fd, "utf-8");
+  } catch {
+    return undefined;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 /**
  * Read every shard under `recordDir/audit/` and return the merged, time-ordered
  * ledger. Pass `isStage` (from the workspace's stage catalogue) so Context-only
  * events attribute to the right stage; without it attribution falls back to
- * positional guessing. An unreadable shard is skipped. Never throws; an absent
- * audit dir yields an empty ledger.
+ * positional guessing. `anchor` is the workspace root the symlink chain is checked
+ * from (see the header); without one it is checked from `recordDir` down. An
+ * unreadable shard is skipped, a refused one listed. Never throws; an absent audit
+ * dir yields an empty ledger.
  */
-export function readAuditLedger(recordDir: string, isStage?: IsStage): AuditLedger {
+export function readAuditLedger(
+  recordDir: string,
+  isStage?: IsStage,
+  anchor: string = recordDir,
+): AuditLedger {
   const events: AuditEvent[] = [];
   const read: { shard: string; content: string }[] = [];
+  const refused: string[] = [];
 
-  for (const p of shardPaths(recordDir)) {
-    try {
-      read.push({ shard: path.basename(p), content: fs.readFileSync(p, "utf-8") });
-    } catch {}
+  for (const p of shardPaths(recordDir, anchor, refused)) {
+    const content = readShard(p);
+    if (content === "refused") refused.push(path.relative(anchor, p));
+    else if (content !== undefined) read.push({ shard: path.basename(p), content });
   }
   const copied = copiedAuditBlocks(read);
   read.forEach(({ shard, content }, index) => {
@@ -321,6 +393,7 @@ export function readAuditLedger(recordDir: string, isStage?: IsStage): AuditLedg
     events,
     counts,
     shards,
+    refused,
     firstTs: events.length > 0 ? events[0]?.ts : undefined,
     lastTs: events.length > 0 ? events[events.length - 1]?.ts : undefined,
   };
