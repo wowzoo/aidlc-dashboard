@@ -19,8 +19,8 @@
 //
 //   HUMAN  a gate-opening event followed by one of the engine's answer receipts
 //          (GATE_CLOSE — HUMAN_TURN is only one of eight) that answers THAT ask:
-//          same clone, and a receipt that names one names the same stage
-//          (`answersAsk`).
+//          same clone, a turn that replied, and a receipt for the same stage, unit
+//          and gate (`answersAsk`).
 //   PARKED every clone PRESENT at that moment is between WORKFLOW_PARKED and
 //          WORKFLOW_UNPARKED, plus an inferred session break when an old ledger has
 //          no balanced park pair.
@@ -101,46 +101,68 @@ const GATE_CLOSE = new Set([
   "PLAN_APPROVAL_RECORDED",
 ]);
 
-/** A `Gate Stages` list, as the writers join it (`", "`). */
-function stageList(raw: string | undefined): string[] {
-  return (raw ?? "")
-    .split(",")
-    .map((v) => v.trim())
-    .filter((v) => v.length > 0);
-}
-
 /**
  * Does receipt `b` answer the ask `a` opened? Being next to it in the merged ledger
  * is not enough — the rule used to read only the two event names, so another
- * clone's turn, or a receipt for a different stage, closed a wait it had nothing to
- * do with. The pairing is the engine's own:
+ * clone's turn, or a receipt for a different stage or unit, could close a wait it had
+ * nothing to do with. What it asks of the pair:
  *
- *   - SAME CLONE, always. Two clones' rows adjacent in the merged ledger are two
- *     developers; one answering does not end the other's wait. This is also all the
- *     identity `HUMAN_TURN` has — it is presence evidence on that clone, naming no
- *     stage.
- *   - A gate (`STAGE_AWAITING_APPROVAL`) is answered by the gate decision for it: a
- *     `GATE_APPROVED`/`GATE_REJECTED` whose `Stage` or `Gate Stages` names the stage
- *     (`pendingGate` clears on the same rows). A recorded answer to some OTHER
- *     question is not that.
- *   - A decision (`DECISION_RECORDED`) is answered as `scan/decision-wait.ts` pairs
- *     it: a row of the same stage that `decisionAnsweredBy` accepts — so a gate
- *     decision closes only the two gate-answered checkpoints, with their key.
+ *   - SAME CLONE. A dashboard policy, not an engine rule — the engine's gate and
+ *     decision readers pair across shards. But two clones' rows adjacent in the merged
+ *     ledger are two developers, the reading the conversation bucket already takes, and
+ *     a rule that reads only adjacency cannot tell an answer from elsewhere apart from
+ *     another developer's unrelated work.
+ *   - A `HUMAN_TURN` that REPLIED (`isReplyTurn`): `Reply: command` is only a command
+ *     to AIDLC and `Reply: question` only a question about a switch, and the engine
+ *     counts neither as the person's reply to what was shown. A turn that did reply
+ *     shows the person came back; it names no ask, so it is the nearest marker, not a
+ *     proof that THAT ask was answered.
+ *   - A gate (`STAGE_AWAITING_APPROVAL`) is answered by a `GATE_APPROVED`/
+ *     `GATE_REJECTED` for the same gate: same `Stage`, same `Unit` (both absent for a
+ *     stage gate), same `Gate Scope` (default `per-stage`) and, when both rows carry
+ *     one, the same `Attempt Generation` — the fields `unitGateStatus` matches on; the
+ *     claim attempt itself lives in checkout state this reader cannot see. A unit-end
+ *     gate is opened and approved on the final stage only (the writer refuses
+ *     otherwise), so `Stage` equality is enough there. A `Recovered: true` gate row
+ *     opens nothing: the approve-time backstop writes it while handling the approval,
+ *     not to ask (`pendingGate` skips it too). `Revalidated: true` does open: the gate
+ *     was already open, and the time after it is still the gate's.
+ *   - A decision (`DECISION_RECORDED`) is answered by a row of the same stage that
+ *     `decisionAnsweredBy` accepts — so a gate decision closes only the two
+ *     gate-answered checkpoints, with their key — and, when both carry a `Unit`, of
+ *     the same unit. The unit condition is this reader's: the engine's ordinary
+ *     pending-decision reader closes on any answer of the stage.
  *
  * Measured over the 150 records on this machine (4 of them multi-clone): of 676
- * gate→receipt gaps, none crossed clones or stages, so no figure moved there: what
- * changes is which pairs the rule is able to claim, not what it found on those trees.
+ * gate→receipt gaps, none crossed clones, and none of the 10 receipts that name a
+ * stage named another one. The other 666 end in a `HUMAN_TURN`, which names none, so
+ * whether those turns answered that ask is not something the ledger can show.
  */
 function answersAsk(a: AuditEvent, b: AuditEvent): boolean {
   if (a.shard !== b.shard) return false;
-  if (b.event === "HUMAN_TURN") return true;
+  if (b.event === "HUMAN_TURN") {
+    const reply = b.fields.Reply;
+    return reply !== "command" && reply !== "question";
+  }
   const stage = a.fields.Stage;
-  if (stage === undefined) return false;
+  if (stage === undefined || b.fields.Stage !== stage) return false;
   if (a.event === "STAGE_AWAITING_APPROVAL") {
     if (b.event !== "GATE_APPROVED" && b.event !== "GATE_REJECTED") return false;
-    return b.fields.Stage === stage || stageList(b.fields["Gate Stages"]).includes(stage);
+    const attempt = (e: AuditEvent) => e.fields["Attempt Generation"];
+    return (
+      a.fields.Unit === b.fields.Unit &&
+      (a.fields["Gate Scope"] ?? "per-stage") === (b.fields["Gate Scope"] ?? "per-stage") &&
+      (attempt(a) === undefined || attempt(b) === undefined || attempt(a) === attempt(b))
+    );
   }
-  return b.fields.Stage === stage && decisionAnsweredBy(a, b);
+  const unit = (e: AuditEvent) => e.fields.Unit;
+  if (unit(a) !== undefined && unit(b) !== undefined && unit(a) !== unit(b)) return false;
+  return decisionAnsweredBy(a, b);
+}
+
+/** A backfilled gate row: written while an approval is handled, not to ask. */
+function opensWait(e: AuditEvent): boolean {
+  return GATE_OPEN.has(e.event) && e.fields.Recovered !== "true";
 }
 
 /**
@@ -680,7 +702,7 @@ export function classifyGaps(
       parkedSec += gap;
       bucket = "parked";
     } else if (
-      GATE_OPEN.has(a.event) &&
+      opensWait(a) &&
       GATE_CLOSE.has(b.event) &&
       gap >= IDLE_FLOOR_SEC &&
       answersAsk(a, b)

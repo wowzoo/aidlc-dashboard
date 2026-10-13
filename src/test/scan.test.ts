@@ -1720,7 +1720,8 @@ describe("gap classification", () => {
     });
     const t0 = "2026-01-01T00:00:00Z";
     const t1 = "2026-01-01T01:00:00Z";
-    // Another clone's turn or approval is another developer.
+    // Another clone's turn or approval is another developer — this reader's policy; the
+    // engine's own readers pair across shards.
     expect(wait(at(t0, "DECISION_RECORDED", { Stage: "rv" }), at(t1, "HUMAN_TURN", {}, "x"))).toBe(
       0,
     );
@@ -1766,13 +1767,58 @@ describe("gap classification", () => {
         at(t1, "GATE_APPROVED", { ...unitGate, Unit: "u2" }),
       ),
     ).toBe(0);
-    // A unit-end checkpoint names its last stage in Stage and all of them in Gate Stages.
+    // A team unit gate is matched by unit and gate scope too (`unitGateStatus`), and a
+    // unit-end gate opens and closes on the final stage — so Stage alone pairs it.
+    const unitEnd = { Stage: "cg", Unit: "u1", "Gate Scope": "unit-end", "Gate Stages": "fd, cg" };
+    expect(wait(at(t0, "STAGE_AWAITING_APPROVAL", unitEnd), at(t1, "GATE_APPROVED", unitEnd))).toBe(
+      3600,
+    );
     expect(
       wait(
-        at(t0, "STAGE_AWAITING_APPROVAL", { Stage: "fd" }),
-        at(t1, "GATE_APPROVED", { Stage: "cg", "Gate Stages": "fd, nfr, cg" }),
+        at(t0, "STAGE_AWAITING_APPROVAL", unitEnd),
+        at(t1, "GATE_APPROVED", { ...unitEnd, Unit: "u2" }),
       ),
-    ).toBe(3600);
+    ).toBe(0);
+    expect(
+      wait(
+        at(t0, "STAGE_AWAITING_APPROVAL", unitEnd),
+        at(t1, "GATE_APPROVED", { ...unitEnd, "Gate Scope": "per-stage" }),
+      ),
+    ).toBe(0);
+    expect(
+      wait(
+        at(t0, "STAGE_AWAITING_APPROVAL", { Stage: "cg" }),
+        at(t1, "GATE_APPROVED", { Stage: "cg", Unit: "u1" }),
+      ),
+    ).toBe(0);
+    // A decision's answer for another unit of the same stage is another ask's.
+    expect(
+      wait(
+        at(t0, "DECISION_RECORDED", { Stage: "cg", Unit: "u1" }),
+        at(t1, "QUESTION_ANSWERED", { Stage: "cg", Unit: "u2" }),
+      ),
+    ).toBe(0);
+    // A turn that was only a command, or only a question about a switch, did not reply
+    // (`isReplyTurn`).
+    for (const Reply of ["command", "question"]) {
+      expect(
+        wait(at(t0, "DECISION_RECORDED", { Stage: "rv" }), at(t1, "HUMAN_TURN", { Reply })),
+      ).toBe(0);
+    }
+  });
+
+  test("a backfilled gate row opens nothing; a revalidated one is still the open gate", () => {
+    // The approve-time backstop writes `Recovered: true` while handling the approval.
+    const recovered = classifyGaps([
+      evf("2026-01-01T00:00:00Z", "STAGE_AWAITING_APPROVAL", { Stage: "rv", Recovered: "true" }),
+      evf("2026-01-01T01:00:00Z", "GATE_APPROVED", { Stage: "rv" }),
+    ]);
+    expect(recovered.humanWaitSec).toBe(0);
+    const revalidated = classifyGaps([
+      evf("2026-01-01T00:00:00Z", "STAGE_AWAITING_APPROVAL", { Stage: "rv", Revalidated: "true" }),
+      evf("2026-01-01T01:00:00Z", "GATE_APPROVED", { Stage: "rv" }),
+    ]);
+    expect(revalidated.humanWaitSec).toBe(3600);
   });
 
   test("an ask with no Stage is not paired with a receipt that names one", () => {
