@@ -1943,6 +1943,47 @@ describe("gap classification", () => {
     expect(revalidated.humanWaitSec).toBe(3600);
   });
 
+  test("another clone's row between an ask and its answer does not hide the wait", () => {
+    // The wait is read on the asking clone's own rows, so one foreign row between the
+    // ask and its answer no longer breaks it — while that clone is not otherwise there.
+    const on = (ts: string, event: string, shard: string, fields: Record<string, string> = {}) => ({
+      ...evf(ts, event, fields),
+      shard,
+    });
+    const lone = classifyGaps([
+      on("2026-01-01T00:00:00Z", "DECISION_RECORDED", "a", { Stage: "rv" }),
+      on("2026-01-01T00:20:00Z", "ARTIFACT_UPDATED", "b"),
+      on("2026-01-01T01:00:00Z", "HUMAN_TURN", "a"),
+    ]);
+    expect(lone.humanWaitSec).toBe(3600);
+  });
+
+  test("a clone that is working while another waits keeps the gap out of the wait", () => {
+    const on = (ts: string, event: string, shard: string, fields: Record<string, string> = {}) => ({
+      ...evf(ts, event, fields),
+      shard,
+    });
+    // b writes before, during and after a's wait: b is present and not waiting.
+    const g = classifyGaps([
+      on("2026-01-01T00:00:00Z", "ARTIFACT_UPDATED", "b"),
+      on("2026-01-01T00:01:00Z", "DECISION_RECORDED", "a", { Stage: "rv" }),
+      on("2026-01-01T00:02:00Z", "ARTIFACT_UPDATED", "b"),
+      on("2026-01-01T00:03:00Z", "ARTIFACT_UPDATED", "b"),
+      on("2026-01-01T00:04:00Z", "HUMAN_TURN", "a"),
+      on("2026-01-01T00:05:00Z", "ARTIFACT_UPDATED", "b"),
+    ]);
+    expect(g.humanWaitSec).toBe(0);
+    // Both clones waiting on a person at once is the team waiting.
+    const both = classifyGaps([
+      on("2026-01-01T00:00:00Z", "DECISION_RECORDED", "a", { Stage: "rv" }),
+      on("2026-01-01T00:01:00Z", "STAGE_AWAITING_APPROVAL", "b", { Stage: "fd" }),
+      on("2026-01-01T00:30:00Z", "HUMAN_TURN", "a"),
+      on("2026-01-01T00:40:00Z", "GATE_APPROVED", "b", { Stage: "fd" }),
+    ]);
+    // Every gap counts: before b's first row only a is there, and after a's last only b.
+    expect(both.humanWaitSec).toBe(2400);
+  });
+
   test("an ask with no Stage is not paired with a receipt that names one", () => {
     // Both are required fields in 2.11; a row missing one cannot be shown to answer it.
     const g = classifyGaps([
@@ -2290,8 +2331,10 @@ describe("per-worker decomposition", () => {
       at("2026-01-01T08:00:00Z", "HUMAN_TURN", "a.md"),
     ].sort((x, y) => (x.ts < y.ts ? -1 : 1));
 
-    // Merged: the gate→HUMAN_TURN pair is no longer adjacent, so idle is 0.
-    expect(classifyGaps(events).idleSec).toBe(0);
+    // Merged: A's wait is read on A's own rows, so B's rows no longer erase it — but
+    // the 20 minutes B is between its rows are B's work, not the team waiting. Before
+    // B's first row and after its last, only A is there.
+    expect(classifyGaps(events).idleSec).toBe(2400);
 
     // Per worker: A's full hour of waiting is recovered.
     const workers = buildWorkers(events);

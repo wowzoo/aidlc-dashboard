@@ -17,10 +17,11 @@
 // most of it is the engine waiting for a human at an approval gate (measured on
 // one run: 58 of 79 minutes). So each gap between consecutive events is sorted:
 //
-//   HUMAN  a gate-opening event followed by one of the engine's answer receipts
-//          (GATE_CLOSE — HUMAN_TURN is only one of eight) that answers THAT ask:
-//          same clone, a turn that replied, and a receipt for the same stage, unit
-//          and gate (`answersAsk`).
+//   HUMAN  a gate-opening event followed, on the SAME clone's rows, by one of the
+//          engine's answer receipts (GATE_CLOSE — HUMAN_TURN is only one of eight)
+//          that answers THAT ask: a turn that replied, a receipt for the same stage,
+//          unit and gate (`answersAsk`). A merged gap counts while every present
+//          clone is waiting or parked (`askWaits`).
 //   PARKED every clone PRESENT at that moment is between WORKFLOW_PARKED and
 //          WORKFLOW_UNPARKED, plus an inferred session break when an old ledger has
 //          no balanced park pair.
@@ -102,16 +103,15 @@ const GATE_CLOSE = new Set([
 ]);
 
 /**
- * Does receipt `b` answer the ask `a` opened? Being next to it in the merged ledger
- * is not enough — the rule used to read only the two event names, so another
- * clone's turn, or a receipt for a different stage or unit, could close a wait it had
- * nothing to do with. What it asks of the pair:
+ * Does receipt `b` answer the ask `a` opened? Being next to it is not enough — the
+ * rule used to read only the two event names, so another clone's turn, or a receipt
+ * for a different stage or unit, could close a wait it had nothing to do with. What
+ * it asks of the pair:
  *
- *   - SAME CLONE. A dashboard policy, not an engine rule — the engine's gate and
- *     decision readers pair across shards. But two clones' rows adjacent in the merged
- *     ledger are two developers, the reading the conversation bucket already takes, and
- *     a rule that reads only adjacency cannot tell an answer from elsewhere apart from
- *     another developer's unrelated work.
+ *   - SAME CLONE. `askWaits` pairs a clone's own rows, so this holds by construction;
+ *     the check stays for a direct caller. A dashboard reading, not an engine rule —
+ *     the engine's gate and decision readers pair across shards — because a turn on
+ *     another clone is another developer.
  *   - A `HUMAN_TURN` that REPLIED (`isReplyTurn`): `Reply: command` is only a command
  *     to AIDLC and `Reply: question` only a question about a switch, and the engine
  *     counts neither as the person's reply to what was shown. A turn that did reply
@@ -158,6 +158,38 @@ function answersAsk(a: AuditEvent, b: AuditEvent): boolean {
   const unit = (e: AuditEvent) => e.fields.Unit;
   if (unit(a) !== undefined && unit(b) !== undefined && unit(a) !== unit(b)) return false;
   return decisionAnsweredBy(a, b);
+}
+
+/**
+ * For each merged gap `i` (event i → i+1), the clones that are waiting on a person
+ * across it. A clone waits from an ask to its OWN next row when that row answers the
+ * ask (`answersAsk`) at least `IDLE_FLOOR_SEC` later — the old adjacency rule, read on
+ * the clone's own rows instead of the merged ledger. Read on the merged ledger, one
+ * other clone's row between an ask and its answer made the wait vanish; read here, it
+ * does not, and the caller still counts a gap only when every PRESENT clone is waiting
+ * or parked, so a clone working through another's wait keeps that time out of it. One
+ * clone gives exactly the old reading. An ask never answered stays out, as before.
+ */
+function askWaits(events: AuditEvent[]): (Set<string> | undefined)[] {
+  const waiting: (Set<string> | undefined)[] = [];
+  const last = new Map<string, number>();
+  events.forEach((e, j) => {
+    const prev = last.get(e.shard);
+    last.set(e.shard, j);
+    if (prev === undefined) return;
+    const a = events[prev]!;
+    if (!opensWait(a) || !GATE_CLOSE.has(e.event) || !answersAsk(a, e)) return;
+    if (!(secs(a.ts, e.ts) >= IDLE_FLOOR_SEC)) return;
+    for (let k = prev; k < j; k++) {
+      let set = waiting[k];
+      if (!set) {
+        set = new Set();
+        waiting[k] = set;
+      }
+      set.add(e.shard);
+    }
+  });
+  return waiting;
 }
 
 /** A backfilled gate row: written while an approval is handled, not to ask. */
@@ -678,6 +710,7 @@ export function classifyGaps(
   };
 
   const delegatedGaps = delegationGaps(events);
+  const waiting = askWaits(events);
 
   for (let i = 0; i < events.length - 1; i++) {
     const a = events[i]!;
@@ -702,10 +735,8 @@ export function classifyGaps(
       parkedSec += gap;
       bucket = "parked";
     } else if (
-      opensWait(a) &&
-      GATE_CLOSE.has(b.event) &&
-      gap >= IDLE_FLOOR_SEC &&
-      answersAsk(a, b)
+      waiting[i] !== undefined &&
+      present.every((shard) => waiting[i]?.has(shard) || parkedShards.has(shard))
     ) {
       humanWaitSec += gap;
       bucket = "humanWait";
