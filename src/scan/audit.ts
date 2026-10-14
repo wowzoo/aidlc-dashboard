@@ -319,7 +319,7 @@ function boundaryParts(rel: string): string[] | undefined {
  * component that exists as a symlink? `assertNoSymlinkInChainOrThrow`: a component
  * that does not exist redirects nothing.
  */
-function chainIsClean(anchor: string, rel: string): boolean {
+export function chainIsClean(anchor: string, rel: string): boolean {
   const parts = boundaryParts(rel);
   if (parts === undefined) return false;
   let current = anchor;

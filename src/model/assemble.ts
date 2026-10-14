@@ -23,6 +23,7 @@ import { type Strings, strings } from "../render/i18n";
 import { DEFAULT_LOCALE } from "../render/locale";
 import { type StageArtifact, listStageArtifacts } from "../scan/artifacts";
 import { type AuditLedger, readAuditLedger } from "../scan/audit";
+import { readCheckpointProofs } from "../scan/checkpoint-proofs";
 import { readDeferrals } from "../scan/deferrals";
 import { ENGINE_DIR } from "../scan/engine-dir";
 import { readHealth } from "../scan/hooks-health";
@@ -242,7 +243,7 @@ function receiptPolicy(
   state: ReturnType<typeof parseState>,
   catalog: StageCatalog | undefined,
   team: boolean,
-): Parameters<typeof readUnitLifecycle>[1] {
+): NonNullable<Parameters<typeof readUnitLifecycle>[1]> {
   const checkpoints = state.constructionCheckpoints === "enabled";
   const unitMajor = state.constructionIteration?.trim() === "unit-major" || checkpoints;
   // Construction rows only, and not a stage the run skipped at runtime (`[S]`): the
@@ -611,6 +612,13 @@ export function assemble(
   }
 
   const construction = state.phases.find((p) => p.key === "construction");
+  // The same catalogue the matrix is given: one it refused (roster or version mismatch)
+  // must not keep steering the receipt policy or the jump order either.
+  const policy = receiptPolicy(
+    state,
+    rosterMismatch || versionMismatch ? undefined : catalog,
+    team,
+  );
   const matrix = construction
     ? // A mismatched roster means the catalogue describes a different run shape, so the
       // matrix must not claim contract-awareness. Withholding the catalogue routes it
@@ -622,17 +630,22 @@ export function assemble(
         rosterMismatch || versionMismatch ? undefined : catalog,
         // Completion receipts come from the audit. Where a stage uses the unit
         // lifecycle they outrank artifact presence — the engine's own rule.
-        // The same catalogue the matrix is given: one it refused (roster or version
-        // mismatch) must not keep steering the receipt policy or the jump order either.
-        readUnitLifecycle(
-          ledger.events,
-          receiptPolicy(state, rosterMismatch || versionMismatch ? undefined : catalog, team),
-        ),
+        readUnitLifecycle(ledger.events, policy),
         // An unverified version does NOT throw the contract away — it withholds the claim
         // that the judgement matches the engine's. Separate axes, not one.
         stateCompat,
       )
     : undefined;
+  // `receiptsRequired` is this reader's `constructionCheckpointsApply` — the one condition
+  // under which the engine resolves a unit checkpoint and so reads its proof.
+  const checkpointProofs =
+    matrix && policy.receiptsRequired
+      ? readCheckpointProofs(
+          recordDir,
+          matrix.units.map((u) => u.name),
+          state.skeletonStance,
+        )
+      : [];
 
   // Per-stage file listing for the overview's expandable rows, keyed the way the
   // renderer identifies a row. SKIP stages are scanned too — a skipped stage that
@@ -776,6 +789,7 @@ export function assemble(
     identity,
     state,
     matrix,
+    checkpointProofs,
     sensors,
     questions,
     diaries,

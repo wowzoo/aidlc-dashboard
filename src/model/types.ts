@@ -17,6 +17,7 @@
 import type { TokenViewModel } from "../credit/claude/token-model";
 import type { CreditViewModel } from "../credit/view/credit-model";
 import type { StageArtifact } from "../scan/artifacts";
+import type { CheckpointProofNote } from "../scan/checkpoint-proofs";
 import type { DeferralReport } from "../scan/deferrals";
 import type { HealthReport } from "../scan/hooks-health";
 import type { ConstructionMatrix } from "../scan/matrix";
@@ -231,6 +232,12 @@ export interface DashboardModel {
   identity: RunIdentity;
   state: AidlcState;
   matrix?: ConstructionMatrix;
+  /**
+   * Unit checkpoint proofs the engine cannot count verified (scan/checkpoint-proofs.ts) —
+   * only where checkpoints are in force. A diagnostic beside the matrix: the next move is
+   * the agent's, so none of them is a wait.
+   */
+  checkpointProofs?: CheckpointProofNote[];
   sensors: SensorReport;
   questions: QuestionsReport;
   diaries: DiaryReport;

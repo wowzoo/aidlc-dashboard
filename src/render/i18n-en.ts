@@ -271,6 +271,47 @@ const overview: OverviewStrings = {
     "state.md's State Version could not be checked against the harness, so this is an <b>unverified contract</b> — the contract is shown as read, but this page does not warrant that its completion judgements match the engine's",
   legendNoContract: (receiptAware) =>
     `No stage-graph.json, so contract judgements are impossible — a cell means file presence${receiptAware ? " and the completion receipt" : ""} only`,
+
+  checkpointHeading: "Checkpoint verification",
+  checkpointNote:
+    "Read from each unit's checkpoint proof. While a proof reads like this, the engine counts the checkpoint not verified, and it neither asks for nor accepts the unit's approval — the next move is the agent's (verify again), so none of this is counted as a wait. A proof that passed is not listed: whether it is still current depends on a fingerprint this page does not reproduce.",
+  checkpointKind: (kind) =>
+    kind === "skeleton" ? "walking-skeleton checkpoint" : "unit checkpoint",
+  checkpointFailed: (unit, kind, detail, startedAt) =>
+    `${unit} — ${kind}: verification did not pass (${detail}), run ${startedAt}`,
+  checkpointFault: (fault, exitCode, signal) =>
+    fault === "exit-code"
+      ? exitCode === null
+        ? "no exit code"
+        : `exit ${exitCode}`
+      : fault === "signal"
+        ? `signal ${signal ?? "?"}`
+        : fault === "error"
+          ? "the check could not run"
+          : fault === "evidence-changed"
+            ? "the unit's evidence changed while it ran"
+            : fault === "unfinished"
+              ? "did not finish"
+              : fault === "not-verified"
+                ? "not verified"
+                : fault === "wrong-unit"
+                  ? "the proof names another unit"
+                  : "the proof is for another checkpoint kind",
+  checkpointMalformed: (unit, kind) =>
+    `${unit} — ${kind}: the proof file is not one the engine accepts (unparseable, or a field of the wrong shape), so it reads as no proof — and with the file present, the committed verification row does not stand in for it`,
+  checkpointUnreadable: (unit, kind, cause) =>
+    `${unit} — ${kind}: the proof could not be read (${
+      cause === "link"
+        ? "a symbolic link on its path — the engine refuses it and stops with an error"
+        : cause === "not-file"
+          ? "not a regular file — the engine refuses it and stops with an error"
+          : cause === "too-large"
+            ? "larger than this reader's 1 MB bound"
+            : "a read error"
+    })`,
+  checkpointKindUndetermined:
+    "Skeleton Stance is scope-dependent and the scope file is not read here, so both of the first unit's proofs are checked — only one of them is the one the engine reads.",
+  checkpointOutputTail: "output tail",
 };
 
 const page: PageStrings = {

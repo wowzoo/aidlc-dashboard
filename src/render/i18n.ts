@@ -25,6 +25,7 @@
 // See the `### Page language` section in CLAUDE.md for the rest of the reasoning.
 
 import type { Locale, SourceKind } from "../model/types";
+import type { CheckpointKind, CheckpointProofNote, ProofFault } from "../scan/checkpoint-proofs";
 import type { OwnerStatus } from "../scan/deferrals";
 import type { CellState, ReceiptReason } from "../scan/matrix";
 import type { StageEndKind } from "../scan/timing";
@@ -324,6 +325,23 @@ export interface OverviewStrings {
   /** Shown when stateCompat !== "verified". Carries `<b>` markup. */
   readonly legendUnverifiedContract: string;
   legendNoContract(receiptAware: boolean): string;
+
+  // Unit checkpoint proofs the engine cannot count verified (scan/checkpoint-proofs.ts).
+  readonly checkpointHeading: string;
+  /** Why none of these is a wait: the engine sends it back to the agent. */
+  readonly checkpointNote: string;
+  checkpointKind(kind: CheckpointKind): string;
+  /** `detail` is the joined `checkpointFault` phrases. */
+  checkpointFailed(unit: string, kind: string, detail: string, startedAt: string): string;
+  checkpointFault(fault: ProofFault, exitCode: number | null, signal: string | null): string;
+  checkpointMalformed(unit: string, kind: string): string;
+  checkpointUnreadable(
+    unit: string,
+    kind: string,
+    cause: Extract<CheckpointProofNote, { state: "unreadable" }>["cause"],
+  ): string;
+  readonly checkpointKindUndetermined: string;
+  readonly checkpointOutputTail: string;
 }
 
 export interface PageStrings {

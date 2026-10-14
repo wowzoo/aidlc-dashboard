@@ -8,8 +8,10 @@
 
 import type { DashboardModel } from "../model/types";
 import type { StageArtifact } from "../scan/artifacts";
+import type { CheckpointProofNote } from "../scan/checkpoint-proofs";
 import type { CellState, ConstructionMatrix, ReceiptReason } from "../scan/matrix";
 import type { AidlcState, StageStatus } from "../scan/parser";
+import { viewLink } from "./card-kit";
 import { bar, esc, pill, section, shortTs } from "./common";
 import type { Strings } from "./i18n";
 
@@ -267,6 +269,48 @@ ${batches}`;
 }
 
 /**
+ * Unit checkpoint proofs the engine cannot count verified, under the matrix. A unit-level
+ * fact, not a cell's: one checkpoint covers every per-unit stage of the unit. Tree text
+ * (the proof's output tail) goes through esc(); the proof file links to /view.
+ */
+function checkpointList(notes: CheckpointProofNote[], s: Strings): string {
+  if (notes.length === 0) return "";
+  const o = s.overview;
+  const items = notes
+    .map((n) => {
+      const kind = o.checkpointKind(n.kind);
+      const file = n.state === "unreadable" ? esc(n.rel) : viewLink(n.rel, n.rel);
+      const line =
+        n.state === "failed"
+          ? o.checkpointFailed(
+              n.unit,
+              kind,
+              // `verified: false` is what every other fault already implies (`verifyOnce`
+              // writes it from them), so it is named only when it stands alone.
+              (n.faults.length > 1 ? n.faults.filter((f) => f !== "not-verified") : n.faults)
+                .map((f) => o.checkpointFault(f, n.exitCode, n.signal))
+                .join(", "),
+              n.startedAt,
+            )
+          : n.state === "malformed"
+            ? o.checkpointMalformed(n.unit, kind)
+            : o.checkpointUnreadable(n.unit, kind, n.cause);
+      const tail = n.state === "failed" ? (n.error ?? (n.stderrTail || n.stdoutTail)) : "";
+      return `<li>${esc(line)} · <code>${file}</code>${
+        tail
+          ? `<details><summary>${esc(o.checkpointOutputTail)}</summary><pre>${esc(tail)}</pre></details>`
+          : ""
+      }</li>`;
+    })
+    .join("");
+  const undetermined = notes.some((n) => n.kindUndetermined)
+    ? `<p class="note">${esc(o.checkpointKindUndetermined)}</p>`
+    : "";
+  return `<h4>${esc(o.checkpointHeading)}</h4><ul class="note warn">${items}</ul>
+<p class="note">${esc(o.checkpointNote)}</p>${undetermined}`;
+}
+
+/**
  * The state's own `## Unit Progress` table, when there is one. This is the AUTHORITY in
  * team/unit-major — an engine-owned projection of receipts, reviews and gates — so it is
  * shown before the disk matrix and labelled as such, rather than being reconstructed.
@@ -312,7 +356,13 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
     parts.push(section(s.overview.sectionUnitProgress, unitProgressTable(up, s), "unit-progress"));
   }
   if (m.matrix) {
-    parts.push(section(s.overview.sectionMatrix, matrixTable(m.matrix, s), "matrix"));
+    parts.push(
+      section(
+        s.overview.sectionMatrix,
+        matrixTable(m.matrix, s) + checkpointList(m.checkpointProofs ?? [], s),
+        "matrix",
+      ),
+    );
   } else {
     parts.push(
       section(

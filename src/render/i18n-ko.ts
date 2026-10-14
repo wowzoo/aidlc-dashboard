@@ -256,6 +256,47 @@ const overview: OverviewStrings = {
     "state.md 와 harness 의 State Version 을 대조하지 못해 <b>확인되지 않은 계약</b>입니다 — 계약 내용은 그대로 보여주지만, 엔진과 같은 완료 판정이라고 보증하지 않습니다",
   legendNoContract: (receiptAware) =>
     `stage-graph.json 부재로 계약 판정 불가 — 칸은 파일 유무${receiptAware ? "와 완료 수령증" : ""}만 뜻함`,
+
+  checkpointHeading: "체크포인트 검증",
+  checkpointNote:
+    "유닛마다 남는 체크포인트 증명 파일을 읽은 결과입니다. 증명이 이 상태인 동안 엔진은 체크포인트를 검증되지 않은 것으로 보고, 그 유닛의 승인을 묻지도 받지도 않습니다. 다음 행동은 에이전트 몫(다시 검증)이라 대기로 세지 않습니다. 통과한 증명은 적지 않습니다 — 아직 유효한지는 이 페이지가 재현하지 않는 fingerprint 에 달려 있습니다.",
+  checkpointKind: (kind) =>
+    kind === "skeleton" ? "walking-skeleton 체크포인트" : "유닛 체크포인트",
+  checkpointFailed: (unit, kind, detail, startedAt) =>
+    `${unit} — ${kind}: 검증이 통과하지 않았습니다 (${detail}), 실행 ${startedAt}`,
+  checkpointFault: (fault, exitCode, signal) =>
+    fault === "exit-code"
+      ? exitCode === null
+        ? "종료 코드 없음"
+        : `종료 코드 ${exitCode}`
+      : fault === "signal"
+        ? `시그널 ${signal ?? "?"}`
+        : fault === "error"
+          ? "검사를 실행하지 못함"
+          : fault === "evidence-changed"
+            ? "실행 중에 유닛의 근거가 바뀜"
+            : fault === "unfinished"
+              ? "끝나지 않음"
+              : fault === "not-verified"
+                ? "검증되지 않음"
+                : fault === "wrong-unit"
+                  ? "증명이 다른 유닛을 가리킴"
+                  : "증명이 다른 종류의 체크포인트 것임",
+  checkpointMalformed: (unit, kind) =>
+    `${unit} — ${kind}: 엔진이 받아들이지 않는 증명 파일입니다(파싱 불가이거나 필드 형식이 다름). 엔진은 증명이 없는 것으로 읽고, 파일이 있으므로 커밋된 검증 기록으로 대신하지도 않습니다`,
+  checkpointUnreadable: (unit, kind, cause) =>
+    `${unit} — ${kind}: 증명을 읽지 못했습니다 (${
+      cause === "link"
+        ? "경로에 심볼릭 링크가 있음 — 엔진은 이를 거부하고 오류로 멈춥니다"
+        : cause === "not-file"
+          ? "일반 파일이 아님 — 엔진은 이를 거부하고 오류로 멈춥니다"
+          : cause === "too-large"
+            ? "이 리더의 1MB 한도를 넘음"
+            : "읽기 오류"
+    })`,
+  checkpointKindUndetermined:
+    "Skeleton Stance 가 scope-dependent 이고 이 페이지는 scope 파일을 읽지 않아, 첫 유닛의 증명 두 개를 모두 확인합니다 — 엔진이 읽는 것은 그중 하나뿐입니다.",
+  checkpointOutputTail: "출력 끝부분",
 };
 
 const page: PageStrings = {

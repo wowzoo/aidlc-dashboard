@@ -172,6 +172,8 @@ export interface AidlcState {
   constructionIteration?: string;
   /** `Construction Checkpoints` (`enabled` turns on per-unit checkpoints). */
   constructionCheckpoints?: string;
+  /** `Skeleton Stance` (`on` / `off` / `scope-dependent`) — which checkpoint the first unit stops at. */
+  skeletonStance?: string;
   hasUnitProgress: boolean;
   /**
    * The engine's `## Runtime State` cache of where the run is held (2.11 aidlc-state.ts):
@@ -369,6 +371,7 @@ export function parseState(
   const unitOwnership = extractField(text, "Unit Ownership");
   const constructionIteration = extractField(text, "Construction Iteration");
   const constructionCheckpoints = extractField(text, "Construction Checkpoints");
+  const skeletonStance = extractField(text, "Skeleton Stance");
   // `## Unit Progress` is an engine-owned projection present only in team/unit-major.
   const unitProgress = parseUnitProgress(text);
   const hasUnitProgress = unitProgress !== undefined;
@@ -434,6 +437,7 @@ export function parseState(
     ...(unitOwnership ? { unitOwnership } : {}),
     ...(constructionIteration ? { constructionIteration } : {}),
     ...(constructionCheckpoints ? { constructionCheckpoints } : {}),
+    ...(skeletonStance ? { skeletonStance } : {}),
     hasUnitProgress,
     runtime: readRuntimeFields(text),
     ...(unitProgress ? { unitProgress } : {}),
