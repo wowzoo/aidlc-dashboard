@@ -4022,6 +4022,17 @@ describe("unit artifact mode (usesStageLevelPerUnitArtifacts)", () => {
     expect(unitArtifactMode(state("- [x] units-generation"), grid)).toBe("stage-level");
   });
 
+  test("a completed Units Generation keeps the units even with no readable action", () => {
+    // The engine checks EXECUTE first and completion second, so a checked row whose suffix
+    // is not EXECUTE|SKIP is still per-unit — only the uncompleted case is unknown.
+    expect(unitArtifactMode(state("- [x] units-generation — legacy-note", "custom"))).toBe(
+      "per-unit",
+    );
+    expect(unitArtifactMode(state("- [ ] units-generation — legacy-note", "custom"))).toBe(
+      "unknown",
+    );
+  });
+
   test("a scope the grid does not know, and no grid, claim neither", () => {
     expect(unitArtifactMode(state("- [ ] units-generation", "custom"), grid)).toBe("unknown");
     expect(unitArtifactMode(state("- [ ] units-generation"))).toBe("unknown");

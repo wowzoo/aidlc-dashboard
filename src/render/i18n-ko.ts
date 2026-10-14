@@ -243,6 +243,8 @@ const overview: OverviewStrings = {
   stageLevelUnits:
     "유닛별 매트릭스 없음 — 이 계획은 Units Generation 을 건너뛰므로 유닛이 없습니다. 유닛별 Construction stage 는 stage 단위로 한 번 실행되고, 산출물은 construction/<stage>/ 에 씁니다(위 Phase · Stage 참고).",
   stageLevelUnitsPill: "stage 단위",
+  unitModeUnknown:
+    "state 파일과 scope grid 어디에서도 Units Generation 의 실행 여부를 읽지 못해, 이 매트릭스는 산출물이 유닛별로 있다고 가정하고 그렸습니다.",
 
   tipPartial: (missing) => `미완: ${missing.join(", ")}`,
   tipComplete: (present) => `완료: ${present.join(", ")}`,

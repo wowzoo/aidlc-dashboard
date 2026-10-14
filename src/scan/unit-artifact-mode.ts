@@ -16,11 +16,18 @@
 // left in the graph by an earlier plan, every cell judged a per-unit path the engine
 // does not read.
 //
-// One deliberate difference: with no suffix and no grid action the engine's function
-// answers "stage level" (`undefined !== "EXECUTE"`), but its artifact resolver refuses
-// that state outright ("Units Generation has no effective action"). This reader cannot
-// tell which the run meant, so it returns `unknown` and claims neither — the matrix then
-// reads as it did before this module.
+// One deliberate difference: with no readable action and Units Generation not completed,
+// the engine's function answers "stage level" (`undefined !== "EXECUTE"`) and most of its
+// callers follow it, but the strict artifact resolver refuses that state outright ("Units
+// Generation has no effective action"). This reader cannot tell which the run meant, so
+// it returns `unknown`: the matrix is drawn as before this module, and says the placement
+// was not readable. A completed Units Generation is per-unit with or without an action,
+// as in the engine.
+//
+// The grid is the harness's compiled `scope-grid.json` as-is. The engine's
+// `loadScopeMapping` also joins scope metadata and honours an `AIDLC_SCOPE_MAPPING`
+// override; neither is reproduced, so a grid-only scope or an overridden mapping can read
+// differently. On a matched install the two agree.
 
 import type { ScopeGrid } from "./parser";
 
@@ -70,6 +77,7 @@ export function unitArtifactMode(stateText: string, scopeGrid?: ScopeGrid): Unit
     stateSuffix(stateText, UNITS_GENERATION) ??
     (scope ? scopeGrid?.[scope]?.[UNITS_GENERATION] : undefined);
   if (action === "EXECUTE") return "per-unit";
-  if (action === undefined) return "unknown";
-  return checkedComplete(stateText, UNITS_GENERATION) ? "per-unit" : "stage-level";
+  // Completion keeps the units whatever the action reads — the engine's second test.
+  if (checkedComplete(stateText, UNITS_GENERATION)) return "per-unit";
+  return action === undefined ? "unknown" : "stage-level";
 }

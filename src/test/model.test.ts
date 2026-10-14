@@ -497,6 +497,12 @@ describe("render", () => {
         expect(m.matrix).toBeUndefined();
         expect(renderBody(m, "en")).toContain(esc(EN.overview.stageLevelUnits));
         expect(renderUnitCard(m, EN)).toContain(esc(EN.overview.stageLevelUnits));
+        // The engine's stage-level question reader reads `construction/<stage>/` only, so
+        // a unit's copy of the current stage is a record of earlier work, not what holds
+        // the run — "no unit" is known here, not unknown.
+        const stale = m.blockers.find((b) => b.unit === "PU-B-ui");
+        expect(stale?.stage).toBe("code-generation");
+        expect(stale?.isCurrentStage).toBe(false);
       });
     });
 
@@ -522,7 +528,14 @@ describe("render", () => {
       withState("- [ ] units-generation", (m) => {
         expect(m.unitArtifactMode).toBe("unknown");
         expect(m.matrix?.units.length).toBe(2);
+        // Drawn as before — and the page says the placement it assumed was not read.
+        expect(renderBody(m, "en")).toContain(esc(EN.overview.unitModeUnknown));
+        expect(renderBody(m, "ko")).toContain(esc(KO.overview.unitModeUnknown));
       });
+      // A readable plan action says nothing extra.
+      withState("- [x] units-generation — EXECUTE", (m) =>
+        expect(renderBody(m, "en")).not.toContain(esc(EN.overview.unitModeUnknown)),
+      );
     });
   });
 

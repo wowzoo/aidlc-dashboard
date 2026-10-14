@@ -317,6 +317,8 @@ export interface OverviewStrings {
   /** The plan skips Units Generation (scan/unit-artifact-mode.ts) — there are no units. */
   readonly stageLevelUnits: string;
   readonly stageLevelUnitsPill: string;
+  /** No readable Units Generation action: the matrix assumes per-unit placement. */
+  readonly unitModeUnknown: string;
 
   // Cell tooltips. `unverified` is per CAUSE — see the ReceiptReason note in scan/matrix.ts.
   tipPartial(missing: string[]): string;

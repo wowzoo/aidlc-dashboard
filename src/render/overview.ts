@@ -367,7 +367,11 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
     parts.push(
       section(
         s.overview.sectionMatrix,
-        matrixTable(m.matrix, s) + checkpointList(m.checkpointProofs ?? [], s),
+        matrixTable(m.matrix, s) +
+          (m.unitArtifactMode === "unknown"
+            ? `<p class="note warn">${esc(s.overview.unitModeUnknown)}</p>`
+            : "") +
+          checkpointList(m.checkpointProofs ?? [], s),
         "matrix",
       ),
     );

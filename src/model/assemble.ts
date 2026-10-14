@@ -306,6 +306,8 @@ function buildBlockers(
   questions: ReturnType<typeof readQuestions>,
   position: RunPosition,
   now: string,
+  /** The plan runs per-unit stages at stage level: "no unit" is known, not unknown. */
+  stageLevel: boolean,
 ): Blocker[] {
   const out: Blocker[] = [];
   for (const f of questions.blocked) {
@@ -329,10 +331,15 @@ function buildBlockers(
         // happens on a position the run line already labels unverified, and filing
         // them all as "earlier" would bring back the false "nothing waiting" this
         // reading exists to remove. Over-claiming under a visible label beats hiding.
+        // At stage level the run HAS no unit — the engine's stage-level question reader
+        // (`summaryQuestionFiles`) reads `construction/<stage>/` only — so a unit's copy
+        // is earlier work, not the current ask.
         isCurrentStage:
           position.stage !== undefined &&
           f.stage === position.stage &&
-          (position.unit === undefined || f.unit === position.unit),
+          (stageLevel
+            ? f.unit === undefined
+            : position.unit === undefined || f.unit === position.unit),
       });
     }
   }
@@ -435,6 +442,12 @@ export function assemble(
     catalog?.scopeGrid,
   );
 
+  // A plan that skips Units Generation has no units: per-unit stages run once at stage
+  // level (scan/unit-artifact-mode.ts). The matrix and the current-blocker test both read
+  // it. The scope grid is the catalogue's, refused or not — the plan action is the
+  // state's own fact, not a contract judgement.
+  const artifactMode = unitArtifactMode(stateText, catalog?.scopeGrid);
+
   const ledger = readAuditLedger(recordDir, isStage, root);
   // A refusal explains an empty readable ledger; `audit-empty` guesses at hooks that
   // never fired, so it is kept for the emptiness nothing else explains.
@@ -462,7 +475,7 @@ export function assemble(
   });
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
-  const blockers = buildBlockers(questions, position, now);
+  const blockers = buildBlockers(questions, position, now, artifactMode === "stage-level");
   const waits = buildWaits({
     state,
     position,
@@ -638,11 +651,6 @@ export function assemble(
     // The engine's `unitScopePath`: `<root>/aidlc/.aidlc-unit-scope.json`, checkout-local.
     fs.existsSync(path.join(root, "aidlc", ".aidlc-unit-scope.json")),
   );
-  // A plan that skips Units Generation has no units: per-unit stages run once at stage
-  // level, so a matrix would only draw a DAG some earlier plan left in the graph, judged
-  // on paths the engine does not read. The scope grid is the catalogue's, refused or not
-  // — the plan action is the state's own fact, not a contract judgement.
-  const artifactMode = unitArtifactMode(stateText, catalog?.scopeGrid);
   const matrix =
     construction && artifactMode !== "stage-level"
       ? // A mismatched roster means the catalogue describes a different run shape, so the

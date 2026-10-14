@@ -257,6 +257,8 @@ const overview: OverviewStrings = {
   stageLevelUnits:
     "No per-unit matrix — this plan skips Units Generation, so there are no units. Each per-unit Construction stage runs once at stage level and writes under construction/<stage>/ (see Phase · Stage above).",
   stageLevelUnitsPill: "stage level",
+  unitModeUnknown:
+    "Neither the state file nor the scope grid says whether Units Generation runs, so this matrix assumes artifacts are per unit.",
 
   tipPartial: (missing) => `missing: ${missing.join(", ")}`,
   tipComplete: (present) => `complete: ${present.join(", ")}`,
