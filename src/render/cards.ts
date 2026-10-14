@@ -157,7 +157,15 @@ function unitRows(st: MatrixStage, s: Strings): Row[] {
       pct: fig.pct,
       tone: CELL_TONE[c.state],
       dim: c.state === "n/a",
-      tip: cellTip(c.state, c.missing, c.present, s, c.receiptReason, c.skipReason),
+      tip: cellTip(
+        c.state,
+        c.missing,
+        c.present,
+        s,
+        c.receiptReason,
+        c.skipReason,
+        c.skipClaimUnchecked,
+      ),
     };
   });
 }

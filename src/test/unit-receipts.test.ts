@@ -286,6 +286,66 @@ describe("2.11-only review regressions", () => {
     expect(exec("custom", "- [ ] nfr-design")).toBe(true);
   });
 
+  test("under team ownership a current UNIT_SKIPPED is read as the engine reads it", () => {
+    // The engine's team path adds only the claim-attempt filter (`eventMatchesClaimAttempt`)
+    // before the same floor and reduction. With no scope stamp and no `Attempt Generation`
+    // on the unit's rows that filter passes every row, so the skip is exactly the engine's
+    // — and it was read `team-claim`, which the matrix drew absent.
+    const team = { team: true, unitScoped: true };
+    const skip = unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", {
+      Reason: "no NFR for a spec unit",
+    });
+    expect(read(ledger([skip]), team).state("u1", "nfr-design")).toEqual({
+      state: "skipped",
+      reason: "no NFR for a spec unit",
+    });
+    // A later start on the same floor supersedes it; a reopen of that unit moves its floor.
+    const restarted = ledger([skip, unit("UNIT_STARTED", 2, "nfr-design", "u1", "unstarted#0")]);
+    expect(read(restarted, team).state("u1", "nfr-design")).toEqual({
+      state: "unverifiable",
+      reason: "team-claim",
+    });
+    const reopened = ledger([
+      skip,
+      { Event: "GATE_REJECTED", Timestamp: at(2), Stage: "nfr-design", Unit: "u1" },
+    ]);
+    expect(read(reopened, team).state("u1", "nfr-design").state).not.toBe("skipped");
+    // Another clone's pause in the same second outranks the skip.
+    const tie = ledger([skip], [unit("UNIT_PAUSED", 1, "nfr-design", "u1", "unstarted#0")]);
+    expect(read(tie, team).state("u1", "nfr-design").state).not.toBe("skipped");
+  });
+
+  test("under team ownership a skip the claim filter could drop says so", () => {
+    // A row carrying `Attempt Generation` is judged against the claim generations file, and
+    // a scope stamp in the checkout keeps only its own unit's rows — neither is read here.
+    const team = { team: true, unitScoped: true };
+    const reason = "covered by u2";
+    const generation = ledger([
+      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", {
+        Reason: reason,
+        "Attempt Generation": "2",
+      }),
+    ]);
+    expect(read(generation, team).state("u1", "nfr-design")).toEqual({
+      state: "skipped",
+      reason,
+      claimUnchecked: true,
+    });
+    const plain = ledger([
+      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", { Reason: reason }),
+    ]);
+    expect(read(plain, { ...team, scopeStamp: true }).state("u1", "nfr-design")).toEqual({
+      state: "skipped",
+      reason,
+      claimUnchecked: true,
+    });
+    // Outside team ownership the stamp means nothing.
+    expect(read(plain, { scopeStamp: true }).state("u1", "nfr-design")).toEqual({
+      state: "skipped",
+      reason,
+    });
+  });
+
   test("under team ownership a unit with no Run floor at all is known not done", () => {
     // The claim file can only decide rows that could be current; a row with no floor
     // fails the engine's exact match whatever the claim says.
@@ -299,5 +359,56 @@ describe("2.11-only review regressions", () => {
       state: "unverifiable",
       reason: "team-claim",
     });
+  });
+});
+
+describe("team ownership, end to end", () => {
+  test("a unit the engine skipped is drawn skipped, not absent, and leaves the denominator", () => {
+    // Measured against the 2.11.0 `unitSkippedUnits` on this exact tree: it returns the
+    // unit as skipped. The matrix drew it absent — a fabricated blocker in the count.
+    const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+    const REC = "aidlc/spaces/default/intents/260101-demo-migration";
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-team-skip-"));
+    fs.cpSync(FIXTURE, root, { recursive: true });
+    fs.rmSync(path.join(root, REC, "construction/PU-B-ui/functional-design"), { recursive: true });
+    const statePath = path.join(root, REC, "aidlc-state.md");
+    fs.writeFileSync(
+      statePath,
+      fs
+        .readFileSync(statePath, "utf-8")
+        .replace("- **Revision Count**: 2", "- **Revision Count**: 2\n- **Unit Ownership**: team"),
+    );
+    const shard = path.join(root, REC, "audit/demo-host-aabbccdd1122.md");
+    fs.appendFileSync(
+      shard,
+      [
+        "",
+        "## Unit Skipped",
+        "**Timestamp**: 2026-01-01T02:30:00Z",
+        "**Event**: UNIT_SKIPPED",
+        "**Stage**: functional-design",
+        "**Unit**: PU-B-ui",
+        "**Reason**: no UI behaviour to design",
+        "**Run floor**: STAGE_STARTED:2026-01-01T02:00:00Z#1",
+        "",
+        "---",
+        "",
+      ].join("\n"),
+    );
+    const stage = assemble(root).matrix?.stages.find((s) => s.slug === "functional-design");
+    const cell = stage?.cells.find((c) => c.unit === "PU-B-ui");
+    expect(cell?.state).toBe("skipped");
+    expect(cell?.skipReason).toBe("no UI behaviour to design");
+    expect(cell?.skipClaimUnchecked).toBeUndefined();
+    expect(stage?.skipped).toBe(1);
+
+    // A scope stamp in the checkout keeps only its own unit's rows, which is not checked
+    // here — still skipped, but the cell says the claim attempt was not read.
+    fs.writeFileSync(path.join(root, "aidlc", ".aidlc-unit-scope.json"), "{}\n");
+    const stamped = assemble(root)
+      .matrix?.stages.find((s) => s.slug === "functional-design")
+      ?.cells.find((c) => c.unit === "PU-B-ui");
+    expect(stamped?.state).toBe("skipped");
+    expect(stamped?.skipClaimUnchecked).toBe(true);
   });
 });

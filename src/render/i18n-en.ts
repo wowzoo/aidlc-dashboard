@@ -260,8 +260,12 @@ const overview: OverviewStrings = {
   tipUnverified: (reason, present) => `${RECEIPT_REASON_EN[reason]} (files: ${present.join(", ")})`,
   tipNotApplicable: (present) =>
     `Nothing is contracted for this unit's kind${present.length ? ` (files present: ${present.join(", ")})` : ""}`,
-  tipSkipped: (reason) =>
-    `The engine skipped this stage for this unit (UNIT_SKIPPED)${reason ? ` — reason: ${reason}` : ""}`,
+  tipSkipped: (reason, claimUnchecked) =>
+    `The engine skipped this stage for this unit (UNIT_SKIPPED)${reason ? ` — reason: ${reason}` : ""}${
+      claimUnchecked
+        ? ". Under team ownership the engine reads only rows matching the claim attempt (Attempt Generation, scope stamp); that match was not checked here"
+        : ""
+    }`,
   tipNotStarted: "not started",
 
   legendBase:

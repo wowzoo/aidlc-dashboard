@@ -108,6 +108,8 @@ export function readUnitLifecycle(
   opts: {
     unitMajor?: boolean;
     teamOwnership?: boolean;
+    /** A unit scope stamp is present in the checkout — see `ReceiptPolicy.scopeStamp`. */
+    scopeStamp?: boolean;
     unitScoped?: boolean;
     receiptsRequired?: boolean;
     stageIndex?: (slug: string) => number;
@@ -135,6 +137,7 @@ export function readUnitLifecycle(
   return readUnitReceipts(rows, {
     unitMajor,
     team,
+    scopeStamp: opts.scopeStamp ?? false,
     unitScoped: opts.unitScoped ?? (team || unitMajor),
     receiptsRequired: opts.receiptsRequired ?? false,
     stageIndex: opts.stageIndex,
@@ -222,6 +225,8 @@ export interface MatrixCell {
   receiptReason?: ReceiptReason;
   /** The engine's `Reason` on the UNIT_SKIPPED row. Set only when state is "skipped". */
   skipReason?: string;
+  /** A team-owned skip the claim-attempt filter might drop; set only with `skipReason`. */
+  skipClaimUnchecked?: true;
 }
 
 /**
@@ -500,6 +505,9 @@ export function buildConstructionMatrix(
         missing,
         ...(receipt?.state === "unverifiable" ? { receiptReason: receipt.reason } : {}),
         ...(receipt?.state === "skipped" ? { skipReason: receipt.reason } : {}),
+        ...(receipt?.state === "skipped" && receipt.claimUnchecked
+          ? { skipClaimUnchecked: true as const }
+          : {}),
       };
     });
 

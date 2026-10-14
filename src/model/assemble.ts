@@ -243,6 +243,7 @@ function receiptPolicy(
   state: ReturnType<typeof parseState>,
   catalog: StageCatalog | undefined,
   team: boolean,
+  scopeStamp: boolean,
 ): NonNullable<Parameters<typeof readUnitLifecycle>[1]> {
   const checkpoints = state.constructionCheckpoints === "enabled";
   const unitMajor = state.constructionIteration?.trim() === "unit-major" || checkpoints;
@@ -267,6 +268,7 @@ function receiptPolicy(
   return {
     unitMajor,
     teamOwnership: team,
+    scopeStamp,
     unitScoped: team || unitMajor,
     receiptsRequired: checkpoints && !team && codeStage,
     stageIndex: catalog ? (s) => catalog.stages.findIndex((x) => x.slug === s) : undefined,
@@ -632,6 +634,8 @@ export function assemble(
     state,
     rosterMismatch || versionMismatch ? undefined : catalog,
     team,
+    // The engine's `unitScopePath`: `<root>/aidlc/.aidlc-unit-scope.json`, checkout-local.
+    fs.existsSync(path.join(root, "aidlc", ".aidlc-unit-scope.json")),
   );
   const matrix = construction
     ? // A mismatched roster means the catalogue describes a different run shape, so the

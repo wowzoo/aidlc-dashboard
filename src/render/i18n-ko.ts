@@ -246,8 +246,12 @@ const overview: OverviewStrings = {
   tipUnverified: (reason, present) => `${RECEIPT_REASON_KO[reason]} (파일: ${present.join(", ")})`,
   tipNotApplicable: (present) =>
     `이 유닛 kind 에 계약된 산출물 없음${present.length ? ` (있는 파일: ${present.join(", ")})` : ""}`,
-  tipSkipped: (reason) =>
-    `엔진이 이 유닛의 이 stage 를 건너뛰었습니다(UNIT_SKIPPED)${reason ? ` — 사유: ${reason}` : ""}`,
+  tipSkipped: (reason, claimUnchecked) =>
+    `엔진이 이 유닛의 이 stage 를 건너뛰었습니다(UNIT_SKIPPED)${reason ? ` — 사유: ${reason}` : ""}${
+      claimUnchecked
+        ? ". 팀 소유라 엔진은 claim 시도(Attempt Generation·scope stamp)가 맞는 기록만 읽는데, 여기서는 그 대조를 하지 않았습니다"
+        : ""
+    }`,
   tipNotStarted: "미착수",
 
   legendBase:

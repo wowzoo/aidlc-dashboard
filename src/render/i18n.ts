@@ -321,8 +321,11 @@ export interface OverviewStrings {
   tipUnsettled(present: string[]): string;
   tipUnverified(reason: ReceiptReason, present: string[]): string;
   tipNotApplicable(present: string[]): string;
-  /** `reason` is the engine's own, from the UNIT_SKIPPED row; may be empty. */
-  tipSkipped(reason: string): string;
+  /**
+   * `reason` is the engine's own, from the UNIT_SKIPPED row; may be empty. `claimUnchecked`:
+   * a team-owned skip the engine's claim-attempt filter might drop, not evaluated here.
+   */
+  tipSkipped(reason: string, claimUnchecked: boolean): string;
   readonly tipNotStarted: string;
 
   // Legend FRAGMENTS. The conditional composition stays in overview.ts — it is logic —

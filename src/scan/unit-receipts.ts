@@ -44,8 +44,12 @@
 //
 // WHAT THE AUDIT CANNOT SAY stays `unverifiable`, never guessed: team ownership (the
 // engine also matches each row's `Attempt Generation` against a claim file outside the
-// audit), a wave-mode completion (held only while an artifact fingerprint matches), a
-// and a cross-shard tie on events built without block positions. A ledger from before
+// audit), a wave-mode completion (held only while an artifact fingerprint matches), and
+// a cross-shard tie on events built without block positions. One team verdict is read
+// all the same: a current UNIT_SKIPPED. With no scope stamp, the claim filter passes a
+// row with no `Attempt Generation`, so for a unit with no such field that skip is the
+// engine's own; otherwise it is still read, marked `claimUnchecked`, because drawing the
+// unit absent put a fabricated blocker in the denominator. A ledger from before
 // the `Run floor` field is read as the engine reads it: no row is current.
 //
 // GENERATION. This reads 2.11.0 — the dashboard's one supported engine. A tree from an
@@ -71,8 +75,13 @@ export type ReceiptReason = "team-claim" | "wave-fingerprint" | "ambiguous-floor
 
 export type ReceiptVerdict =
   | { state: "settled" | "unsettled"; reason?: undefined }
-  /** `reason` is the engine's own `Reason` field on the UNIT_SKIPPED row. */
-  | { state: "skipped"; reason: string }
+  /**
+   * `reason` is the engine's own `Reason` field on the UNIT_SKIPPED row. `claimUnchecked`
+   * marks a team-owned skip the engine's claim-attempt filter might drop — a row carrying
+   * `Attempt Generation`, or a scope stamp in the checkout — which this reader does not
+   * evaluate.
+   */
+  | { state: "skipped"; reason: string; claimUnchecked?: true }
   | { state: "unverifiable"; reason: ReceiptReason };
 
 export interface ReceiptPolicy {
@@ -81,6 +90,12 @@ export interface ReceiptPolicy {
   /** Team ownership, checkpoints enabled, or solo unit-major — per-unit floors. */
   unitScoped: boolean;
   team: boolean;
+  /**
+   * The checkout holds a unit scope stamp (`aidlc/.aidlc-unit-scope.json`). Under team
+   * ownership an applicable one keeps only its own unit's rows; whether it applies is not
+   * checked, so its mere presence makes a team skip `claimUnchecked`.
+   */
+  scopeStamp?: boolean;
   /** The engine requires receipts by policy (`constructionCheckpointsApply`). */
   receiptsRequired: boolean;
   /** Catalogue stage order, for `stageJumpReaches`. */
@@ -386,17 +401,6 @@ export function readUnitReceipts(
     const units = [...new Set(lifecycle.map((r) => r.f.Unit as string))];
     const set = (unit: string, v: ReceiptVerdict) => verdicts.set(`${slug}\u0001${unit}`, v);
 
-    if (p.team) {
-      // The claim match decides only rows that could be current at all: a unit none of
-      // whose rows carries a `Run floor` fails the engine's exact match whatever the
-      // claim file says, so it is known — not done.
-      for (const u of units) {
-        const anyFloor = lifecycle.some((r) => r.f.Unit === u && !!r.f["Run floor"]);
-        set(u, anyFloor ? { state: "unverifiable", reason: "team-claim" } : { state: "unsettled" });
-      }
-      continue;
-    }
-
     // Under stage-major flooring the rows start at the latest stage start that counts.
     const starts = rows.filter((r) => isMainStart(r, slug));
     const startedAt = [...starts].sort(byTime).at(-1)?.ts ?? "";
@@ -481,19 +485,38 @@ export function readUnitReceipts(
     for (const unit of units) {
       const mine = lifecycle.filter((r) => r.f.Unit === unit);
       const matched = mine.some((r) => r.f["Run floor"] === floorOf(unit));
-      // A row with no `Run floor` (a ledger from before the field) fails the exact match
-      // and is simply not current, as the engine reads it — no special case.
-      if (!matched && !hasPositions && floorOf(unit).startsWith("AMBIGUOUS:")) {
-        // Built without block positions, the AMBIGUOUS digest cannot be rebuilt.
-        set(unit, { state: "unverifiable", reason: "ambiguous-floor" });
-      } else if (skipped.has(unit)) {
-        set(unit, { state: "skipped", reason: skipped.get(unit) ?? "" });
-      } else if (receipts.has(unit)) {
-        set(unit, { state: "settled" });
-      } else if (wave.has(unit)) {
-        set(unit, { state: "unverifiable", reason: "wave-fingerprint" });
+      const verdict: ReceiptVerdict =
+        // A row with no `Run floor` (a ledger from before the field) fails the exact match
+        // and is simply not current, as the engine reads it — no special case.
+        !matched && !hasPositions && floorOf(unit).startsWith("AMBIGUOUS:")
+          ? // Built without block positions, the AMBIGUOUS digest cannot be rebuilt.
+            { state: "unverifiable", reason: "ambiguous-floor" }
+          : skipped.has(unit)
+            ? { state: "skipped", reason: skipped.get(unit) ?? "" }
+            : receipts.has(unit)
+              ? { state: "settled" }
+              : wave.has(unit)
+                ? { state: "unverifiable", reason: "wave-fingerprint" }
+                : { state: "unsettled" };
+      if (!p.team) {
+        set(unit, verdict);
+      } else if (verdict.state === "skipped") {
+        // Team ownership adds one step before the same floor and reduction: the claim-
+        // attempt filter (`eventMatchesClaimAttempt`). With no scope stamp, a row with no
+        // `Attempt Generation` passes it whatever the claim files say — so when none of the
+        // unit's rows carries one, the engine reads exactly these rows and the skip is its
+        // verdict. Otherwise the skip is still the reading, marked unchecked.
+        const inert = !p.scopeStamp && !mine.some((r) => r.f["Attempt Generation"] !== undefined);
+        set(unit, inert ? verdict : { ...verdict, claimUnchecked: true as const });
       } else {
-        set(unit, { state: "unsettled" });
+        // Everything else stays the claim's to decide: a unit none of whose rows carries a
+        // `Run floor` fails the engine's exact match whatever the claim says, so it is
+        // known — not done; one that has a floor the claim file decides.
+        const anyFloor = mine.some((r) => !!r.f["Run floor"]);
+        set(
+          unit,
+          anyFloor ? { state: "unverifiable", reason: "team-claim" } : { state: "unsettled" },
+        );
       }
     }
   }

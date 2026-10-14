@@ -142,10 +142,11 @@ function cellHtml(
   s: Strings,
   reason?: ReceiptReason,
   skipReason?: string,
+  skipClaimUnchecked?: boolean,
 ): string {
   // `n/a` needs a class the CSS can target, and "/" is not usable in one.
   return `<td class="mx-cell c-${state === "n/a" ? "na" : state}" title="${esc(
-    cellTip(state, missing, present, s, reason, skipReason),
+    cellTip(state, missing, present, s, reason, skipReason, skipClaimUnchecked),
   )}">${cellGlyph(state)}</td>`;
 }
 
@@ -174,6 +175,7 @@ export function cellTip(
   s: Strings,
   reason?: ReceiptReason,
   skipReason?: string,
+  skipClaimUnchecked?: boolean,
 ): string {
   return state === "partial"
     ? s.overview.tipPartial(missing)
@@ -189,7 +191,7 @@ export function cellTip(
             // says its own thing, because each is a different reason the audit cannot tell.
             s.overview.tipUnverified(reason ?? "ambiguous-floor", present)
           : state === "skipped"
-            ? s.overview.tipSkipped(skipReason ?? "")
+            ? s.overview.tipSkipped(skipReason ?? "", skipClaimUnchecked === true)
             : state === "n/a"
               ? s.overview.tipNotApplicable(present)
               : s.overview.tipNotStarted;
@@ -211,7 +213,17 @@ function matrixTable(mx: ConstructionMatrix, s: Strings): string {
         return `<tr class="mx-skip"><th>${esc(st.display)}</th><td colspan="${mx.units.length}">SKIP</td><td class="mx-n">—</td></tr>`;
       }
       const cells = st.cells
-        .map((c) => cellHtml(c.state, c.missing, c.present, s, c.receiptReason, c.skipReason))
+        .map((c) =>
+          cellHtml(
+            c.state,
+            c.missing,
+            c.present,
+            s,
+            c.receiptReason,
+            c.skipReason,
+            c.skipClaimUnchecked,
+          ),
+        )
         .join("");
       // The denominator counts only units the stage actually contracts something
       // for; n/a units would otherwise read as outstanding work.
