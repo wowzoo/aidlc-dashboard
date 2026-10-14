@@ -43,7 +43,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 const ACTIVE_SPACE_POINTER = "active-space";
-const ACTIVE_INTENT_POINTER = "active-intent";
+export const ACTIVE_INTENT_POINTER = "active-intent";
 const DEFAULT_SPACE = "default";
 const STATE_FILE = "aidlc-state.md";
 /** The engine's `SPACE_NAME_REGEX`. */

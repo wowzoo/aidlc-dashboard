@@ -122,7 +122,6 @@ describe("claim-attempt readers", () => {
 
   test("the checkout's files are read in place, and the registry only when reached", () => {
     const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
-    const REC = "aidlc/spaces/default/intents/260101-demo-migration";
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-claim-"));
     try {
       fs.cpSync(FIXTURE, root, { recursive: true });
@@ -131,15 +130,53 @@ describe("claim-attempt readers", () => {
         path.join(root, "aidlc", ".aidlc-claim-generations.json"),
         JSON.stringify({ [`default/${STAMP.intent_uuid}/PU-B-ui`]: 3 }),
       );
-      const filter = claimFilter(readClaimInputs(root, path.join(root, REC), team));
+      const filter = claimFilter(readClaimInputs(root, team));
       expect(filter({ "Attempt Generation": "3" }, "PU-B-ui")).toBe(true);
       expect(filter({ "Attempt Generation": "2" }, "PU-B-ui")).toBe(false);
       // A registry the engine would throw on matters only where the filter needs it.
       const registry = path.join(root, "aidlc/spaces/default/intents/intents.json");
       fs.writeFileSync(registry, "[null]");
-      const broken = claimFilter(readClaimInputs(root, path.join(root, REC), team));
+      const broken = claimFilter(readClaimInputs(root, team));
       expect(broken({}, "PU-B-ui")).toBe(true);
       expect(broken({ "Attempt Generation": "3" }, "PU-B-ui")).toBe("unknown");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the active intent is the engine's: the raw cursor, and a lone record it can read", () => {
+    // Codex review, each reproduced against the 2.11.0 functions on a fixture copy.
+    const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-claim-"));
+    const intents = path.join(root, "aidlc/spaces/default/intents");
+    const team = "- **Unit Ownership**: team\n";
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      fs.writeFileSync(
+        path.join(root, "aidlc", ".aidlc-unit-scope.json"),
+        JSON.stringify({ ...STAMP, unit: "PU-B-ui" }),
+      );
+      // A `./<dir>` cursor names the same state, but `activeIntentUuid` compares it with
+      // the dir name exactly and finds no uuid: the stamp does not apply.
+      fs.writeFileSync(path.join(intents, "active-intent"), "./260101-demo-migration\n");
+      const dotted = claimFilter(readClaimInputs(root, team));
+      expect(dotted({ Unit: "PU-A-core" }, "PU-A-core")).toBe(true);
+      // With no cursor, a lone record whose registry row has no string status makes the
+      // engine's `activeIntent` throw: no engine verdict, so none is claimed.
+      fs.rmSync(path.join(intents, "active-intent"));
+      const registry = JSON.parse(fs.readFileSync(path.join(intents, "intents.json"), "utf-8"));
+      registry[0].status = undefined; // JSON drops the key: a row with no status
+      fs.writeFileSync(path.join(intents, "intents.json"), JSON.stringify(registry));
+      expect(claimFilter(readClaimInputs(root, team))({}, "PU-A-core")).toBe("unknown");
+      expect(claimFilter(readClaimInputs(root, ""))({}, "PU-A-core")).toBe(true);
+      // A uuid the generation key cannot stringify is unknown, never a thrown page.
+      fs.rmSync(path.join(root, "aidlc", ".aidlc-unit-scope.json"));
+      registry[0].status = "in-flight";
+      registry[0].uuid = { toString: null };
+      fs.writeFileSync(path.join(intents, "intents.json"), JSON.stringify(registry));
+      const odd = claimFilter(readClaimInputs(root, team));
+      expect(odd({ "Attempt Generation": "1" }, "PU-A-core")).toBe("unknown");
+      expect(odd({}, "PU-A-core")).toBe(true);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

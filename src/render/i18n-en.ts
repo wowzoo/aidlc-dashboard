@@ -200,7 +200,7 @@ const status: StatusStrings = {
   humanUnreadableTip:
     "Could not be read or confirmed (for example no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow). A blank answer in it is missing, and an engine ask the file would have explained may be counted on its own, so the count above can be off either way. The paths are in the warnings at the top of the page",
   humanTeamGate: (unit, stage) => `Unit approval pending: ${unit} · ${stage}`,
-  humanTeamGateRevising: (unit, stage) => `${unit} · ${stage} in revision — unit gate rejected`,
+  humanTeamGateRevising: (unit, stage) => `${unit} · ${stage} reopened — back in revision`,
   humanTeamGateSource: "team unit gate · audit",
   humanTeamGateTip:
     "Under team ownership a unit's gate never moves the state row. It is read from the audit as the stop hook reads it: the active unit and stage, the gate scope (the scope stamp's, else Unit Gate Rhythm), and only rows of this checkout's claim attempt",
@@ -753,7 +753,9 @@ const timeline: TimelineStrings = {
   <code>UNIT_RESUMED</code> and closes at <code>UNIT_PAUSED</code> (dotted) or <code>UNIT_COMPLETED</code>;
   <code>UNIT_SKIPPED</code> closes an open segment and is otherwise a tick. Two clones' rows for one unit in the same
   second cannot be ordered, so they are reduced as the engine reduces them: a possible pause wins, then a start or
-  resume, and a pause with nothing open is a tick. The view runs THROUGH completion — the unit
+  resume, and a pause with nothing open is a tick. Under team ownership the engine first keeps only this
+  checkout's claim attempt; this view keeps every attempt's rows, because a stale attempt's time was still
+  spent, so a tie between two attempts can end differently here. The view runs THROUGH completion — the unit
   checkpoint work after it (verification, the unit-end gate) is not in it. A start receipt can be written after the
   work, and a wave or recovery completion has none, so a segment may start at the unit's first record write in the
   stage instead, within the same attempt and clone (<b>~</b> on the row, details in the bar's tooltip): that is the

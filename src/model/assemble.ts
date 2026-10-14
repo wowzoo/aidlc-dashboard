@@ -542,7 +542,7 @@ export function assemble(
   const blockers = buildBlockers(questions, position, now, artifactMode === "stage-level");
   // The claim attempt's checkout-local inputs (scan/claim-attempt.ts) — read, never written.
   // The receipts and the team unit gate both filter by them.
-  const claim = readClaimInputs(root, recordDir, stateText);
+  const claim = readClaimInputs(root, stateText);
   const waits = buildWaits({
     state,
     position,

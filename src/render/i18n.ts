@@ -266,7 +266,10 @@ export interface StatusStrings {
   readonly humanEngineOnlyTip: string;
   /** A team-owned unit's own gate is open (`unitGateStatus` = awaiting-approval). */
   humanTeamGate(unit: string, stage: string): string;
-  /** The same gate, rejected and in revision — shown, not counted, like `[R]`. */
+  /**
+   * The same gate back in revision — a rejection, or a jump/redo re-entry (both write
+   * `GATE_REJECTED`) — shown, not counted, like `[R]`. Says reopened, not rejected.
+   */
   humanTeamGateRevising(unit: string, stage: string): string;
   readonly humanTeamGateSource: string;
   readonly humanTeamGateTip: string;

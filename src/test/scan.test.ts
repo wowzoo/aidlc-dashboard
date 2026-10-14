@@ -2245,6 +2245,19 @@ describe("gap classification", () => {
     expect(g.unknownSec).toBe(0);
   });
 
+  test("two claim attempts' requests in one review scope do not replace each other", () => {
+    // Under team ownership the engine's review accounting reads only the current claim
+    // attempt (`reviewAttemptEventMatchesCurrentClaim`), so a stale generation's late
+    // request never takes over the current one. This view keeps every attempt's time, so
+    // each generation holds its own pending request: the current completion still pairs.
+    const g = classifyGaps([
+      req("2026-01-01T00:00:00Z", "review:r2", { "Attempt Generation": "2" }),
+      req("2026-01-01T00:05:00Z", "review:r1", { "Attempt Generation": "1" }),
+      done("2026-01-01T00:20:00Z", "review:r2", { "Attempt Generation": "2" }),
+    ]);
+    expect(g.delegatedSec).toBe(1200);
+  });
+
   test("a retried request opens the window at the last request its completion answers", () => {
     const g = classifyGaps([
       req("2026-01-01T00:00:00Z", "review:a"),

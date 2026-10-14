@@ -18,17 +18,30 @@
 //
 // Both readers are total in the engine: an absent, unreadable or malformed file reads
 // as no stamp / no generations, and so it does here — that is the engine's own answer
-// in this checkout, not a guess. The one input the engine can THROW on is the intent
-// registry: `recordDirMatches` dereferences each row, so a `null` row, or a non-string
-// uuid against a hex-suffixed record name, raises inside `activeIntentUuid`. Where the
-// filter reaches that read, the answer is `unknown` — the engine itself cannot run there.
+// in this checkout, not a guess. What the engine can THROW on is the intent
+// identity, and each throw is an `unknown` here, not a verdict:
+//
+//   - the record's own resolution (`activeIntent`, under `readStateFile`): with no
+//     cursor, every registry row is joined (`recordDirMatches`) and its `status` read
+//     (`isArchivedIntent`), so a `null` row or a status that is not a string raises. The
+//     filter's own catch then returns TRUE, but every engine reader around it — the
+//     audit, the state, the gate rhythm — fails the same way, so there is no engine
+//     verdict for this record to match, and none is claimed;
+//   - the intent's uuid (`activeIntentUuid` over `listIntents`), which joins every row
+//     again; and the generation key, whose template literal throws on a uuid that is
+//     not stringable (`{"toString": null}`). Only a path that REACHES one is unknown.
+//
+// The active intent is read as the engine reads it, from the raw cursor string: a cursor
+// of `./<dir>` names the same state file, but `activeIntentUuid` compares it with the
+// record's dir name exactly, finds no row, and reads no uuid — so the stamp does not apply
+// and generations are keyed `legacy`. The record dir's own name would apply them.
 //
 // The stamp's own claim check (`liveClaimPayload` against the claim refs in git) belongs
 // to the commands that act on a claim, not to this filter, and is not read.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { activeSpace } from "./resolve";
+import { ACTIVE_INTENT_POINTER, activeSpace } from "./resolve";
 import { stateField } from "./unit-artifact-mode";
 
 /** A row passes, is dropped, or reaches a read the engine would throw on. */
@@ -64,6 +77,8 @@ export interface ClaimInputs {
   space: string;
   /** `activeIntentUuid` — read lazily by the engine, so only reached paths can fail. */
   uuid: () => IntentUuid;
+  /** `activeIntent` resolves without throwing (`readStateFile` would). Default true. */
+  resolves?: () => boolean;
 }
 
 /** `isTeamUnitOwnership`: `getField(state, "Unit Ownership")?.trim() === "team"`. */
@@ -151,7 +166,7 @@ function engineRecordDirMatches(entry: any, dirName: string): boolean {
 export function activeIntentUuid(
   registry: readonly unknown[],
   recordDirs: readonly string[],
-  activeDir: string,
+  activeDir: string | null,
 ): IntentUuid {
   try {
     const claimed = new Set<string>();
@@ -162,6 +177,7 @@ export function activeIntentUuid(
       return { uuid: (entry as any).uuid, dirName };
     });
     for (const d of recordDirs) if (!claimed.has(d)) infos.push({ uuid: "", dirName: d });
+    if (activeDir === null) return { ok: true, value: null };
     const match = infos.find((i) => i.dirName === activeDir);
     return { ok: true, value: match?.uuid ? match.uuid : null };
   } catch {
@@ -169,9 +185,40 @@ export function activeIntentUuid(
   }
 }
 
+/** The active intent dir as `activeIntent` returns it, or a registry it throws on. */
+export type ActiveIntent = { ok: true; dir: string | null } | { ok: false };
+
+/**
+ * `activeIntent(projectDir, space)` with no explicit intent: the raw `active-intent`
+ * cursor (trimmed) when it names a dir holding `aidlc-state.md`, else the one record
+ * whose registry row (if any) is not archived — `isArchivedIntent` trims the status,
+ * which throws on a status that is not a string.
+ */
+export function activeIntent(
+  cursor: string | undefined,
+  registry: readonly unknown[],
+  recordDirs: readonly string[],
+  hasState: (dir: string) => boolean,
+): ActiveIntent {
+  const raw = (cursor ?? "").trim();
+  if (raw.length > 0 && hasState(raw)) return { ok: true, dir: raw };
+  try {
+    const live = recordDirs.filter((d) => {
+      const row = registry.find((entry) => engineRecordDirMatches(entry, d));
+      // biome-ignore lint/suspicious/noExplicitAny: the engine's own unchecked row access
+      return row === undefined || (row as any).status.trim().toLowerCase() !== "archived";
+    });
+    return { ok: true, dir: live.length === 1 ? (live[0] ?? null) : null };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** `applicableTeamUnitScopeStamp`: the stamp when team-owned and it names this intent. */
 export function applicableStamp(c: ClaimInputs): ScopeStamp | null | "unknown" {
-  if (!c.team || !c.stamp) return null;
+  if (!c.team) return null;
+  if (c.resolves && !c.resolves()) return "unknown";
+  if (!c.stamp) return null;
   const uuid = c.uuid();
   if (!uuid.ok) return "unknown";
   if (!uuid.value || c.stamp.space !== c.space || c.stamp.intent_uuid !== uuid.value) {
@@ -184,6 +231,7 @@ export function applicableStamp(c: ClaimInputs): ScopeStamp | null | "unknown" {
 export function claimFilter(c: ClaimInputs): ClaimFilter {
   return (fields, unit) => {
     if (!c.team) return true;
+    if (c.resolves && !c.resolves()) return "unknown";
     const stamp = applicableStamp(c);
     if (stamp === "unknown") return "unknown";
     if (!stamp) {
@@ -192,7 +240,13 @@ export function claimFilter(c: ClaimInputs): ClaimFilter {
       if (eventGeneration === undefined) return true;
       const uuid = c.uuid();
       if (!uuid.ok) return "unknown";
-      const key = `${c.space}/${String(uuid.value ?? "legacy")}/${unit}`;
+      let key: string;
+      try {
+        key = `${c.space}/${String(uuid.value ?? "legacy")}/${unit}`;
+      } catch {
+        // `claimGenerationKey`'s template literal throws on an unstringable uuid too.
+        return "unknown";
+      }
       const generation = Object.hasOwn(c.generations, key) ? c.generations[key] : undefined;
       return generation === undefined ? true : eventGeneration === String(generation);
     }
@@ -250,28 +304,39 @@ function rawRegistry(intentsDir: string): unknown[] {
 }
 
 /**
- * The checkout's claim inputs for the record at `recordDir` under `root`. Reads only; the
- * registry is read once, and only if the filter reaches the intent's uuid.
+ * The checkout's claim inputs under `root`, for the state text the page reads. Reads only;
+ * the cursor, registry and record list are read once, and only if the filter reaches them.
  */
-export function readClaimInputs(root: string, recordDir: string, stateText: string): ClaimInputs {
+export function readClaimInputs(root: string, stateText: string): ClaimInputs {
   const roof = path.join(root, "aidlc");
   const space = activeSpace(root);
   const intentsDir = path.join(roof, "spaces", space, "intents");
   const stampText = readText(path.join(roof, ".aidlc-unit-scope.json"));
   const generationsText = readText(path.join(roof, ".aidlc-claim-generations.json"));
-  let uuid: IntentUuid | undefined;
+  let identity: { active: ActiveIntent; uuid: IntentUuid } | undefined;
+  const read = () => {
+    if (identity) return identity;
+    const registry = rawRegistry(intentsDir);
+    const dirs = recordDirsOf(intentsDir);
+    const active = activeIntent(
+      readText(path.join(intentsDir, ACTIVE_INTENT_POINTER)),
+      registry,
+      dirs,
+      (d) => fs.existsSync(path.join(intentsDir, d, "aidlc-state.md")),
+    );
+    // `listIntents` calls `activeIntent` again, so a throw there is a throw here too.
+    const uuid: IntentUuid = active.ok
+      ? activeIntentUuid(registry, dirs, active.dir)
+      : { ok: false };
+    identity = { active, uuid };
+    return identity;
+  };
   return {
     team: isTeamUnitOwnership(stateText),
     stamp: stampText === undefined ? null : parseScopeStamp(stampText),
     generations: generationsText === undefined ? {} : parseClaimGenerations(generationsText),
     space,
-    uuid: () => {
-      uuid ??= activeIntentUuid(
-        rawRegistry(intentsDir),
-        recordDirsOf(intentsDir),
-        path.basename(recordDir),
-      );
-      return uuid;
-    },
+    uuid: () => read().uuid,
+    resolves: () => read().active.ok,
   };
 }

@@ -598,8 +598,11 @@ function secs(a: string, b: string): number {
  *     none, no id on the completion either; and `Request Fingerprint` (else `Artifact
  *     Fingerprint`) equal to the request's `Artifact Fingerprint`, as
  *     `reviewCompletionMatchesRequest` requires. So the window opens at the last request
- *     the completion answers. Not transcribed: the verdict and review-record checks, which
- *     decide whether the review COUNTS, not when it ran.
+ *     the completion answers. Under team ownership the engine reads only the current claim
+ *     attempt's rows; this view keeps every attempt's time instead, so the pending request
+ *     is held per `Attempt Generation` — a stale attempt's late request used to replace the
+ *     current one and drop its window. Not transcribed: the verdict and review-record
+ *     checks, which decide whether the review COUNTS, not when it ran.
  *   MERGE_DISPATCH_INVOKED → _RETURNED | _FALLBACK
  *     by `Bolt slug` plus, on a pinned Unit merge, `Pinned OID` + `Attempt Generation` +
  *     `Pin Transaction` — the identity `requireMergeDispatchDecision` (`tools/aidlc-unit.ts`)
@@ -627,7 +630,12 @@ function delegationGaps(events: readonly AuditEvent[]): Set<number> {
     if (e.event === "REVIEW_REQUESTED" || e.event === "REVIEW_COMPLETED") {
       const iteration = field(e, "Iteration");
       if (!/^[1-9][0-9]*$/.test(iteration)) return;
-      const key = ["Stage", "Reviewer", "Unit", "Workflow"].map((f) => field(e, f)).join("\0");
+      // `Attempt Generation` keeps two claim attempts apart: the engine reads only the
+      // current one (`reviewAttemptEventMatchesCurrentClaim`), so a stale generation's late
+      // request must not take over its pending request — and this view keeps both.
+      const key = ["Stage", "Reviewer", "Unit", "Workflow", "Attempt Generation"]
+        .map((f) => field(e, f))
+        .join("\0");
       const scope = `${key}\0${iteration}`;
       if (e.event === "REVIEW_REQUESTED") {
         reviews.set(scope, i);

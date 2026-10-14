@@ -187,7 +187,7 @@ const status: StatusStrings = {
   humanUnreadableTip:
     "읽거나 확인하지 못했습니다(예: 권한 없음, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크). 그 안의 빈 답은 빠지고, 그 파일이 설명했을 엔진 질문은 따로 셀 수 있어서 위 수는 어느 쪽으로든 불완전합니다. 경로는 페이지 위 경고에 있습니다",
   humanTeamGate: (unit, stage) => `유닛 승인 대기 ${unit} · ${stage}`,
-  humanTeamGateRevising: (unit, stage) => `${unit} · ${stage} 수정 구간 — 유닛 게이트가 거절됨`,
+  humanTeamGateRevising: (unit, stage) => `${unit} · ${stage} 다시 열림 — 수정 중`,
   humanTeamGateSource: "팀 유닛 게이트 · 감사 기록",
   humanTeamGateTip:
     "팀 소유에서는 유닛 게이트가 state 행을 바꾸지 않습니다. 그래서 stop hook 과 같은 방식으로 감사 기록에서 읽습니다: 진행 중인 유닛과 stage, 게이트 범위(scope stamp 의 값, 없으면 Unit Gate Rhythm), 그리고 이 checkout 의 claim 시도에 속한 기록만 봅니다",
@@ -720,7 +720,8 @@ const timeline: TimelineStrings = {
   열리고 <code>UNIT_PAUSED</code>(점선) 또는 <code>UNIT_COMPLETED</code> 에서 닫힙니다. <code>UNIT_SKIPPED</code> 는 열린
   구간을 닫고, 열린 구간이 없으면 눈금입니다. 두 clone 이 같은 초에 한 유닛에 남긴 행은 순서를 알 수 없어 엔진과
   똑같이 줄입니다 — 일시정지가 있을 수 있으면 그것을, 다음으로 시작·재개를 택하고, 열린 구간 없이 남은 일시정지는
-  눈금입니다. 이 보기는 완료까지이며, 그 뒤의 유닛 체크포인트 작업(검증, 유닛 끝 관문)은
+  눈금입니다. 팀 소유에서는 엔진이 이 checkout 의 claim 시도 행만 먼저 남기지만, 이 보기는 지난 시도에 쓴 시간도
+  쓴 시간이라 모든 시도의 행을 읽습니다. 그래서 두 시도가 같은 초에 겹치면 결과가 엔진과 다를 수 있습니다. 이 보기는 완료까지이며, 그 뒤의 유닛 체크포인트 작업(검증, 유닛 끝 관문)은
   들어 있지 않습니다. 시작 receipt 가 작업 뒤에 찍히거나 wave·복구 완료처럼 아예 없을 수 있어서, 같은 시도·같은 clone
   안에서 그 stage 의 유닛 첫 기록 쓰기를 시작으로 쓸 수 있습니다(행의 <b>~</b>, 자세한 내용은 막대 툴팁). 기록상 가장 이른
   근거이지 측정된 시작이 아닙니다. 구간 안의 분류는 그 유닛을 실행한 clone 의 이벤트로 계산하고, 그 이벤트가 덮지 못한
