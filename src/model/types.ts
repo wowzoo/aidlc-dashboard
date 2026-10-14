@@ -203,7 +203,8 @@ export type Warning =
    *  where the engine refuses it: the Units Generation gate while that stage is open
    *  (the file may be mid-write), the per-unit Construction stages once it has closed. */
   | { code: "unit-dag-malformed"; reason: string; detail: string; stop: UnitDagStop }
-  | { code: "unit-progress-missing" }
+  /** `stageLevel`: the plan runs per-unit stages at stage level, so no matrix stands in. */
+  | { code: "unit-progress-missing"; stageLevel?: boolean }
   | {
       code: "roster-mismatch";
       stateVersion?: string;

@@ -16,6 +16,7 @@ import { NoRunError, assemble } from "../model/assemble";
 import { dur, esc, hours } from "../render/common";
 import { renderHealth } from "../render/health";
 import { strings } from "../render/i18n";
+import { warningTextIn } from "../render/warnings";
 
 const KO = strings("ko");
 const EN = strings("en");
@@ -449,6 +450,8 @@ describe("render", () => {
         files?: Record<string, string>;
         /** The authored unit DAG: removed, or its yaml units block stripped (malformed). */
         authoredDag?: "drop" | "malformed";
+        /** Literal replacements in the state text, applied last. */
+        replace?: [string, string][];
       } = {},
     ) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-stagelevel-"));
@@ -466,6 +469,7 @@ describe("render", () => {
         if (opts.info)
           text = text.replace("- **State Version**: 8", `- **State Version**: 8\n${opts.info}`);
         if (opts.tail) text = `${text.trimEnd()}\n\n${opts.tail}\n`;
+        for (const [from, to] of opts.replace ?? []) text = text.replace(from, to);
         fs.writeFileSync(sp, text);
         const dep = path.join(root, REC, "inception/units-generation/unit-of-work-dependency.md");
         if (opts.authoredDag === "drop") fs.rmSync(dep);
@@ -710,6 +714,37 @@ describe("render", () => {
           expect(m.warnings.map((w) => w.code)).not.toContain("unit-dag-malformed");
         },
         { authoredDag: "malformed", runtime: LEFTOVER },
+      );
+    });
+
+    test("a missing Unit Progress at stage level: warned only where the engine could derive one", () => {
+      const team = { runtime: LEFTOVER, info: "- **Unit Ownership**: team" };
+      // A roster resolves and per-unit stages still run: the table is derivable and absent.
+      // The warning says so without pointing at a matrix this mode does not draw.
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          const w = m.warnings.find((x) => x.code === "unit-progress-missing");
+          expect(w).toEqual({ code: "unit-progress-missing", stageLevel: true });
+          if (!w) throw new Error("no unit-progress-missing warning");
+          for (const x of [EN, KO])
+            expect(warningTextIn(w, x)).toBe(x.warn.unitProgressMissing(true));
+          expect(EN.warn.unitProgressMissing(true)).not.toContain("matrix");
+        },
+        team,
+      );
+      // Every per-unit Construction stage skipped at runtime: `deriveTeamUnitProgressModel`
+      // refuses an empty block, so nothing is missing.
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => expect(m.warnings.map((w) => w.code)).not.toContain("unit-progress-missing"),
+        {
+          ...team,
+          replace: [
+            ["- [x] functional-design — EXECUTE", "- [S] functional-design — EXECUTE"],
+            ["- [-] code-generation — EXECUTE", "- [S] code-generation — EXECUTE"],
+          ],
+        },
       );
     });
 

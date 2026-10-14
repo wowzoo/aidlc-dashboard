@@ -63,8 +63,10 @@ const warn: WarnStrings = {
   unitProgressMalformed:
     "state.md 의 `## Unit Progress` 표를 엔진이 정한 모양으로 읽지 못했습니다 (표가 줄 맨 앞에서 시작하지 않거나, 첫 열이 `unit` 이 아니거나, 구분선 폭이 헤더와 다름 — 엔진도 같은 조건에서 거부합니다). owner·유닛 게이트를 표시하지 않습니다",
 
-  unitProgressMissing:
-    "team / unit-major 실행인데 state.md 에 `## Unit Progress` 절이 없습니다 — owner·유닛 게이트의 권위 있는 원천이 없어 아래 매트릭스는 디스크와 감사 기록으로 재구성한 값입니다",
+  unitProgressMissing: (stageLevel) =>
+    stageLevel
+      ? "team / unit-major 실행인데 state.md 에 `## Unit Progress` 절이 없습니다 — 엔진은 유닛 목록으로 이 표를 만들 수 있지만, 여기에는 owner·유닛 게이트의 권위 있는 원천이 없습니다"
+      : "team / unit-major 실행인데 state.md 에 `## Unit Progress` 절이 없습니다 — owner·유닛 게이트의 권위 있는 원천이 없어 아래 매트릭스는 디스크와 감사 기록으로 재구성한 값입니다",
 
   rosterMismatch: (stateVersion, unknownToCatalog, missingFromState) => {
     const ver = stateVersion ? `(State Version: ${stateVersion})` : "(State Version 없음)";

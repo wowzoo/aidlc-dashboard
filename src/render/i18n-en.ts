@@ -70,8 +70,10 @@ const warn: WarnStrings = {
   unitProgressMalformed:
     "The `## Unit Progress` table in state.md is not in the shape the engine defines (the table does not start at column 0, or its first column is not `unit`, or the separator row's width differs from the header — the engine refuses it on the same conditions). Owner and per-unit gate are not shown",
 
-  unitProgressMissing:
-    "This is a team / unit-major run, but state.md has no `## Unit Progress` section — with no authoritative source for owner and per-unit gate, the matrix below is reconstructed from disk and the audit ledger",
+  unitProgressMissing: (stageLevel) =>
+    stageLevel
+      ? "This is a team / unit-major run, but state.md has no `## Unit Progress` section — the engine could derive one from the unit roster, but there is no authoritative source here for owner and per-unit gate"
+      : "This is a team / unit-major run, but state.md has no `## Unit Progress` section — with no authoritative source for owner and per-unit gate, the matrix below is reconstructed from disk and the audit ledger",
 
   rosterMismatch: (stateVersion, unknownToCatalog, missingFromState) => {
     const ver = stateVersion ? `(State Version: ${stateVersion})` : "(no State Version)";

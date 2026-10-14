@@ -36,7 +36,7 @@ export function warningTextIn(w: Warning, s: Strings): string {
     case "unit-progress-malformed":
       return t.unitProgressMalformed;
     case "unit-progress-missing":
-      return t.unitProgressMissing;
+      return t.unitProgressMissing(w.stageLevel === true);
     case "roster-mismatch":
       return t.rosterMismatch(w.stateVersion, w.unknownToCatalog, w.missingFromState);
     case "harness-coexist":

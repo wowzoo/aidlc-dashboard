@@ -166,7 +166,8 @@ export interface WarnStrings {
   stateVersionUnreadable(stateVersion: string | undefined): string;
   teamWithoutUnitMajor(constructionIteration: string | undefined): string;
   readonly unitProgressMalformed: string;
-  readonly unitProgressMissing: string;
+  /** `stageLevel`: no matrix is drawn in this mode, so none is offered in the table's place. */
+  unitProgressMissing(stageLevel: boolean): string;
   rosterMismatch(
     stateVersion: string | undefined,
     unknownToCatalog: string[],

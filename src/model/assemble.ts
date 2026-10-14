@@ -675,15 +675,28 @@ export function assemble(
       constructionIteration: state.constructionIteration,
     });
   }
-  // The engine derives the table only from a valid non-empty Unit DAG
-  // (`deriveTeamUnitProgressModel` refuses any `resolveBoltDag` result but a non-empty `ok`).
-  // At stage level with no such roster its absence is not a missing projection; stage level
-  // alone does not prove there is none, because the derivation does not refuse stage level.
-  const derivable = unitDag.state === "ok" && unitDag.units.length > 0;
+  // The engine derives the table only from a valid non-empty Unit DAG AND a non-empty block
+  // of active, unskipped per-unit Construction stages (`deriveTeamUnitProgressModel` refuses
+  // either missing). At stage level, where neither is implied, an absent table is missing
+  // only when both hold; stage level alone does not settle it, because the derivation does
+  // not refuse stage level. Without a catalogue every executing Construction row is taken
+  // as per-unit — the side that keeps the warning.
+  const stageLevel = artifactMode === "stage-level";
+  const scopeInGrid = catalog?.scopeGrid ? state.scope in catalog.scopeGrid : true;
+  const derivable =
+    unitDag.state === "ok" &&
+    unitDag.units.length > 0 &&
+    scopeInGrid &&
+    (state.phases.find((p) => p.key === "construction")?.stages ?? []).some(
+      (st) =>
+        st.execute &&
+        st.status !== "skipped" &&
+        (catalog ? catalog.bySlug.get(st.slug)?.forEach === "unit-of-work" : true),
+    );
   if (state.unitProgress?.malformed) {
     warnings.push({ code: "unit-progress-malformed" });
-  } else if (teamMode && !state.unitProgress && (artifactMode !== "stage-level" || derivable)) {
-    warnings.push({ code: "unit-progress-missing" });
+  } else if (teamMode && !state.unitProgress && (!stageLevel || derivable)) {
+    warnings.push({ code: "unit-progress-missing", ...(stageLevel ? { stageLevel: true } : {}) });
   }
 
   const stateSlugs = state.phases.flatMap((p) => p.stages.map((st) => st.slug));
