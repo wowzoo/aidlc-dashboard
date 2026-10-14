@@ -87,6 +87,8 @@ export type StateCompat = "verified" | "unknown" | "incompatible";
  *
  *   team-claim          the claim FILE decides (`eventMatchesClaimAttempt`); the engine
  *                       could settle it or not, and neither is derivable here.
+ *   team-claim-skip     a current UNIT_SKIPPED the claim filter could drop or restore;
+ *                       shown whatever the segment holds, never as absent or exempt.
  *   wave-fingerprint    an artifact fingerprint decides; same.
  *   ambiguous-floor     the floor is `AMBIGUOUS:<ts>#<digest>`, not reproducible; same.
  */
@@ -225,8 +227,6 @@ export interface MatrixCell {
   receiptReason?: ReceiptReason;
   /** The engine's `Reason` on the UNIT_SKIPPED row. Set only when state is "skipped". */
   skipReason?: string;
-  /** A team-owned skip the claim-attempt filter might drop; set only with `skipReason`. */
-  skipClaimUnchecked?: true;
 }
 
 /**
@@ -481,21 +481,32 @@ export function buildConstructionMatrix(
       // check reads the skip first. A stage whose only unit rows are skips is real — the
       // skip writer emits no UNIT_STARTED.
       const verdict = lifecycle?.state(u.name, st.slug);
-      const receipt = needsReceipt || verdict?.state === "skipped" ? verdict : undefined;
+      // A team skip the claim filter decides is read the same way — a skip-only stage is
+      // not `inUse`, and dropping the verdict there drew the unit absent.
+      const receipt =
+        needsReceipt ||
+        verdict?.state === "skipped" ||
+        (verdict?.state === "unverifiable" && verdict.reason === "team-claim-skip")
+          ? verdict
+          : undefined;
       const state: CellState =
         catStage !== undefined && u.kind !== undefined && vacuouslyCovered(catStage, u.kind)
           ? "n/a"
           : receipt?.state === "skipped"
             ? "skipped"
-            : !started
-              ? "absent"
-              : !artifactsMet
-                ? "partial"
-                : receipt?.state === "unsettled"
-                  ? "unsettled"
-                  : receipt?.state === "unverifiable"
-                    ? "unverified"
-                    : "complete";
+            : // Before the artifact checks: whether the unit owes the stage at all is the
+              // open question, so an empty segment is not "not started".
+              receipt?.state === "unverifiable" && receipt.reason === "team-claim-skip"
+              ? "unverified"
+              : !started
+                ? "absent"
+                : !artifactsMet
+                  ? "partial"
+                  : receipt?.state === "unsettled"
+                    ? "unsettled"
+                    : receipt?.state === "unverifiable"
+                      ? "unverified"
+                      : "complete";
       return {
         unit: u.name,
         state,
@@ -505,9 +516,6 @@ export function buildConstructionMatrix(
         missing,
         ...(receipt?.state === "unverifiable" ? { receiptReason: receipt.reason } : {}),
         ...(receipt?.state === "skipped" ? { skipReason: receipt.reason } : {}),
-        ...(receipt?.state === "skipped" && receipt.claimUnchecked
-          ? { skipClaimUnchecked: true as const }
-          : {}),
       };
     });
 

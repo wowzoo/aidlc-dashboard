@@ -31,6 +31,8 @@ import type {
 const RECEIPT_REASON_KO: Record<ReceiptReason, string> = {
   "team-claim":
     "산출물은 다 있고, 완료 수령증은 claim 파일이 판정합니다 (team 소유) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다. 위의 유닛 진행 표가 권위 있는 값입니다",
+  "team-claim-skip":
+    "이 유닛을 건너뛴 기록(UNIT_SKIPPED)이 있지만, team 소유라 엔진은 claim 시도(Attempt Generation·scope stamp)가 맞는 기록만 읽습니다 — 건너뛴 것으로 볼지 감사 기록만으로는 알 수 없습니다",
   "wave-fingerprint":
     "산출물은 다 있고, 완료 수령증은 산출물 지문이 판정합니다 (wave 모드) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다",
   "ambiguous-floor":
@@ -243,15 +245,12 @@ const overview: OverviewStrings = {
   tipComplete: (present) => `완료: ${present.join(", ")}`,
   tipUnsettled: (present) =>
     `산출물은 다 있으나 완료 수령증(UNIT_COMPLETED)이 없습니다 — 일시중지·재개 대기·미승인 상태일 수 있습니다 (파일: ${present.join(", ")})`,
-  tipUnverified: (reason, present) => `${RECEIPT_REASON_KO[reason]} (파일: ${present.join(", ")})`,
+  tipUnverified: (reason, present) =>
+    `${RECEIPT_REASON_KO[reason]}${present.length ? ` (파일: ${present.join(", ")})` : ""}`,
   tipNotApplicable: (present) =>
     `이 유닛 kind 에 계약된 산출물 없음${present.length ? ` (있는 파일: ${present.join(", ")})` : ""}`,
-  tipSkipped: (reason, claimUnchecked) =>
-    `엔진이 이 유닛의 이 stage 를 건너뛰었습니다(UNIT_SKIPPED)${reason ? ` — 사유: ${reason}` : ""}${
-      claimUnchecked
-        ? ". 팀 소유라 엔진은 claim 시도(Attempt Generation·scope stamp)가 맞는 기록만 읽는데, 여기서는 그 대조를 하지 않았습니다"
-        : ""
-    }`,
+  tipSkipped: (reason) =>
+    `엔진이 이 유닛의 이 stage 를 건너뛰었습니다(UNIT_SKIPPED)${reason ? ` — 사유: ${reason}` : ""}`,
   tipNotStarted: "미착수",
 
   legendBase:

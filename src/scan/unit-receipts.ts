@@ -48,8 +48,8 @@
 // a cross-shard tie on events built without block positions. One team verdict is read
 // all the same: a current UNIT_SKIPPED. With no scope stamp, the claim filter passes a
 // row with no `Attempt Generation`, so for a unit with no such field that skip is the
-// engine's own; otherwise it is still read, marked `claimUnchecked`, because drawing the
-// unit absent put a fabricated blocker in the denominator. A ledger from before
+// engine's own. Otherwise a current skip row is `team-claim-skip`: the filter can drop it
+// or restore it, and drawing the unit absent had put a fabricated blocker in the count. A ledger from before
 // the `Run floor` field is read as the engine reads it: no row is current.
 //
 // GENERATION. This reads 2.11.0 — the dashboard's one supported engine. A tree from an
@@ -71,17 +71,16 @@ export interface ReceiptRow {
 }
 
 /** Why a receipt cannot be read from the audit alone. */
-export type ReceiptReason = "team-claim" | "wave-fingerprint" | "ambiguous-floor";
+export type ReceiptReason =
+  | "team-claim"
+  | "team-claim-skip"
+  | "wave-fingerprint"
+  | "ambiguous-floor";
 
 export type ReceiptVerdict =
   | { state: "settled" | "unsettled"; reason?: undefined }
-  /**
-   * `reason` is the engine's own `Reason` field on the UNIT_SKIPPED row. `claimUnchecked`
-   * marks a team-owned skip the engine's claim-attempt filter might drop — a row carrying
-   * `Attempt Generation`, or a scope stamp in the checkout — which this reader does not
-   * evaluate.
-   */
-  | { state: "skipped"; reason: string; claimUnchecked?: true }
+  /** `reason` is the engine's own `Reason` field on the UNIT_SKIPPED row. */
+  | { state: "skipped"; reason: string }
   | { state: "unverifiable"; reason: ReceiptReason };
 
 export interface ReceiptPolicy {
@@ -92,8 +91,9 @@ export interface ReceiptPolicy {
   team: boolean;
   /**
    * The checkout holds a unit scope stamp (`aidlc/.aidlc-unit-scope.json`). Under team
-   * ownership an applicable one keeps only its own unit's rows; whether it applies is not
-   * checked, so its mere presence makes a team skip `claimUnchecked`.
+   * ownership an applicable one keeps only its own unit's rows. Whether it applies is not
+   * checked, so its mere presence is enough to withhold a team skip — conservatively, since
+   * a malformed or other-intent stamp the engine ignores is counted too.
    */
   scopeStamp?: boolean;
   /** The engine requires receipts by policy (`constructionCheckpointsApply`). */
@@ -498,16 +498,21 @@ export function readUnitReceipts(
               : wave.has(unit)
                 ? { state: "unverifiable", reason: "wave-fingerprint" }
                 : { state: "unsettled" };
+      // Team ownership adds one step before the same floor and reduction: the claim-
+      // attempt filter (`eventMatchesClaimAttempt`), applied to the lifecycle rows only —
+      // the floor and cutoff are read from every row. With no scope stamp, a row with no
+      // `Attempt Generation` passes it whatever the claim files say, so for a unit none of
+      // whose rows carries one the engine reads exactly these rows.
+      const inert = !p.scopeStamp && !mine.some((r) => r.f["Attempt Generation"] !== undefined);
       if (!p.team) {
         set(unit, verdict);
-      } else if (verdict.state === "skipped") {
-        // Team ownership adds one step before the same floor and reduction: the claim-
-        // attempt filter (`eventMatchesClaimAttempt`). With no scope stamp, a row with no
-        // `Attempt Generation` passes it whatever the claim files say — so when none of the
-        // unit's rows carries one, the engine reads exactly these rows and the skip is its
-        // verdict. Otherwise the skip is still the reading, marked unchecked.
-        const inert = !p.scopeStamp && !mine.some((r) => r.f["Attempt Generation"] !== undefined);
-        set(unit, inert ? verdict : { ...verdict, claimUnchecked: true as const });
+      } else if (verdict.state === "skipped" && inert) {
+        set(unit, verdict);
+      } else if (!inert && current.some((r) => r.f.Unit === unit && r.event === "UNIT_SKIPPED")) {
+        // Otherwise the filter can drop the skip (a stale generation) or keep it by dropping
+        // the row that superseded it — either way. A current skip row is then a can't-tell,
+        // never a definite exemption out of the denominator, nor a missing unit.
+        set(unit, { state: "unverifiable", reason: "team-claim-skip" });
       } else {
         // Everything else stays the claim's to decide: a unit none of whose rows carries a
         // `Run floor` fails the engine's exact match whatever the claim says, so it is

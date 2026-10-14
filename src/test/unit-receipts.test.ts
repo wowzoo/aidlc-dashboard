@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { assemble } from "../model/assemble";
+import { renderBody } from "../render/page";
 import { parseAuditShard } from "../scan/audit";
 import { readUnitLifecycle } from "../scan/matrix";
 import { parseState } from "../scan/parser";
@@ -315,34 +316,41 @@ describe("2.11-only review regressions", () => {
     expect(read(tie, team).state("u1", "nfr-design").state).not.toBe("skipped");
   });
 
-  test("under team ownership a skip the claim filter could drop says so", () => {
+  test("under team ownership a skip the claim filter decides is a can't-tell, either way", () => {
     // A row carrying `Attempt Generation` is judged against the claim generations file, and
-    // a scope stamp in the checkout keeps only its own unit's rows — neither is read here.
+    // a scope stamp keeps only its own unit's rows — neither is read here. The filter can
+    // drop the skip (a stale generation) or restore it by dropping the row after it, both
+    // reproduced against the engine, so neither a skip nor a supersession is claimed.
     const team = { team: true, unitScoped: true };
-    const reason = "covered by u2";
-    const generation = ledger([
-      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", {
-        Reason: reason,
-        "Attempt Generation": "2",
-      }),
-    ]);
-    expect(read(generation, team).state("u1", "nfr-design")).toEqual({
-      state: "skipped",
-      reason,
-      claimUnchecked: true,
+    const cantTell = { state: "unverifiable", reason: "team-claim-skip" } as const;
+    const gen = (g: string, extra: Record<string, string> = {}) => ({
+      Reason: "covered by u2",
+      "Attempt Generation": g,
+      ...extra,
     });
+    const stale = ledger([unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", gen("1"))]);
+    expect(read(stale, team).state("u1", "nfr-design")).toEqual(cantTell);
+    const restored = ledger([
+      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", gen("2")),
+      unit("UNIT_STARTED", 2, "nfr-design", "u1", "unstarted#0", { "Attempt Generation": "1" }),
+    ]);
+    expect(read(restored, team).state("u1", "nfr-design")).toEqual(cantTell);
     const plain = ledger([
-      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", { Reason: reason }),
+      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", { Reason: "covered by u2" }),
     ]);
-    expect(read(plain, { ...team, scopeStamp: true }).state("u1", "nfr-design")).toEqual({
-      state: "skipped",
-      reason,
-      claimUnchecked: true,
+    expect(read(plain, { ...team, scopeStamp: true }).state("u1", "nfr-design")).toEqual(cantTell);
+    // A unit with no current skip row keeps the claim's reason; outside team ownership the
+    // stamp means nothing.
+    const done = ledger([
+      unit("UNIT_COMPLETED", 1, "nfr-design", "u1", "unstarted#0", { "Attempt Generation": "1" }),
+    ]);
+    expect(read(done, team).state("u1", "nfr-design")).toEqual({
+      state: "unverifiable",
+      reason: "team-claim",
     });
-    // Outside team ownership the stamp means nothing.
     expect(read(plain, { scopeStamp: true }).state("u1", "nfr-design")).toEqual({
       state: "skipped",
-      reason,
+      reason: "covered by u2",
     });
   });
 
@@ -395,20 +403,23 @@ describe("team ownership, end to end", () => {
         "",
       ].join("\n"),
     );
-    const stage = assemble(root).matrix?.stages.find((s) => s.slug === "functional-design");
+    const m = assemble(root);
+    const stage = m.matrix?.stages.find((s) => s.slug === "functional-design");
     const cell = stage?.cells.find((c) => c.unit === "PU-B-ui");
     expect(cell?.state).toBe("skipped");
     expect(cell?.skipReason).toBe("no UI behaviour to design");
-    expect(cell?.skipClaimUnchecked).toBeUndefined();
     expect(stage?.skipped).toBe(1);
+    // Out of the denominator: one applicable unit, and it is complete.
+    expect(renderBody(m, "en")).toContain("1/1 (–1⊘)");
 
     // A scope stamp in the checkout keeps only its own unit's rows, which is not checked
-    // here — still skipped, but the cell says the claim attempt was not read.
+    // here — so the same skip becomes a can't-tell, still not "not started". Presence alone
+    // counts, conservatively: this empty stamp is one the engine would ignore.
     fs.writeFileSync(path.join(root, "aidlc", ".aidlc-unit-scope.json"), "{}\n");
-    const stamped = assemble(root)
-      .matrix?.stages.find((s) => s.slug === "functional-design")
-      ?.cells.find((c) => c.unit === "PU-B-ui");
-    expect(stamped?.state).toBe("skipped");
-    expect(stamped?.skipClaimUnchecked).toBe(true);
+    const stamped = assemble(root).matrix?.stages.find((s) => s.slug === "functional-design");
+    const held = stamped?.cells.find((c) => c.unit === "PU-B-ui");
+    expect(held?.state).toBe("unverified");
+    expect(held?.receiptReason).toBe("team-claim-skip");
+    expect(stamped?.skipped).toBe(0);
   });
 });

@@ -38,6 +38,8 @@ import type {
 const RECEIPT_REASON_EN: Record<ReceiptReason, string> = {
   "team-claim":
     "Every artifact is present, and the completion receipt is settled by the claim file (team ownership) — the audit ledger alone cannot say whether the engine considers this done. The Unit Progress table above is the authority",
+  "team-claim-skip":
+    "A skip is recorded for this unit (UNIT_SKIPPED), but under team ownership the engine reads only rows matching the claim attempt (Attempt Generation, scope stamp) — the audit ledger alone cannot say whether the engine counts it skipped",
   "wave-fingerprint":
     "Every artifact is present, and the completion receipt is settled by an artifact fingerprint (wave mode) — the audit ledger alone cannot say whether the engine considers this done",
   "ambiguous-floor":
@@ -257,15 +259,12 @@ const overview: OverviewStrings = {
   tipComplete: (present) => `complete: ${present.join(", ")}`,
   tipUnsettled: (present) =>
     `Every artifact is present but there is no completion receipt (UNIT_COMPLETED) — the unit may be paused, waiting to resume, or unapproved (files: ${present.join(", ")})`,
-  tipUnverified: (reason, present) => `${RECEIPT_REASON_EN[reason]} (files: ${present.join(", ")})`,
+  tipUnverified: (reason, present) =>
+    `${RECEIPT_REASON_EN[reason]}${present.length ? ` (files: ${present.join(", ")})` : ""}`,
   tipNotApplicable: (present) =>
     `Nothing is contracted for this unit's kind${present.length ? ` (files present: ${present.join(", ")})` : ""}`,
-  tipSkipped: (reason, claimUnchecked) =>
-    `The engine skipped this stage for this unit (UNIT_SKIPPED)${reason ? ` — reason: ${reason}` : ""}${
-      claimUnchecked
-        ? ". Under team ownership the engine reads only rows matching the claim attempt (Attempt Generation, scope stamp); that match was not checked here"
-        : ""
-    }`,
+  tipSkipped: (reason) =>
+    `The engine skipped this stage for this unit (UNIT_SKIPPED)${reason ? ` — reason: ${reason}` : ""}`,
   tipNotStarted: "not started",
 
   legendBase:
