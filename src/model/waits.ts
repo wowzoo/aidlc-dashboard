@@ -15,9 +15,13 @@
 //     when. An audit-open gate on a row that is not `[?]` is a stale stamp.
 //   - TEAM UNIT GATE: under team ownership the engine reads a unit's gate from the
 //     audit by unit, gate scope and CLAIM ATTEMPT (`unitGateStatus`) and never moves
-//     the global row to `[?]`. The claim attempt lives in the checkout's claim state,
-//     which this reader cannot see, so it says the gate is unread instead of letting
-//     an absent `[?]` read as "nothing waiting".
+//     the global row to `[?]`; `isHumanWaitStop` asks it first, for the active stage
+//     and unit at `effectiveUnitGateRhythm`'s scope. Read here the same way
+//     (scan/team-gate.ts, the claim filter in scan/claim-attempt.ts): an open one
+//     counts like the stage gate, a revising one is shown like `[R]`. Where the claim
+//     attempt cannot be resolved (an intent registry the engine would throw on) it is
+//     said to be unread, never an absent `[?]` read as "nothing waiting". The active
+//     stage and unit are the hook's own probe, so the scope follows the decision's.
 //   - REVISING: a `[R]` row — the person rejected the gate. The hook's own comment
 //     says the row covers both asking the person what to change and the rework, so it
 //     is shown, not counted, and the copy does not say whose move it is.
@@ -68,11 +72,13 @@
 // Read-only, never throws.
 
 import type { AuditEvent } from "../scan/audit";
+import type { ClaimFilter } from "../scan/claim-attempt";
 import { type OpenDecision, openDecision, openDecisionInAttempt } from "../scan/decision-wait";
 import { pendingGate } from "../scan/gate-wait";
 import type { AidlcState } from "../scan/parser";
 import type { QuestionsReport } from "../scan/questions";
 import type { DirectiveMarker, MarkerMiss, RunPosition } from "../scan/run-position";
+import { unitGateStatus } from "../scan/team-gate";
 import type { Blocker } from "./types";
 
 export interface Waits {
@@ -92,7 +98,18 @@ export interface Waits {
   engineAsk?: { askType?: string; stage: string; unit?: string };
   /** `aidlc/.aidlc-unit-parked` exists in this checkout — applicability unchecked. */
   checkoutPark: boolean;
-  /** Team ownership with a unit position: the unit's gate is not read here. */
+  /**
+   * Team ownership: the active unit's own gate (`unitGateStatus`), as the stop hook reads it
+   * before the state row — only an open (`awaiting-approval`) or `revising` one is carried.
+   * `scopeVerified` as on `decision`: the stage and unit came from a current marker.
+   */
+  teamGate?: {
+    stage: string;
+    unit: string;
+    status: "awaiting-approval" | "revising";
+    scopeVerified: boolean;
+  };
+  /** Team ownership with a unit position whose gate this reader could not decide. */
   teamGateUnread: boolean;
   /**
    * The stop-hook record names the state it blocked on (the signature's digest) and that
@@ -119,6 +136,12 @@ export type HookLiveness =
 export interface WaitsInput {
   state: AidlcState;
   position: RunPosition;
+  /**
+   * Under team ownership (`isTeamUnitOwnership`): the checkout's claim filter and the gate
+   * scope `effectiveUnitGateRhythm` gives (`unknown` when the stamp's applicability cannot
+   * be read). Absent outside team ownership.
+   */
+  teamGate?: { claim: ClaimFilter; scope: "per-stage" | "unit-end" | "unknown" };
   marker: { marker: DirectiveMarker } | { miss: MarkerMiss };
   events: AuditEvent[];
   questions: QuestionsReport;
@@ -326,6 +349,29 @@ export function buildWaits(w: WaitsInput): Waits {
   }
   if (decision) decision = { ...decision, scopeVerified };
 
+  // Team unit gate, as `isHumanWaitStop` reads it first: the active stage and unit, at the
+  // effective gate scope. Its `activeStage`/`activeUnit` are the hook's own probe, so the
+  // scope follows the decision's — a current marker, else the unit cache, unconfirmed.
+  let teamGate: Waits["teamGate"];
+  let teamGateUnread = false;
+  if (w.teamGate && scope.stage && scope.unit) {
+    const status =
+      w.teamGate.scope === "unknown"
+        ? "unknown"
+        : unitGateStatus(
+            w.events,
+            scope.stage,
+            scope.unit,
+            w.teamGate.scope,
+            w.teamGate.claim,
+            w.stageIndex,
+          );
+    if (status === "unknown") teamGateUnread = true;
+    else if (status === "awaiting-approval" || status === "revising") {
+      teamGate = { stage: scope.stage, unit: scope.unit, status, scopeVerified };
+    }
+  }
+
   const nowMs = Date.parse(w.now);
   const compose =
     !autonomous &&
@@ -354,7 +400,8 @@ export function buildWaits(w: WaitsInput): Waits {
     engineOnly,
     autonomous,
     checkoutPark: w.checkoutParkFile && !parked,
-    teamGateUnread: team && !!position.unit,
+    teamGate,
+    teamGateUnread,
     guardRecordStale,
   };
 }

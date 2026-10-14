@@ -36,7 +36,7 @@ export type UnitArtifactMode = "per-unit" | "stage-level" | "unknown";
 const UNITS_GENERATION = "units-generation";
 
 /** `getField`: the first `- **<name>**: <value>` line, trimmed. */
-function stateField(text: string, name: string): string | undefined {
+export function stateField(text: string, name: string): string | undefined {
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const m = new RegExp(`^- \\*\\*${esc}\\*\\*:[ \\t]*(.*)$`, "m").exec(text);
   return m?.[1]?.trim();

@@ -940,10 +940,10 @@ const UNIT_LIFECYCLE = new Set([
  * floor` because the engine reduces only the current attempt's rows. `events` is in the
  * ledger's order — time, then shard index, then position — so iteration order breaks the
  * rank ties. The engine runs this in every ownership mode; under team ownership it first
- * filters the rows by claim attempt (`eventMatchesClaimAttempt`), which needs checkout-local
- * state this reader does not have — so there the view reads every claim attempt's rows, and
- * a tie between two claim attempts under one floor can still end differently from the
- * engine's verdict. The receipt matrix says `team-claim` for exactly that reason.
+ * filters the rows by claim attempt (`eventMatchesClaimAttempt`). The receipt matrix applies
+ * that filter (scan/claim-attempt.ts); this view does not, because a stale claim attempt's
+ * rows are still time someone spent — so a tie between two claim attempts under one floor
+ * can end differently here from the engine's verdict, which the matrix states.
  */
 function crossShardTieLosers(events: readonly AuditEvent[]): Set<AuditEvent> {
   const groups = new Map<string, AuditEvent[]>();

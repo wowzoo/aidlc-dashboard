@@ -36,10 +36,8 @@ import type {
 } from "./i18n";
 /** What each `unverified` cause means — each one the engine could settle either way. */
 const RECEIPT_REASON_EN: Record<ReceiptReason, string> = {
-  "team-claim":
-    "Every artifact is present, and the completion receipt is settled by the claim file (team ownership) — the audit ledger alone cannot say whether the engine considers this done. The Unit Progress table above is the authority",
-  "team-claim-skip":
-    "A skip is recorded for this unit (UNIT_SKIPPED), but under team ownership the engine reads only rows matching the claim attempt (Attempt Generation, scope stamp) — the audit ledger alone cannot say whether the engine counts it skipped",
+  "claim-unresolved":
+    "Under team ownership the engine reads only rows matching the claim attempt (Attempt Generation, scope stamp), and deciding that needs an intent registry (intents.json) in a shape the engine itself cannot read — the audit ledger cannot say whether this unit is done or skipped",
   "wave-fingerprint":
     "Every artifact is present, and the completion receipt is settled by an artifact fingerprint (wave mode) — the audit ledger alone cannot say whether the engine considers this done",
   "ambiguous-floor":
@@ -201,9 +199,14 @@ const status: StatusStrings = {
     `${plural(n, "questions path")} could not be read — the questions in ${n === 1 ? "it" : "them"} are not counted`,
   humanUnreadableTip:
     "Could not be read or confirmed (for example no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow). A blank answer in it is missing, and an engine ask the file would have explained may be counted on its own, so the count above can be off either way. The paths are in the warnings at the top of the page",
-  humanTeamGateUnread: "Team unit gate — not read",
+  humanTeamGate: (unit, stage) => `Unit approval pending: ${unit} · ${stage}`,
+  humanTeamGateRevising: (unit, stage) => `${unit} · ${stage} in revision — unit gate rejected`,
+  humanTeamGateSource: "team unit gate · audit",
+  humanTeamGateTip:
+    "Under team ownership a unit's gate never moves the state row. It is read from the audit as the stop hook reads it: the active unit and stage, the gate scope (the scope stamp's, else Unit Gate Rhythm), and only rows of this checkout's claim attempt",
+  humanTeamGateUnread: "Team unit gate — could not be read",
   humanTeamGateUnreadTip:
-    "Under team ownership a unit's gate is decided from the audit by unit, gate scope and claim attempt, not by the state row. The claim state is not visible to this dashboard, so whether an approval is pending was not determined — this does not mean nothing is waiting",
+    "Under team ownership a unit's gate is read from the audit by unit, gate scope and claim attempt. Deciding the claim attempt here needs an intent registry (intents.json) in a shape the engine itself cannot read, so whether an approval is pending was not determined — this does not mean nothing is waiting",
   humanCheckoutPark: "Unit park marker in this checkout — applicability unverified",
   humanCheckoutParkTip:
     "aidlc/.aidlc-unit-parked exists. Whether it applies to the intent shown is decided by a scope stamp this dashboard does not check, so it is not counted",
@@ -655,8 +658,10 @@ const timeline: TimelineStrings = {
   awaitingDecision: (name) => `awaiting decision: <b>${name ?? "unnamed decision"}</b>`,
   awaitingDecisionUnscoped:
     '<span class="mute"> (scope unconfirmed — taken from the state\'s unit cache alone)</span>',
+  awaitingTeam: (unit, stage) =>
+    `awaiting unit approval: <b>${unit}</b> · ${stage}<span class="mute"> (team ownership — the unit's own gate, read from the audit)</span>`,
   awaitingTeamUnread:
-    'unit gate not read<span class="mute"> (team ownership — whether a unit approval is pending is not determined here)</span>',
+    'unit gate not read<span class="mute"> (team ownership — the claim attempt could not be resolved, so whether a unit approval is pending is not determined)</span>',
   awaitingNone:
     'no stage gate open<span class="mute"> (the Current Stage row is not awaiting approval — other asks are in the Your answers tab; past submissions are in the rework table below)</span>',
   reworkPending: " · a stage is rejected and not yet re-approved",

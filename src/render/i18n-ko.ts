@@ -29,10 +29,8 @@ import type {
 } from "./i18n";
 /** What each `unverified` cause means — each one the engine could settle either way. */
 const RECEIPT_REASON_KO: Record<ReceiptReason, string> = {
-  "team-claim":
-    "산출물은 다 있고, 완료 수령증은 claim 파일이 판정합니다 (team 소유) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다. 위의 유닛 진행 표가 권위 있는 값입니다",
-  "team-claim-skip":
-    "이 유닛을 건너뛴 기록(UNIT_SKIPPED)이 있지만, team 소유라 엔진은 claim 시도(Attempt Generation·scope stamp)가 맞는 기록만 읽습니다 — 건너뛴 것으로 볼지 감사 기록만으로는 알 수 없습니다",
+  "claim-unresolved":
+    "team 소유라 엔진은 claim 시도(Attempt Generation·scope stamp)에 맞는 기록만 읽는데, 그 판정에 필요한 intent 목록(intents.json)을 엔진도 읽지 못하는 모양입니다 — 이 유닛이 완료됐는지, 건너뛰었는지 감사 기록으로는 알 수 없습니다",
   "wave-fingerprint":
     "산출물은 다 있고, 완료 수령증은 산출물 지문이 판정합니다 (wave 모드) — 감사 기록만으로는 엔진이 완료로 볼지 알 수 없습니다",
   "ambiguous-floor":
@@ -188,9 +186,14 @@ const status: StatusStrings = {
   humanUnreadable: (n) => `읽지 못한 질문 경로 ${n}곳 — 그 안의 질문은 세지 않았습니다`,
   humanUnreadableTip:
     "읽거나 확인하지 못했습니다(예: 권한 없음, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크). 그 안의 빈 답은 빠지고, 그 파일이 설명했을 엔진 질문은 따로 셀 수 있어서 위 수는 어느 쪽으로든 불완전합니다. 경로는 페이지 위 경고에 있습니다",
-  humanTeamGateUnread: "팀 유닛 게이트 — 판독하지 않음",
+  humanTeamGate: (unit, stage) => `유닛 승인 대기 ${unit} · ${stage}`,
+  humanTeamGateRevising: (unit, stage) => `${unit} · ${stage} 수정 구간 — 유닛 게이트가 거절됨`,
+  humanTeamGateSource: "팀 유닛 게이트 · 감사 기록",
+  humanTeamGateTip:
+    "팀 소유에서는 유닛 게이트가 state 행을 바꾸지 않습니다. 그래서 stop hook 과 같은 방식으로 감사 기록에서 읽습니다: 진행 중인 유닛과 stage, 게이트 범위(scope stamp 의 값, 없으면 Unit Gate Rhythm), 그리고 이 checkout 의 claim 시도에 속한 기록만 봅니다",
+  humanTeamGateUnread: "팀 유닛 게이트 — 판독하지 못함",
   humanTeamGateUnreadTip:
-    "팀 소유에서는 유닛 게이트를 state 행이 아니라 감사 로그의 유닛·게이트 범위·claim 시도로 판정합니다. claim 상태는 이 대시보드가 볼 수 없어, 승인 대기 여부를 판정하지 않았습니다 — '대기 없음'이라는 뜻이 아닙니다",
+    "팀 소유에서는 유닛 게이트를 감사 기록의 유닛·게이트 범위·claim 시도로 판정합니다. 이 checkout 에서 claim 시도를 정하려면 intent 목록(intents.json)이 필요한데, 엔진도 읽지 못하는 모양이라 승인 대기 여부를 판정하지 않았습니다 — '대기 없음'이라는 뜻이 아닙니다",
   humanCheckoutPark: "이 checkout 에 유닛 park 표시 — 적용 범위 미확인",
   humanCheckoutParkTip:
     "aidlc/.aidlc-unit-parked 가 있습니다. 이 park 가 지금 보는 intent 에 적용되는지는 scope stamp 로 정해지는데 이 대시보드는 그것을 확인하지 않아, 대기 건수에 넣지 않았습니다",
@@ -627,8 +630,10 @@ const timeline: TimelineStrings = {
   awaitingDecision: (name) => `결정 대기 <b>${name ?? "이름 없는 결정"}</b>`,
   awaitingDecisionUnscoped:
     '<span class="mute"> (범위 미확인 — state 의 유닛 위치로만 정함)</span>',
+  awaitingTeam: (unit, stage) =>
+    `유닛 승인 대기 <b>${unit}</b> · ${stage}<span class="mute"> (팀 소유 — 감사 기록에서 읽은 유닛 자신의 관문)</span>`,
   awaitingTeamUnread:
-    '유닛 관문은 판독하지 않음<span class="mute"> (팀 소유 — 유닛 승인 대기 여부는 여기서 판단하지 않습니다)</span>',
+    '유닛 관문은 판독하지 못함<span class="mute"> (팀 소유 — claim 시도를 정하지 못해 유닛 승인 대기 여부를 판단하지 않았습니다)</span>',
   awaitingNone:
     '열린 stage 관문 없음<span class="mute"> (Current Stage 행이 승인 대기가 아님 — 다른 질문은 "내 답변" 탭, 과거 제출 이력은 아래 재작업 표)</span>',
   reworkPending: " · 반려 후 승인 전인 stage 있음",

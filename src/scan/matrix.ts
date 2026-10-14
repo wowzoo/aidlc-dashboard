@@ -31,6 +31,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ClaimFilter } from "./claim-attempt";
 import { type StageInfo, type StageStatus, displayFromSlug } from "./parser";
 import {
   type StageCatalog,
@@ -88,10 +89,9 @@ export type StateCompat = "verified" | "unknown" | "incompatible";
  * WHY a receipt could not be checked — each cause is one the engine could settle either
  * way, and the audit alone cannot say which:
  *
- *   team-claim          the claim FILE decides (`eventMatchesClaimAttempt`); the engine
- *                       could settle it or not, and neither is derivable here.
- *   team-claim-skip     a current UNIT_SKIPPED the claim filter could drop or restore;
- *                       shown whatever the segment holds, never as absent or exempt.
+ *   claim-unresolved    a team row's claim attempt needs an intent registry the engine
+ *                       would throw on; whether the unit owes the stage at all is open,
+ *                       so it is shown whatever the segment holds, never absent or exempt.
  *   wave-fingerprint    an artifact fingerprint decides; same.
  *   ambiguous-floor     the floor is `AMBIGUOUS:<ts>#<digest>`, not reproducible; same.
  */
@@ -113,8 +113,8 @@ export function readUnitLifecycle(
   opts: {
     unitMajor?: boolean;
     teamOwnership?: boolean;
-    /** A unit scope stamp is present in the checkout — see `ReceiptPolicy.scopeStamp`. */
-    scopeStamp?: boolean;
+    /** The checkout's claim-attempt filter — see `ReceiptPolicy.claim`. */
+    claim?: ClaimFilter;
     unitScoped?: boolean;
     receiptsRequired?: boolean;
     stageIndex?: (slug: string) => number;
@@ -141,8 +141,7 @@ export function readUnitLifecycle(
   const team = opts.teamOwnership ?? false;
   return readUnitReceipts(rows, {
     unitMajor,
-    team,
-    scopeStamp: opts.scopeStamp ?? false,
+    claim: opts.claim,
     unitScoped: opts.unitScoped ?? (team || unitMajor),
     receiptsRequired: opts.receiptsRequired ?? false,
     stageIndex: opts.stageIndex,
@@ -457,12 +456,12 @@ export function buildConstructionMatrix(
       // check reads the skip first. A stage whose only unit rows are skips is real — the
       // skip writer emits no UNIT_STARTED.
       const verdict = lifecycle?.state(u.name, st.slug);
-      // A team skip the claim filter decides is read the same way — a skip-only stage is
-      // not `inUse`, and dropping the verdict there drew the unit absent.
+      // An unresolved claim is read the same way: it could hide a skip, and a skip-only
+      // stage is not `inUse`, so dropping the verdict there would draw the unit absent.
       const receipt =
         needsReceipt ||
         verdict?.state === "skipped" ||
-        (verdict?.state === "unverifiable" && verdict.reason === "team-claim-skip")
+        (verdict?.state === "unverifiable" && verdict.reason === "claim-unresolved")
           ? verdict
           : undefined;
       const state: CellState =
@@ -472,7 +471,7 @@ export function buildConstructionMatrix(
             ? "skipped"
             : // Before the artifact checks: whether the unit owes the stage at all is the
               // open question, so an empty segment is not "not started".
-              receipt?.state === "unverifiable" && receipt.reason === "team-claim-skip"
+              receipt?.state === "unverifiable" && receipt.reason === "claim-unresolved"
               ? "unverified"
               : !started
                 ? "absent"

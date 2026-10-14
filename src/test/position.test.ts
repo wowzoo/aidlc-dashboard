@@ -13,6 +13,7 @@ import { buildWaits } from "../model/waits";
 import { strings } from "../render/i18n";
 import { renderRunHealth, renderRunLine } from "../render/status";
 import type { AuditEvent } from "../scan/audit";
+import { claimFilter } from "../scan/claim-attempt";
 import { pendingGate } from "../scan/gate-wait";
 import { parseState } from "../scan/parser";
 import type { QuestionsReport } from "../scan/questions";
@@ -702,10 +703,62 @@ describe("second-review regressions", () => {
     expect(file.checkoutPark).toBe(true);
   });
 
-  test("a team unit gate is reported unread rather than as nothing waiting", () => {
+  test("a team unit's own gate is read as the stop hook reads it", () => {
+    // `isHumanWaitStop` asks `unitGateStatus` for the active stage and unit first; under
+    // team ownership the state row never moves to `[?]` for it. Expectations are the
+    // engine's own (scan/team-gate.ts header; 0 of 47,680 random queries disagree).
     const team = "- **Unit Ownership**: team\n- **Construction Iteration**: unit-major";
-    expect(w(STATE(ROW, team), { miss: "absent" }).teamGateUnread).toBe(true);
-    expect(w(STATE(ROW), { miss: "absent" }).teamGateUnread).toBe(false);
+    const claim = claimFilter({
+      team: true,
+      stamp: null,
+      generations: {},
+      space: "default",
+      uuid: () => ({ ok: true, value: "u-1" }),
+    });
+    const teamGate = { claim, scope: "per-stage" as const };
+    let pos = 0;
+    const g = (event: string, ts: string, fields: Record<string, string> = {}): AuditEvent => ({
+      event,
+      ts,
+      shard: "a.md",
+      shardIndex: 0,
+      pos: pos++,
+      fields: { Stage: "code-generation", Unit: "unit-b", ...fields },
+    });
+    const open = [g("STAGE_AWAITING_APPROVAL", "2026-10-09T10:00:00Z")];
+    expect(w(STATE(ROW, team), { miss: "absent" }, { events: open, teamGate }).teamGate).toEqual({
+      stage: "code-generation",
+      unit: "unit-b",
+      status: "awaiting-approval",
+      scopeVerified: false,
+    });
+    // Approved closes it; a rejection leaves it revising — shown, like `[R]`.
+    const approved = [...open, g("GATE_APPROVED", "2026-10-09T10:05:00Z")];
+    expect(
+      w(STATE(ROW, team), { miss: "absent" }, { events: approved, teamGate }).teamGate,
+    ).toBeUndefined();
+    const rejected = [...open, g("GATE_REJECTED", "2026-10-09T10:05:00Z")];
+    expect(
+      w(STATE(ROW, team), { miss: "absent" }, { events: rejected, teamGate }).teamGate?.status,
+    ).toBe("revising");
+    // Another unit's gate, or another gate scope, is not this unit's.
+    const other = [g("STAGE_AWAITING_APPROVAL", "2026-10-09T10:00:00Z", { Unit: "unit-a" })];
+    expect(
+      w(STATE(ROW, team), { miss: "absent" }, { events: other, teamGate }).teamGate,
+    ).toBeUndefined();
+    const unitEnd = { claim, scope: "unit-end" as const };
+    expect(
+      w(STATE(ROW, team), { miss: "absent" }, { events: open, teamGate: unitEnd }).teamGate,
+    ).toBeUndefined();
+    // A gate row the claim filter cannot decide: unread, never "nothing waiting".
+    const stuck = { claim: () => "unknown" as const, scope: "per-stage" as const };
+    const unread = w(STATE(ROW, team), { miss: "absent" }, { events: open, teamGate: stuck });
+    expect(unread.teamGate).toBeUndefined();
+    expect(unread.teamGateUnread).toBe(true);
+    // Outside team ownership there is no unit gate to read.
+    const solo = w(STATE(ROW), { miss: "absent" }, { events: open });
+    expect(solo.teamGate).toBeUndefined();
+    expect(solo.teamGateUnread).toBe(false);
   });
 
   test("a team unit-major directive reads engine-only blanks without the [-] row", () => {

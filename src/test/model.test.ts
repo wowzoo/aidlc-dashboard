@@ -1533,6 +1533,42 @@ describe("absence sentences claim only what their source read", () => {
     expect(en).not.toContain(EN.timeline.awaitingNone);
   });
 
+  test("an open team unit gate is named on the line and counted in the answers tab", () => {
+    const teamGate = {
+      stage: "code-generation",
+      unit: "PU-B-ui",
+      status: "awaiting-approval" as const,
+      scopeVerified: true,
+    };
+    const m = { ...base, blockers: [], waits: { ...base.waits, teamGate } };
+    // Counted like the stage gate: one more than the same page without it.
+    const answers = (html: string) =>
+      Number(
+        new RegExp(`${EN.cards.answersTab} <b class="mc-n [a-z]+">(\\d+)\\??</b>`).exec(html)?.[1],
+      );
+    const without = { ...base, blockers: [], waits: { ...base.waits, gate: undefined } };
+    const withGate = { ...m, waits: { ...m.waits, gate: undefined } };
+    const before = answers(renderBody(without, "en"));
+    expect(Number.isInteger(before)).toBe(true);
+    expect(answers(renderBody(withGate, "en"))).toBe(before + 1);
+    for (const lang of ["en", "ko"] as const) {
+      const t = strings(lang);
+      const html = renderBody(m, lang);
+      expect(html).toContain(t.timeline.awaitingTeam("PU-B-ui", "code-generation"));
+      expect(html).not.toContain(t.timeline.awaitingNone);
+      expect(html).toContain(esc(t.status.humanTeamGate("PU-B-ui", "code-generation")));
+    }
+    // Revising is shown, not counted, and the line does not call it pending.
+    const revising = {
+      ...base,
+      blockers: [],
+      waits: { ...base.waits, teamGate: { ...teamGate, status: "revising" as const } },
+    };
+    const en = renderBody(revising, "en");
+    expect(en).toContain(esc(EN.status.humanTeamGateRevising("PU-B-ui", "code-generation")));
+    expect(en).not.toContain(EN.timeline.awaitingTeam("PU-B-ui", "code-generation"));
+  });
+
   test("with nothing read open, the line claims only the stage gate", () => {
     const en = renderBody(base, "en");
     expect(en).toContain(EN.timeline.awaitingNone);

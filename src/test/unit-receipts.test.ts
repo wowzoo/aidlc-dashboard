@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import { renderBody } from "../render/page";
 import { parseAuditShard } from "../scan/audit";
+import { type ClaimInputs, claimFilter } from "../scan/claim-attempt";
 import { readUnitLifecycle } from "../scan/matrix";
 import { parseState } from "../scan/parser";
 import { type ReceiptPolicy, readUnitReceipts } from "../scan/unit-receipts";
@@ -20,7 +21,6 @@ const ORDER = ["functional-design", "nfr-design", "code-generation"];
 const POLICY: ReceiptPolicy = {
   unitMajor: false,
   unitScoped: false,
-  team: false,
   receiptsRequired: false,
   stageIndex: (s) => ORDER.indexOf(s),
 };
@@ -287,12 +287,33 @@ describe("2.11-only review regressions", () => {
     expect(exec("custom", "- [ ] nfr-design")).toBe(true);
   });
 
-  test("under team ownership a current UNIT_SKIPPED is read as the engine reads it", () => {
-    // The engine's team path adds only the claim-attempt filter (`eventMatchesClaimAttempt`)
-    // before the same floor and reduction. With no scope stamp and no `Attempt Generation`
-    // on the unit's rows that filter passes every row, so the skip is exactly the engine's
-    // — and it was read `team-claim`, which the matrix drew absent.
-    const team = { team: true, unitScoped: true };
+  // The claim filter's inputs for a team-owned record with no claim files: no stamp, no
+  // generations, and an intent the registry resolves. `over` adds what a case needs.
+  const UUID = "019fa168-8d45-7aef-a383-000000000001";
+  const teamOf = (over: Partial<ClaimInputs> = {}): Partial<ReceiptPolicy> => ({
+    unitScoped: true,
+    claim: claimFilter({
+      team: true,
+      stamp: null,
+      generations: {},
+      space: "default",
+      uuid: () => ({ ok: true, value: UUID }),
+      ...over,
+    }),
+  });
+  const stamp = (unit: string, generation: number) => ({
+    space: "default",
+    intent_uuid: UUID,
+    unit,
+    generation,
+    gate_rhythm: "per-stage" as const,
+  });
+
+  test("under team ownership the same floor and reduction run, after the claim filter", () => {
+    // The engine's team path adds only `eventMatchesClaimAttempt` on the lifecycle rows.
+    // With no claim files it passes every row — so these are the solo verdicts, which
+    // used to read `team-claim` across the board and draw a skipped unit absent.
+    const team = teamOf();
     const skip = unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", {
       Reason: "no NFR for a spec unit",
     });
@@ -300,73 +321,116 @@ describe("2.11-only review regressions", () => {
       state: "skipped",
       reason: "no NFR for a spec unit",
     });
-    // A later start on the same floor supersedes it; a reopen of that unit moves its floor.
     const restarted = ledger([skip, unit("UNIT_STARTED", 2, "nfr-design", "u1", "unstarted#0")]);
-    expect(read(restarted, team).state("u1", "nfr-design")).toEqual({
-      state: "unverifiable",
-      reason: "team-claim",
-    });
+    expect(read(restarted, team).state("u1", "nfr-design")).toEqual({ state: "unsettled" });
     const reopened = ledger([
       skip,
       { Event: "GATE_REJECTED", Timestamp: at(2), Stage: "nfr-design", Unit: "u1" },
     ]);
     expect(read(reopened, team).state("u1", "nfr-design").state).not.toBe("skipped");
-    // Another clone's pause in the same second outranks the skip.
     const tie = ledger([skip], [unit("UNIT_PAUSED", 1, "nfr-design", "u1", "unstarted#0")]);
-    expect(read(tie, team).state("u1", "nfr-design").state).not.toBe("skipped");
+    expect(read(tie, team).state("u1", "nfr-design")).toEqual({ state: "unsettled" });
+    const done = ledger([unit("UNIT_COMPLETED", 1, "functional-design", "u2", "unstarted#0")]);
+    expect(read(done, team).state("u2", "functional-design")).toEqual({ state: "settled" });
   });
 
-  test("under team ownership a skip the claim filter decides is a can't-tell, either way", () => {
-    // A row carrying `Attempt Generation` is judged against the claim generations file, and
-    // a scope stamp keeps only its own unit's rows — neither is read here. The filter can
-    // drop the skip (a stale generation) or restore it by dropping the row after it, both
-    // reproduced against the engine, so neither a skip nor a supersession is claimed.
-    const team = { team: true, unitScoped: true };
-    const cantTell = { state: "unverifiable", reason: "team-claim-skip" } as const;
-    const gen = (g: string, extra: Record<string, string> = {}) => ({
-      Reason: "covered by u2",
-      "Attempt Generation": g,
+  test("a recorded claim generation keeps only rows of that generation", () => {
+    // `.aidlc-claim-generations.json`, keyed `<space>/<intent uuid>/<unit>`. Each
+    // expectation is the engine's `unitLifecycleSnapshot` on the same ledger.
+    const gens = { [`default/${UUID}/u1`]: 2 };
+    const team = teamOf({ generations: gens });
+    const g = (n: string, extra: Record<string, string> = {}) => ({
+      "Attempt Generation": n,
       ...extra,
     });
-    const stale = ledger([unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", gen("1"))]);
-    expect(read(stale, team).state("u1", "nfr-design")).toEqual(cantTell);
+    // A skip from a stale claim is dropped, so the unit owes the stage.
+    const stale = ledger([
+      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", g("1", { Reason: "r" })),
+    ]);
+    expect(read(stale, team).state("u1", "nfr-design")).toEqual({ state: "unsettled" });
+    // A later row from a stale claim is dropped too, so the current skip stands.
     const restored = ledger([
-      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", gen("2")),
-      unit("UNIT_STARTED", 2, "nfr-design", "u1", "unstarted#0", { "Attempt Generation": "1" }),
+      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", g("2", { Reason: "r" })),
+      unit("UNIT_STARTED", 2, "nfr-design", "u1", "unstarted#0", g("1")),
     ]);
-    expect(read(restored, team).state("u1", "nfr-design")).toEqual(cantTell);
-    const plain = ledger([
-      unit("UNIT_SKIPPED", 1, "nfr-design", "u1", "unstarted#0", { Reason: "covered by u2" }),
-    ]);
-    expect(read(plain, { ...team, scopeStamp: true }).state("u1", "nfr-design")).toEqual(cantTell);
-    // A unit with no current skip row keeps the claim's reason; outside team ownership the
-    // stamp means nothing.
-    const done = ledger([
-      unit("UNIT_COMPLETED", 1, "nfr-design", "u1", "unstarted#0", { "Attempt Generation": "1" }),
-    ]);
-    expect(read(done, team).state("u1", "nfr-design")).toEqual({
-      state: "unverifiable",
-      reason: "team-claim",
-    });
-    expect(read(plain, { scopeStamp: true }).state("u1", "nfr-design")).toEqual({
+    expect(read(restored, team).state("u1", "nfr-design")).toEqual({
       state: "skipped",
-      reason: "covered by u2",
+      reason: "r",
     });
+    // A row with no generation passes whatever the file says; another unit is not keyed.
+    const plain = ledger([
+      unit("UNIT_COMPLETED", 1, "functional-design", "u1", "unstarted#0"),
+      unit("UNIT_COMPLETED", 1, "functional-design", "u3", "unstarted#0", g("7")),
+    ]);
+    expect(read(plain, team).state("u1", "functional-design")).toEqual({ state: "settled" });
+    expect(read(plain, team).state("u3", "functional-design")).toEqual({ state: "settled" });
+  });
+
+  test("an applicable scope stamp keeps only its own unit, at its own generation", () => {
+    const rows = ledger([
+      unit("UNIT_COMPLETED", 1, "functional-design", "u1", "unstarted#0", {
+        "Attempt Generation": "3",
+      }),
+      unit("UNIT_COMPLETED", 1, "functional-design", "u2", "unstarted#0", {
+        "Attempt Generation": "3",
+      }),
+      unit("UNIT_COMPLETED", 1, "functional-design", "u3", "unstarted#0"),
+    ]);
+    const r = read(rows, teamOf({ stamp: stamp("u1", 3) }));
+    expect(r.state("u1", "functional-design")).toEqual({ state: "settled" });
+    expect(r.state("u2", "functional-design")).toEqual({ state: "unsettled" });
+    // Under a stamp a row must carry the stamp's generation — none is not a pass.
+    expect(r.state("u3", "functional-design")).toEqual({ state: "unsettled" });
+    expect(read(rows, teamOf({ stamp: stamp("u1", 2) })).state("u1", "functional-design")).toEqual({
+      state: "unsettled",
+    });
+    // A stamp for another intent (or space) does not apply: the generations path decides.
+    const other = { ...stamp("u1", 2), intent_uuid: "another" };
+    expect(read(rows, teamOf({ stamp: other })).state("u2", "functional-design")).toEqual({
+      state: "settled",
+    });
+    // Outside team ownership the filter passes everything, stamp or not.
+    const solo = {
+      claim: claimFilter({
+        team: false,
+        stamp: stamp("u1", 2),
+        generations: {},
+        space: "default",
+        uuid: () => ({ ok: true, value: UUID }),
+      }),
+    };
+    expect(read(rows, solo).state("u2", "functional-design")).toEqual({ state: "settled" });
+  });
+
+  test("a registry the engine would throw on leaves the claim unresolved, only where reached", () => {
+    // `activeIntentUuid` dereferences each registry row; a `null` row throws in the
+    // engine. The filter only reaches it for a row carrying `Attempt Generation` (no
+    // stamp), or for any row once a well-formed stamp is present.
+    const broken = { uuid: () => ({ ok: false }) as const };
+    const rows = ledger([
+      unit("UNIT_COMPLETED", 1, "functional-design", "u1", "unstarted#0"),
+      unit("UNIT_COMPLETED", 1, "functional-design", "u2", "unstarted#0", {
+        "Attempt Generation": "1",
+      }),
+    ]);
+    const r = read(rows, teamOf(broken));
+    expect(r.state("u1", "functional-design")).toEqual({ state: "settled" });
+    expect(r.state("u2", "functional-design")).toEqual({
+      state: "unverifiable",
+      reason: "claim-unresolved",
+    });
+    const stamped = read(rows, teamOf({ ...broken, stamp: stamp("u1", 1) }));
+    expect(stamped.state("u1", "functional-design").state).toBe("unverifiable");
   });
 
   test("under team ownership a unit with no Run floor at all is known not done", () => {
-    // The claim file can only decide rows that could be current; a row with no floor
-    // fails the engine's exact match whatever the claim says.
     const e = ledger([
       { Event: "UNIT_COMPLETED", Timestamp: at(1), Stage: "functional-design", Unit: "u1" },
       unit("UNIT_COMPLETED", 1, "functional-design", "u2", "unstarted#0"),
     ]);
-    const r = read(e, { team: true, unitScoped: true });
+    const r = read(e, teamOf());
     expect(r.state("u1", "functional-design").state).toBe("unsettled");
-    expect(r.state("u2", "functional-design")).toEqual({
-      state: "unverifiable",
-      reason: "team-claim",
-    });
+    expect(r.state("u2", "functional-design")).toEqual({ state: "settled" });
   });
 });
 
@@ -412,14 +476,36 @@ describe("team ownership, end to end", () => {
     // Out of the denominator: one applicable unit, and it is complete.
     expect(renderBody(m, "en")).toContain("1/1 (–1⊘)");
 
-    // A scope stamp in the checkout keeps only its own unit's rows, which is not checked
-    // here — so the same skip becomes a can't-tell, still not "not started". Presence alone
-    // counts, conservatively: this empty stamp is one the engine would ignore.
-    fs.writeFileSync(path.join(root, "aidlc", ".aidlc-unit-scope.json"), "{}\n");
+    // An empty stamp is one the engine ignores (`readUnitScopeStamp` refuses it): the
+    // skip stands.
+    const stampPath = path.join(root, "aidlc", ".aidlc-unit-scope.json");
+    fs.writeFileSync(stampPath, "{}\n");
+    const ignored = assemble(root).matrix?.stages.find((s) => s.slug === "functional-design");
+    expect(ignored?.cells.find((c) => c.unit === "PU-B-ui")?.state).toBe("skipped");
+
+    // A well-formed stamp for THIS intent and the other unit keeps only that unit's rows,
+    // so PU-B-ui's skip is not its claim attempt's: the engine's `unitLifecycleSnapshot`
+    // reads no skip, the stage is not in use, and the unit owes its artifacts — absent.
+    fs.writeFileSync(
+      stampPath,
+      JSON.stringify({
+        version: 1,
+        space: "default",
+        intent_uuid: "019fa168-8d45-7aef-a383-000000000001",
+        intent_id8: "00000001",
+        unit: "PU-A-core",
+        owner: "someone",
+        generation: 1,
+        nonce: "n",
+        claim_ref: "refs/heads/claim/00000001/PU-A-core",
+        claim_oid: "0",
+        claimed_from_oid: "0",
+        integration_ref: "refs/heads/main",
+        gate_rhythm: "per-stage",
+      }),
+    );
     const stamped = assemble(root).matrix?.stages.find((s) => s.slug === "functional-design");
-    const held = stamped?.cells.find((c) => c.unit === "PU-B-ui");
-    expect(held?.state).toBe("unverified");
-    expect(held?.receiptReason).toBe("team-claim-skip");
+    expect(stamped?.cells.find((c) => c.unit === "PU-B-ui")?.state).toBe("absent");
     expect(stamped?.skipped).toBe(0);
   });
 });

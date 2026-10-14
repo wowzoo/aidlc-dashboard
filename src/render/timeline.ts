@@ -261,6 +261,12 @@ function awaitingLine(m: DashboardModel, x: Strings["timeline"]): string {
       d.scopeVerified === false ? x.awaitingDecisionUnscoped : ""
     }`;
   }
+  const t = m.waits.teamGate;
+  if (t?.status === "awaiting-approval") {
+    return `${x.awaitingTeam(esc(t.unit), esc(t.stage))}${
+      t.scopeVerified === false ? x.awaitingDecisionUnscoped : ""
+    }`;
+  }
   if (m.waits.teamGateUnread) return x.awaitingTeamUnread;
   return x.awaitingNone;
 }

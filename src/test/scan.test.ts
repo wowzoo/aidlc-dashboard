@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { copiedAuditBlocks, parseAuditShard, parseContext, readAuditLedger } from "../scan/audit";
 import type { AuditEvent } from "../scan/audit";
+import { claimFilter } from "../scan/claim-attempt";
 import { parseDeclaredOpenQuestions } from "../scan/declared-open-questions";
 import { parseDeferralSections, readDeferrals, resolveOwner } from "../scan/deferrals";
 import { engineReadDir } from "../scan/engine-dir";
@@ -633,6 +634,22 @@ describe("construction matrix", () => {
     /** Why a cell is unverifiable. */
     const why = (evs: LifecycleEvent[], unit = "api", opts = {}) =>
       readUnitLifecycle(evs, opts).state(unit, S).reason;
+    /** Team ownership with the claim filter over the given checkout files. */
+    const team = (stamp: { unit: string; generation: number } | null = null) => ({
+      teamOwnership: true,
+      claim: claimFilter({
+        team: true,
+        stamp: stamp && {
+          ...stamp,
+          space: "default",
+          intent_uuid: "u-1",
+          gate_rhythm: "per-stage" as const,
+        },
+        generations: {},
+        space: "default",
+        uuid: () => ({ ok: true, value: "u-1" }),
+      }),
+    });
 
     test("the `Run floor` FIELD is compared exactly, not just 'after the last boundary'", () => {
       // `if (auditBlockField(row.block, "Run floor") !== floorFor(unit)) continue;` — the
@@ -678,11 +695,13 @@ describe("construction matrix", () => {
       ];
       expect(st(noFloor)).toBe("unsettled");
 
+      // A team row whose claim attempt needs an intent registry the engine would throw on.
       expect(
         why([E("STAGE_STARTED", T), U("UNIT_COMPLETED", T, { unit: "api" })], "api", {
           teamOwnership: true,
+          claim: () => "unknown",
         }),
-      ).toBe("team-claim");
+      ).toBe("claim-unresolved");
 
       expect(
         why([
@@ -722,16 +741,13 @@ describe("construction matrix", () => {
       expect(st(pair("UNIT_COMPLETED", "UNIT_PAUSED"))).toBe("unsettled");
       expect(st(pair("UNIT_COMPLETED", "UNIT_COMPLETED"))).toBe("settled");
       // Under team ownership the engine runs the same reduction after its claim-attempt
-      // filter (`eventMatchesClaimAttempt`), which reads checkout state this reader does
-      // not have — so a tie is never settled here, in either order.
+      // filter (`eventMatchesClaimAttempt`); with no claim files every row passes, so the
+      // tie reduces exactly as it does solo, in either order.
       for (const p of [
         pair("UNIT_PAUSED", "UNIT_COMPLETED"),
         pair("UNIT_COMPLETED", "UNIT_PAUSED"),
       ]) {
-        expect(readUnitLifecycle(p, { teamOwnership: true }).state("api", S)).toEqual({
-          state: "unverifiable",
-          reason: "team-claim",
-        });
+        expect(readUnitLifecycle(p, team()).state("api", S)).toEqual({ state: "unsettled" });
       }
     });
 
@@ -774,18 +790,21 @@ describe("construction matrix", () => {
       }
     });
 
-    test("team ownership is unverifiable — the claim FILE decides, not the audit", () => {
-      // `eventMatchesClaimAttempt` compares the row's `Attempt Generation` with the claim
-      // file's: with an active stamp a MISSING field is a mismatch and a matching value is a
-      // pass. Neither verdict is derivable here, so both must not be guessed. Reporting
-      // "gen present → false, gen absent → true" was wrong in both directions at once.
-      for (const fields of [{}, { "Attempt Generation": "3" }] as Record<string, string>[]) {
-        expect(
-          st([E("STAGE_STARTED", T), U("UNIT_COMPLETED", T, { unit: "api", fields })], "api", {
-            teamOwnership: true,
-          }),
-        ).toBe("unverifiable");
-      }
+    test("team ownership: the claim files decide, read as the engine reads them", () => {
+      // `eventMatchesClaimAttempt` compares the row's `Attempt Generation` with the claim's:
+      // with an applicable stamp a MISSING field is a mismatch and a matching value a pass;
+      // with no stamp and no recorded generation every row passes. Reporting "gen present →
+      // false, gen absent → true" without reading the files was wrong in both directions.
+      const done = (fields: Record<string, string>) => [
+        E("STAGE_STARTED", T),
+        U("UNIT_COMPLETED", T, { unit: "api", fields }),
+      ];
+      const stamped = team({ unit: "api", generation: 3 });
+      expect(st(done({}), "api", stamped)).toBe("unsettled");
+      expect(st(done({ "Attempt Generation": "3" }), "api", stamped)).toBe("settled");
+      expect(st(done({ "Attempt Generation": "2" }), "api", stamped)).toBe("unsettled");
+      expect(st(done({}), "api", team())).toBe("settled");
+      expect(st(done({ "Attempt Generation": "3" }), "api", team())).toBe("settled");
       // Outside team ownership the check is a no-op, so a declared generation changes nothing.
       expect(
         st([
@@ -799,10 +818,8 @@ describe("construction matrix", () => {
       // `gateRejectionMatchesAttempt`: `Gate Stages` (else `Stage`) must name the slug, and a
       // row carrying `Unit` matches only that unit — with `unit === undefined`, which is what
       // non-team ownership passes, it matches NOTHING. Reading `e.stage === stage` alone let
-      // one unit's rejection invalidate another's finished work. Per-unit floor SCOPING
-      // (`key = teamOwnership ? unit : ""`) cannot be observed through `state()` while team
-      // ownership is unverifiable for the claim-file reason, so what is asserted here is the
-      // boundary filter that scoping feeds.
+      // one unit's rejection invalidate another's finished work. What is asserted here is
+      // the boundary filter that per-unit floor scoping feeds.
       const withRejection = (fields: Record<string, string>) => [
         E("STAGE_STARTED", T),
         U("UNIT_COMPLETED", "2026-01-01T01:00:00Z", { unit: "B" }),

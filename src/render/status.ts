@@ -211,6 +211,29 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
       tone: "warn",
     });
   }
+  if (w?.teamGate) {
+    const g = w.teamGate;
+    const source =
+      g.scopeVerified === false
+        ? `${x.humanTeamGateSource} · ${x.humanDecisionUnscoped}`
+        : x.humanTeamGateSource;
+    rows.push(
+      g.status === "awaiting-approval"
+        ? {
+            label: `${esc(x.humanTeamGate(g.unit, g.stage))}${sub(source)}`,
+            value: "",
+            pct: 100,
+            tone: "warn",
+            tip: x.humanTeamGateTip,
+          }
+        : {
+            label: `${esc(x.humanTeamGateRevising(g.unit, g.stage))}${sub(source)}`,
+            value: "",
+            tone: "none",
+            tip: x.humanTeamGateTip,
+          },
+    );
+  }
   if (w?.teamGateUnread) {
     rows.push({
       label: esc(x.humanTeamGateUnread),
@@ -282,7 +305,8 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
   // current ask carries it — the same rule the status chip used. A park, a paused unit,
   // an engine ask, an open decision and a compose gate each hold the run on their own
   // and count once each; revising, engine-only, turn-ended, hook and autonomy rows are
-  // shown, not counted (see model/waits.ts).
+  // shown, not counted (see model/waits.ts). An open team unit gate counts like the
+  // stage gate — it is the same approval, held per unit instead of on the state row.
   const current = h?.current ?? 0;
   const holds =
     (w?.parked ? 1 : 0) +
@@ -290,7 +314,8 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
     (w?.engineAsk ? 1 : 0) +
     (w?.decision ? 1 : 0) +
     (w?.compose ? 1 : 0);
-  const open = (current > 0 ? current : h?.awaitingGate ? 1 : 0) + holds;
+  const gateOpen = !!h?.awaitingGate || w?.teamGate?.status === "awaiting-approval";
+  const open = (current > 0 ? current : gateOpen ? 1 : 0) + holds;
   // An unread questions file makes the count incomplete either way — it can miss a
   // blank answer, and it can count a plan-approval marker the file would have
   // explained — so it is neither a green zero nor a floor.

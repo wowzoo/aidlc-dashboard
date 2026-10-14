@@ -24,6 +24,12 @@ import { DEFAULT_LOCALE } from "../render/locale";
 import { type StageArtifact, listStageArtifacts } from "../scan/artifacts";
 import { type AuditLedger, readAuditLedger } from "../scan/audit";
 import { readCheckpointProofs } from "../scan/checkpoint-proofs";
+import {
+  type ClaimInputs,
+  claimFilter,
+  readClaimInputs,
+  unitGateRhythm,
+} from "../scan/claim-attempt";
 import { readDeferrals } from "../scan/deferrals";
 import { ENGINE_DIR } from "../scan/engine-dir";
 import { readHealth } from "../scan/hooks-health";
@@ -245,9 +251,10 @@ function statMtimeMs(p: string): number | undefined {
 function receiptPolicy(
   state: ReturnType<typeof parseState>,
   catalog: StageCatalog | undefined,
-  team: boolean,
-  scopeStamp: boolean,
+  claim: ClaimInputs,
 ): NonNullable<Parameters<typeof readUnitLifecycle>[1]> {
+  // `isTeamUnitOwnership`, exactly: the field trimmed and equal to `team`.
+  const team = claim.team;
   const checkpoints = state.constructionCheckpoints === "enabled";
   const unitMajor = state.constructionIteration?.trim() === "unit-major" || checkpoints;
   // Construction rows only, and not a stage the run skipped at runtime (`[S]`): the
@@ -271,7 +278,7 @@ function receiptPolicy(
   return {
     unitMajor,
     teamOwnership: team,
-    scopeStamp,
+    claim: claimFilter(claim),
     unitScoped: team || unitMajor,
     receiptsRequired: checkpoints && !team && codeStage,
     stageIndex: catalog ? (s) => catalog.stages.findIndex((x) => x.slug === s) : undefined,
@@ -533,10 +540,16 @@ export function assemble(
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
   const blockers = buildBlockers(questions, position, now, artifactMode === "stage-level");
+  // The claim attempt's checkout-local inputs (scan/claim-attempt.ts) — read, never written.
+  // The receipts and the team unit gate both filter by them.
+  const claim = readClaimInputs(root, recordDir, stateText);
   const waits = buildWaits({
     state,
     position,
     marker,
+    teamGate: claim.team
+      ? { claim: claimFilter(claim), scope: unitGateRhythm(claim, stateText) }
+      : undefined,
     events: ledger.events,
     questions,
     blockers,
@@ -723,9 +736,7 @@ export function assemble(
   const policy = receiptPolicy(
     state,
     rosterMismatch || versionMismatch ? undefined : catalog,
-    team,
-    // The engine's `unitScopePath`: `<root>/aidlc/.aidlc-unit-scope.json`, checkout-local.
-    fs.existsSync(path.join(root, "aidlc", ".aidlc-unit-scope.json")),
+    claim,
   );
   const matrix =
     construction && artifactMode !== "stage-level"

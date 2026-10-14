@@ -42,15 +42,17 @@
 //
 // Run by extraction against the engine's own source on random ledgers — see the test.
 //
-// WHAT THE AUDIT CANNOT SAY stays `unverifiable`, never guessed: team ownership (the
-// engine also matches each row's `Attempt Generation` against a claim file outside the
-// audit), a wave-mode completion (held only while an artifact fingerprint matches), and
-// a cross-shard tie on events built without block positions. One team verdict is read
-// all the same: a current UNIT_SKIPPED. With no scope stamp, the claim filter passes a
-// row with no `Attempt Generation`, so for a unit with no such field that skip is the
-// engine's own. Otherwise a current skip row is `team-claim-skip`: the filter can drop it
-// or restore it, and drawing the unit absent had put a fabricated blocker in the count. A ledger from before
-// the `Run floor` field is read as the engine reads it: no row is current.
+//   - TEAM OWNERSHIP adds one step and nothing else: the claim-attempt filter
+//     (`eventMatchesClaimAttempt`, scan/claim-attempt.ts) on the LIFECYCLE rows only —
+//     the floor, the cutoff and IN USE are read from every row, as the engine reads them.
+//     It used to be skipped outright, every team unit reading `team-claim` and the matrix
+//     drawing a skipped one absent; the filter's two checkout-local files are read now.
+//
+// WHAT THE AUDIT CANNOT SAY stays `unverifiable`, never guessed: a team row whose claim
+// attempt needs an intent registry the engine would throw on (`claim-unresolved`), a
+// wave-mode completion (held only while an artifact fingerprint matches), and a
+// cross-shard tie on events built without block positions. A ledger from before the
+// `Run floor` field is read as the engine reads it: no row is current.
 //
 // GENERATION. This reads 2.11.0 — the dashboard's one supported engine. A tree from an
 // older engine is read by these same rules, under the page's version warning; the
@@ -59,6 +61,7 @@
 
 import { createHash } from "node:crypto";
 import type { AuditEvent } from "./audit";
+import type { ClaimFilter } from "./claim-attempt";
 
 /** The fields of an audit row this reader needs; `pos`/`shardIndex` may be absent. */
 export interface ReceiptRow {
@@ -71,11 +74,7 @@ export interface ReceiptRow {
 }
 
 /** Why a receipt cannot be read from the audit alone. */
-export type ReceiptReason =
-  | "team-claim"
-  | "team-claim-skip"
-  | "wave-fingerprint"
-  | "ambiguous-floor";
+export type ReceiptReason = "claim-unresolved" | "wave-fingerprint" | "ambiguous-floor";
 
 export type ReceiptVerdict =
   | { state: "settled" | "unsettled"; reason?: undefined }
@@ -88,14 +87,11 @@ export interface ReceiptPolicy {
   unitMajor: boolean;
   /** Team ownership, checkpoints enabled, or solo unit-major — per-unit floors. */
   unitScoped: boolean;
-  team: boolean;
   /**
-   * The checkout holds a unit scope stamp (`aidlc/.aidlc-unit-scope.json`). Under team
-   * ownership an applicable one keeps only its own unit's rows. Whether it applies is not
-   * checked, so its mere presence is enough to withhold a team skip — conservatively, since
-   * a malformed or other-intent stamp the engine ignores is counted too.
+   * `eventMatchesClaimAttempt` for this checkout (scan/claim-attempt.ts). Outside team
+   * ownership it passes every row; absent, every row passes too.
    */
-  scopeStamp?: boolean;
+  claim?: ClaimFilter;
   /** The engine requires receipts by policy (`constructionCheckpointsApply`). */
   receiptsRequired: boolean;
   /** Catalogue stage order, for `stageJumpReaches`. */
@@ -397,8 +393,16 @@ export function readUnitReceipts(
   const verdicts = new Map<string, ReceiptVerdict>();
 
   for (const slug of slugs) {
-    const lifecycle = rows.filter((r) => UNIT_ROWS.has(r.event) && r.f.Stage === slug && r.f.Unit);
-    const units = [...new Set(lifecycle.map((r) => r.f.Unit as string))];
+    // The claim filter decides each row the engine would keep; a row it cannot decide
+    // marks its unit, whose verdict is then not this reader's to give.
+    const unresolved = new Set<string>();
+    const lifecycle = rows.filter((r) => {
+      if (!UNIT_ROWS.has(r.event) || r.f.Stage !== slug || !r.f.Unit) return false;
+      const pass = p.claim ? p.claim(r.f, r.f.Unit) : true;
+      if (pass === "unknown") unresolved.add(r.f.Unit);
+      return pass === true;
+    });
+    const units = [...new Set([...lifecycle.map((r) => r.f.Unit as string), ...unresolved])];
     const set = (unit: string, v: ReceiptVerdict) => verdicts.set(`${slug}\u0001${unit}`, v);
 
     // Under stage-major flooring the rows start at the latest stage start that counts.
@@ -498,31 +502,10 @@ export function readUnitReceipts(
               : wave.has(unit)
                 ? { state: "unverifiable", reason: "wave-fingerprint" }
                 : { state: "unsettled" };
-      // Team ownership adds one step before the same floor and reduction: the claim-
-      // attempt filter (`eventMatchesClaimAttempt`), applied to the lifecycle rows only —
-      // the floor and cutoff are read from every row. With no scope stamp, a row with no
-      // `Attempt Generation` passes it whatever the claim files say, so for a unit none of
-      // whose rows carries one the engine reads exactly these rows.
-      const inert = !p.scopeStamp && !mine.some((r) => r.f["Attempt Generation"] !== undefined);
-      if (!p.team) {
-        set(unit, verdict);
-      } else if (verdict.state === "skipped" && inert) {
-        set(unit, verdict);
-      } else if (!inert && current.some((r) => r.f.Unit === unit && r.event === "UNIT_SKIPPED")) {
-        // Otherwise the filter can drop the skip (a stale generation) or keep it by dropping
-        // the row that superseded it — either way. A current skip row is then a can't-tell,
-        // never a definite exemption out of the denominator, nor a missing unit.
-        set(unit, { state: "unverifiable", reason: "team-claim-skip" });
-      } else {
-        // Everything else stays the claim's to decide: a unit none of whose rows carries a
-        // `Run floor` fails the engine's exact match whatever the claim says, so it is
-        // known — not done; one that has a floor the claim file decides.
-        const anyFloor = mine.some((r) => !!r.f["Run floor"]);
-        set(
-          unit,
-          anyFloor ? { state: "unverifiable", reason: "team-claim" } : { state: "unsettled" },
-        );
-      }
+      set(
+        unit,
+        unresolved.has(unit) ? { state: "unverifiable", reason: "claim-unresolved" } : verdict,
+      );
     }
   }
 

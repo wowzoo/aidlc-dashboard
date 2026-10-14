@@ -264,6 +264,12 @@ export interface StatusStrings {
   readonly humanEngineAskTip: string;
   humanEngineOnly(file: string): string;
   readonly humanEngineOnlyTip: string;
+  /** A team-owned unit's own gate is open (`unitGateStatus` = awaiting-approval). */
+  humanTeamGate(unit: string, stage: string): string;
+  /** The same gate, rejected and in revision — shown, not counted, like `[R]`. */
+  humanTeamGateRevising(unit: string, stage: string): string;
+  readonly humanTeamGateSource: string;
+  readonly humanTeamGateTip: string;
   readonly humanTeamGateUnread: string;
   readonly humanTeamGateUnreadTip: string;
   /** A row in the answers tab: `n` questions paths exist and could not be read. */
@@ -617,7 +623,9 @@ export interface TimelineStrings {
   awaitingDecision(name: string | undefined): string;
   /** Raw markup, appended when the decision's stage came from the unit cache alone. */
   readonly awaitingDecisionUnscoped: string;
-  /** Raw markup. Team ownership: the unit gate is decided by claim state not read here. */
+  /** Raw markup. A team-owned unit's own gate is open; `unit`/`stage` arrive escaped. */
+  awaitingTeam(unit: string, stage: string): string;
+  /** Raw markup. Team ownership: the unit gate needs a read this checkout cannot give. */
   readonly awaitingTeamUnread: string;
   /** Raw markup. Claims the stage gate only — other asks live in the waits tab. */
   readonly awaitingNone: string;
