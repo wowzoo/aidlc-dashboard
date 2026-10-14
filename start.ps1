@@ -72,8 +72,38 @@ if (-not $bun) {
   exit 1
 }
 
-$bunVersion = (& $bun --version).Trim()
-Write-Host "> bun $bunVersion ($bun)"
+# package.json's `engines.bun` floor — src/test/bun-floor.test.ts pins this copy to it.
+$minBun = [version]'1.4.0'
+
+# $true = at least $minBun, $false = older, $null = not a version. Only the leading
+# X.Y.Z counts, so a canary or build suffix (`1.4.3-canary.1+abc`) reads as its
+# release number — the same rule as start.sh / install.sh.
+function Test-BunVersion([string]$v) {
+  if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)')) { return $null }
+  $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+  return ($have -ge $minBun)
+}
+
+# A too-old bun fails later and obscurely, so stop here and say how to fix it.
+# First line only, and never fatal to read: an odd bun is "unknown", not a crash.
+$bunVersion = ''
+try { $bunVersion = ([string](& $bun --version | Select-Object -First 1)).Trim() } catch { }
+Write-Host "> bun $(if ($bunVersion) { $bunVersion } else { '?' }) ($bun)"
+$bunOk = Test-BunVersion $bunVersion
+if ($bunOk -eq $false) {
+  Write-Host ''
+  Write-Host "✗ bun $bunVersion 은 너무 오래됐다 — $minBun 이상이 필요하다." -ForegroundColor Red
+  Write-Host ''
+  Write-Host "    & '$bun' upgrade" -ForegroundColor Cyan
+  Write-Host ''
+  Write-Host '업그레이드 후 다시 실행한다.'
+  Write-Host ''
+  exit 1
+} elseif ($null -eq $bunOk) {
+  # Unknown is not "too old": say so and carry on rather than blocking a bun whose
+  # version string this script simply cannot read.
+  Write-Host "  ⚠ bun 버전을 읽지 못했다 — $minBun 이상인지 확인하지 않고 계속한다." -ForegroundColor Yellow
+}
 
 # ---- dependencies -----------------------------------------------------------
 if (-not (Test-Path -LiteralPath 'node_modules')) {

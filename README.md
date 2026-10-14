@@ -1,7 +1,7 @@
 # aidlc-dashboard
 
 AI-DLC v2 실런의 **현황·진행·사용량을 한 화면에서 보는 웹 대시보드.** 워크스페이스의
-`aidlc/` 문서 트리를 파싱해서 서버가 HTML 을 만든다. bun 만 있으면 돈다. 추가 런타임이나
+`aidlc/` 문서 트리를 파싱해서 서버가 HTML 을 만든다. bun 1.4.0 이상만 있으면 돈다. 추가 런타임이나
 빌드 단계는 없다.
 
 **워크스페이스에는 쓰지 않는다.** 게이트 승인·stage 전이는 실행 도구의 몫이고 이 대시보드는
@@ -17,7 +17,8 @@ curl -fsSL https://github.com/wowzoo/aidlc-dashboard/releases/latest/download/in
 ```
 
 최신 릴리스를 `~/.aidlc-dashboard` 에 풀고, `~/.local/bin/aidlc-dashboard` 실행기를 만들고,
-bun 이 없으면 공식 설치 스크립트를 실행한다(실행 전에 알려준다). 설치 후:
+bun 이 없으면 공식 설치 스크립트를 실행한다(실행 전에 알려준다). 이미 있는 bun 이 1.4.0 보다
+낮으면 업그레이드 명령을 경고로 알려 주고 설치는 마친다 — 설치된 bun 은 건드리지 않는다. 설치 후:
 
 ```bash
 aidlc-dashboard                       # 폴더 선택 화면
@@ -78,7 +79,8 @@ zip 을 직접 받고 싶으면 [Releases](https://github.com/wowzoo/aidlc-dashb
 .\start.cmd --port 5000
 ```
 
-bun 이 없으면 설치 명령을 안내하고 멈춘다(더블클릭한 창은 읽을 수 있게 대기한다).
+bun 이 없으면 설치 명령을 안내하고 멈춘다(더블클릭한 창은 읽을 수 있게 대기한다). bun 이 1.4.0 보다
+낮으면 `bun upgrade` 를 안내하고 멈춘다.
 
 ⚠️Windows 에서 `.\start.ps1` 이 "running scripts is disabled on this system" 으로 막히면
 `.\start.cmd` 를 쓴다 — 그 호출에만 실행 정책을 우회하고 시스템 설정은 바꾸지 않는다.

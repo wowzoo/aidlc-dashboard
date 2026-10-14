@@ -123,6 +123,8 @@ function trimManifest(full: Record<string, unknown>): string {
     version: full.version,
     private: full.private,
     type: full.type,
+    // The Bun floor the launchers enforce — shipped so the archive states it too.
+    engines: full.engines,
     scripts: Object.fromEntries(
       keepScripts.filter((k) => scripts[k] !== undefined).map((k) => [k, scripts[k]]),
     ),

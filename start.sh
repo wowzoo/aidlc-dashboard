@@ -54,7 +54,48 @@ MSG
   exit 1
 fi
 
-echo "▸ bun $("$BUN" --version) ($BUN)"
+# ---- bun version -------------------------------------------------------------
+# A too-old bun fails later and obscurely, so stop here and say how to fix it.
+# MIN_BUN is package.json's `engines.bun` floor; src/test/bun-floor.test.ts pins
+# this copy, install.sh's and the PowerShell ones to it. bun_version_ok is shared
+# byte-for-byte with install.sh (the test checks that too) and is POSIX sh there.
+MIN_BUN=1.4.0
+# Exit 0 = at least MIN_BUN, 1 = older, 2 = not a version. Only the leading
+# X.Y.Z counts, so a canary or build suffix (`1.4.3-canary.1+abc`) reads as its
+# release number.
+bun_version_ok() {
+  printf '%s\n' "$1" | awk -v min="$MIN_BUN" '
+    NR == 1 {
+      if (match($0, /^v?[0-9]+\.[0-9]+\.[0-9]+/) == 0) exit 2
+      s = substr($0, RSTART, RLENGTH); sub(/^v/, "", s)
+      split(s, have, "."); split(min, need, ".")
+      for (i = 1; i <= 3; i++) {
+        if (have[i] + 0 > need[i] + 0) exit 0
+        if (have[i] + 0 < need[i] + 0) exit 1
+      }
+      exit 0
+    }
+    END { if (NR == 0) exit 2 }'
+}
+
+BUN_VERSION="$("$BUN" --version 2>/dev/null || true)"
+echo "▸ bun ${BUN_VERSION:-?} ($BUN)"
+BUN_STATUS=0
+bun_version_ok "$BUN_VERSION" || BUN_STATUS=$?
+if [ "$BUN_STATUS" -eq 1 ]; then
+  cat >&2 <<MSG
+✗ bun $BUN_VERSION 은 너무 오래됐다 — $MIN_BUN 이상이 필요하다.
+
+    "$BUN" upgrade          (Homebrew 로 설치했다면 brew upgrade bun)
+
+업그레이드 후 다시 실행한다.
+MSG
+  exit 1
+elif [ "$BUN_STATUS" -ne 0 ]; then
+  # Unknown is not "too old": say so and carry on rather than blocking a bun
+  # whose version string this script simply cannot read.
+  echo "  ⚠ bun 버전을 읽지 못했다 — $MIN_BUN 이상인지 확인하지 않고 계속한다." >&2
+fi
 
 # ---- dependencies -----------------------------------------------------------
 # Only 3 dev deps (types + tsc), so this is quick and idempotent.

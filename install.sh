@@ -132,8 +132,45 @@ find_bun() {
   return 1
 }
 
+# MIN_BUN is package.json's `engines.bun` floor, and bun_version_ok is start.sh's
+# byte-for-byte — src/test/bun-floor.test.ts pins both. Exit 0 = at least MIN_BUN,
+# 1 = older, 2 = not a version; only the leading X.Y.Z counts, so a canary suffix
+# (`1.4.3-canary.1+abc`) reads as its release number.
+MIN_BUN=1.4.0
+bun_version_ok() {
+  printf '%s\n' "$1" | awk -v min="$MIN_BUN" '
+    NR == 1 {
+      if (match($0, /^v?[0-9]+\.[0-9]+\.[0-9]+/) == 0) exit 2
+      s = substr($0, RSTART, RLENGTH); sub(/^v/, "", s)
+      split(s, have, "."); split(min, need, ".")
+      for (i = 1; i <= 3; i++) {
+        if (have[i] + 0 > need[i] + 0) exit 0
+        if (have[i] + 0 < need[i] + 0) exit 1
+      }
+      exit 0
+    }
+    END { if (NR == 0) exit 2 }'
+}
+
+# Prints the version line, and remembers a bun that is too old: start.sh will refuse
+# to run on it, so the closing message has to say so rather than "설치 완료" alone.
+# Not upgraded here — that is the user's bun, possibly shared with other projects.
+BUN_OLD=""
+report_bun() {
+  BUN_VERSION=$("$BUN" --version 2>/dev/null || true)
+  say "▸ bun ${BUN_VERSION:-?} ($BUN)"
+  BUN_STATUS=0
+  bun_version_ok "$BUN_VERSION" || BUN_STATUS=$?
+  if [ "$BUN_STATUS" -eq 1 ]; then
+    BUN_OLD="$BUN_VERSION"
+    say "  ⚠ bun $BUN_VERSION 은 너무 오래됐다 — $MIN_BUN 이상이 필요하다. 업그레이드: \"$BUN\" upgrade"
+  elif [ "$BUN_STATUS" -ne 0 ]; then
+    say "  ⚠ bun 버전을 읽지 못했다 — $MIN_BUN 이상인지 확인하지 못했다."
+  fi
+}
+
 if BUN=$(find_bun); then
-  say "▸ bun $("$BUN" --version) ($BUN)"
+  report_bun
 elif [ "${AIDLC_NO_BUN:-}" = "1" ]; then
   say "▸ bun 이 없다 — AIDLC_NO_BUN=1 이라 설치를 건너뛴다."
   say "  직접 설치: curl -fsSL https://bun.sh/install | bash"
@@ -144,7 +181,7 @@ else
   say "  건너뛰려면 AIDLC_NO_BUN=1 로 다시 실행할 것."
   curl -fsSL https://bun.sh/install | bash || die "bun 설치 실패. 직접 설치 후 다시 실행할 것."
   BUN=$(find_bun) || die "bun 을 설치했지만 찾을 수 없다. 터미널을 새로 열고 다시 실행할 것."
-  say "▸ bun $("$BUN" --version) ($BUN)"
+  report_bun
 fi
 
 # ---- launcher ---------------------------------------------------------------
@@ -175,6 +212,12 @@ fi
 # ---- done -------------------------------------------------------------------
 say ""
 say "설치 완료 — v$VER"
+if [ -n "$BUN_OLD" ]; then
+  # Repeated at the end because it is the one thing standing between this install
+  # and a working launch: start.sh stops on this bun.
+  say ""
+  say "  ⚠ 먼저 bun 을 $MIN_BUN 이상으로 올릴 것 (지금 $BUN_OLD): \"$BUN\" upgrade"
+fi
 say ""
 say "  $RUN"
 say "  $RUN ~/path/to/workspace"

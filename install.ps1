@@ -189,9 +189,43 @@ function Find-Bun {
   return $null
 }
 
+# package.json's `engines.bun` floor — src/test/bun-floor.test.ts pins this copy to it.
+$minBun = [version]'1.4.0'
+
+# $true = at least $minBun, $false = older, $null = not a version. Only the leading
+# X.Y.Z counts, so a canary or build suffix (`1.4.3-canary.1+abc`) reads as its
+# release number — the same rule as start.sh / install.sh.
+function Test-BunVersion([string]$v) {
+  if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)')) { return $null }
+  $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+  return ($have -ge $minBun)
+}
+
+# Prints the version line and returns the version when it is too old (else $null):
+# start.ps1 refuses to run on it, so the closing message has to say so. Returned
+# rather than assigned to an outer variable — under `irm | iex` there is no script
+# scope of our own to assign into. Not upgraded here — that is the user's bun,
+# possibly shared with other projects.
+function Report-Bun {
+  $v = ''
+  try { $v = ([string](& $bun --version | Select-Object -First 1)).Trim() } catch { }
+  Say "▸ bun $(if ($v) { $v } else { '?' }) ($bun)"
+  $ok = Test-BunVersion $v
+  if ($ok -eq $false) {
+    Say "  ⚠ bun $v 은 너무 오래됐다 — $minBun 이상이 필요하다. 업그레이드: & '$bun' upgrade"
+    return $v
+  }
+  if ($null -eq $ok) {
+    Say "  ⚠ bun 버전을 읽지 못했다 — $minBun 이상인지 확인하지 못했다."
+  }
+  return $null
+}
+
+$bunOld = $null
+
 $bun = Find-Bun
 if ($bun) {
-  Say "▸ bun $(& $bun --version) ($bun)"
+  $bunOld = Report-Bun
 } elseif ($env:AIDLC_NO_BUN -eq '1') {
   Say '▸ bun 이 없다 — AIDLC_NO_BUN=1 이라 설치를 건너뛴다.'
   Say '  직접 설치: irm bun.sh/install.ps1 | iex'
@@ -207,7 +241,7 @@ if ($bun) {
   }
   $bun = Find-Bun
   if (-not $bun) { Die 'bun 을 설치했지만 찾을 수 없다. 터미널을 새로 열고 다시 실행할 것.' }
-  Say "▸ bun $(& $bun --version) ($bun)"
+  $bunOld = Report-Bun
 }
 
 # ---- launcher ---------------------------------------------------------------
@@ -240,6 +274,12 @@ if ($env:AIDLC_NO_BIN -ne '1') {
 # ---- done -------------------------------------------------------------------
 Say ''
 Say "설치 완료 — v$ver"
+if ($bunOld) {
+  # Repeated at the end because it is the one thing standing between this install and
+  # a working launch: start.ps1 stops on this bun.
+  Say ''
+  Say "  ⚠ 먼저 bun 을 $minBun 이상으로 올릴 것 (지금 $bunOld): & '$bun' upgrade"
+}
 Say ''
 Say "  $run"
 Say "  $run C:\path\to\workspace"
