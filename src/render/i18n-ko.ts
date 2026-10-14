@@ -601,7 +601,7 @@ const timeline: TimelineStrings = {
   reworkNone: (approved) =>
     approved === 0
       ? "아직 승인된 관문이 없고, 반려·수정 기록도 없습니다."
-      : `반려·수정 기록 없음 — 지금까지 승인된 관문 ${approved}건 모두 한 번에 통과.`,
+      : `반려·수정 기록 없음 — 지금까지의 승인 ${approved}건 모두 한 번에 통과.`,
   reworkNonePartial: (refused) =>
     `읽은 감사 기록에는 반려·수정 기록 없음 — 감사 기록 경로 ${refused}곳을 읽지 않아 그쪽의 반려는 보이지 않습니다.`,
   reworkProvisionalTip: "아직 승인되지 않음 — 시간은 계속 늘어남",
