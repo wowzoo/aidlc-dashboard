@@ -442,6 +442,34 @@ const deferrals: DeferralStrings = {
   ledgerAssumptionsSource: "같은 절의 <code>[assumption]</code> 항목",
   ledgerDiary: "stage 일지 미결",
   ledgerDiarySource: "각 stage <code>memory.md</code>의 <code>## Open questions</code>",
+  ledgerDeclared: "stage 선언 미결 질문",
+  ledgerDeclaredSource:
+    "<code>requirements.md</code>·<code>contract-summary.md</code>의 <code>Open questions</code>",
+  declaredFaces: {
+    requirements: {
+      label: "요구사항",
+      tip: "requirements-analysis 가 직접 적은 Open questions — 이후 단계로 넘긴 남은 불확실성",
+    },
+    contract: {
+      label: "계약",
+      tip: "contract-design 의 Open questions 표 — 풀리지 않은 계약 지점과 그것이 막는 대상",
+    },
+  },
+  declaredSummary: (count) => `stage 산출물이 직접 선언한 미결 질문 ${count}건 — 배정 없음`,
+  declaredNote: `requirements-analysis(<code>requirements.md</code>)와 contract-design(<code>contract-summary.md</code>)이
+  쓰도록 정해진 <code>Open questions</code>에서 읽었습니다 — <code>## Assumptions &amp; Open Questions</code> 절 밖입니다.
+  둘 다 배정 칸이 없습니다. <code>Blocks</code>는 그 지점이 막는 대상이지 답할 단계가 아니므로
+  <b>담당을 주장하지 않고, 위의 산출물 미결과 합산하지 않습니다</b>.`,
+  contractLabel: "계약",
+  blocksLabel: "막는 대상",
+  declaredUnread: (files) =>
+    `${files}의 <code>Open questions</code> 절은 이 리더가 아는 모양이 아닙니다 —
+    <b>비어 있다는 뜻이 아니라 읽지 못했다는 뜻입니다</b>.`,
+  declaredMissing: (files) =>
+    `${files}에 <code>Open questions</code> 절이 없습니다 — 그 stage 규약은 이 절을 쓰라고 정합니다.`,
+  unreadAlongside: (unread, files) =>
+    `<b><code>## Assumptions &amp; Open Questions</code> 절 ${unread}곳은 이 리더가 아는 모양이 아닙니다</b>
+    (${files}) — 그 안의 미결은 위 숫자에 들어 있지 않습니다.`,
   chipUnassignedTip:
     "산문이라 배정 칸이 없습니다 — 사용자가 그 단계 질문지에서 확인해 줄 때까지 전제로 남습니다",
   chipFollowUp: "후속 확인",
@@ -449,8 +477,8 @@ const deferrals: DeferralStrings = {
   chipOther: "그 외",
   chipOtherTip:
     "미결 소절에 적혀 있으나 문장에 후속 신호는 없는 항목 — 소절 자체가 미결 선언이라 그대로 셉니다",
-  ledgersNote: `세 대장은 <b>서로 다른 읽기</b>입니다 — 배정 칸이 있는 것은 첫 줄뿐이고,
-아래 둘은 물어볼 자리가 정해져 있지 않습니다. <b>합산하지 않습니다.</b>`,
+  ledgersNote: `이 대장들은 <b>서로 다른 읽기</b>입니다 — 배정 칸이 있는 것은 첫 줄뿐이고,
+나머지는 물어볼 자리가 정해져 있지 않습니다. <b>합산하지 않습니다.</b>`,
   noSections: (artifacts) =>
     `산출물에 <code>## Assumptions &amp; Open Questions</code> 절이 없습니다 — 이 실행은
     미결 대장을 남기지 않았거나 아직 산출물을 쓰지 않았습니다. (읽은 산출물 ${artifacts}개)`,
@@ -462,7 +490,8 @@ const deferrals: DeferralStrings = {
       명시적으로 <code>None.</code>을 선언한 절은 ${emptySections}곳입니다.`,
   noOpenPill: "미결 없음",
   noOpenPillTip: "미결 대장 절은 있고 그 안이 비어 있음 — 명시적으로 '없음'을 선언한 상태",
-  allNone: (sections) => ` 산출물 ${sections}곳의 미결 대장이 모두 <code>None.</code>입니다.`,
+  allNone: (sections) =>
+    ` 산출물 ${sections}곳의 <code>## Assumptions &amp; Open Questions</code> 절이 모두 <code>None.</code>입니다.`,
   lead: (items, sections, rows, exits) =>
     `미결 <b>${items}건</b> · 산출물 ${sections}곳에
   <code>## Assumptions &amp; Open Questions</code> 대장이 있습니다 (원시 ${rows}행 → 중복 정리 후 ${items}건)${

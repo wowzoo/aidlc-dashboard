@@ -8,6 +8,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { copiedAuditBlocks, parseAuditShard, parseContext, readAuditLedger } from "../scan/audit";
 import type { AuditEvent } from "../scan/audit";
+import { parseDeclaredOpenQuestions } from "../scan/declared-open-questions";
 import { parseDeferralSections, readDeferrals, resolveOwner } from "../scan/deferrals";
 import { engineReadDir } from "../scan/engine-dir";
 import { parseDrops, readHealth } from "../scan/hooks-health";
@@ -3089,6 +3090,192 @@ None.
         ownerStatus: "unassigned",
       });
     });
+  });
+});
+
+describe("unread deferral sections", () => {
+  /** A record with the given artifacts under inception/<stage>/<file>. */
+  const record = (files: Record<string, string>) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-unread-"));
+    for (const [rel, text] of Object.entries(files)) {
+      const abs = path.join(root, "inception", rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, text);
+    }
+    return root;
+  };
+  const TABLE = `## Assumptions & Open Questions
+
+### Open questions
+
+| 항목 | 배정 |
+| --- | --- |
+| 공통 타입의 자리 | 이후 설계 |
+`;
+  const PROSE = `## Assumptions & Open Questions
+
+이 절은 표도 태그도 id 도 없이 산문으로만 적혀 있다.
+`;
+
+  test("an unreadable section stays reported when another section yields items", () => {
+    // The panel used to say "not read" only when NOTHING was read, so one parsed
+    // table silenced every other section this reader could not parse.
+    const root = record({ "a-stage/a.md": TABLE, "b-stage/b.md": PROSE });
+    try {
+      const r = readDeferrals(root);
+      expect(r.items.map((i) => i.item)).toEqual(["공통 타입의 자리"]);
+      expect(r.unreadSections).toEqual(["inception/b-stage/b.md"]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("the read is per section, not per artifact", () => {
+    // One artifact can carry two sections: a parsed one must not vouch for its sibling,
+    // and two explicit `None.` sections are two declarations, not one.
+    const root = record({
+      "a-stage/a.md": `${TABLE}\n${PROSE}`,
+      "b-stage/b.md":
+        "## Assumptions & Open Questions\n\nNone.\n\n## Assumptions & Open Questions\n\nNone.\n",
+    });
+    try {
+      const r = readDeferrals(root);
+      expect(r.sections).toBe(4);
+      expect(r.emptySections).toBe(2);
+      expect(r.unreadSections).toEqual(["inception/a-stage/a.md"]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("stage-declared open-question ledgers", () => {
+  test("requirements: bullets under a standalone `## Open Questions` are items", () => {
+    const p = parseDeclaredOpenQuestions(`# Requirements
+
+## Assumptions & Open Questions
+
+None.
+
+## Open Questions
+
+- **OQ1**: 세션 파일의 위치는 설계 단계에서 확정한다. [Q2]
+- **OQ2**: 파일명 규칙은
+  설계 단계에서 확정한다.
+  - 하위 불릿은 위 항목의 설명이다.
+
+## Review
+- 대장 밖.
+`);
+    expect(p.sections).toBe(1);
+    expect(p.items.map((i) => i.text)).toEqual([
+      "OQ1: 세션 파일의 위치는 설계 단계에서 확정한다. [Q2]",
+      "OQ2: 파일명 규칙은 설계 단계에서 확정한다.",
+    ]);
+    expect(p.unread).toBe(0);
+  });
+
+  test("contract-design: the `| Contract | Question | Blocks |` table, header excluded", () => {
+    const p = parseDeclaredOpenQuestions(`## Open Questions
+
+| Contract | Question | Blocks |
+|----------|----------|--------|
+| C1 | 허용 범위의 구체 정의 | U1 (경로 안전 세부) |
+| C2 | 빈 목록과 '없음'의 구분 | U1 |
+`);
+    expect(p.items).toEqual([
+      { text: "허용 범위의 구체 정의", contract: "C1", blocks: "U1 (경로 안전 세부)" },
+      { text: "빈 목록과 '없음'의 구분", contract: "C2", blocks: "U1" },
+    ]);
+  });
+
+  test("columns are found by name, so a reordered table still reads", () => {
+    const p = parseDeclaredOpenQuestions(`**Open questions**
+
+| Blocks | Question | Contract |
+| --- | --- | --- |
+| U2 | 재시도 상한 | C3 |
+`);
+    expect(p.items).toEqual([{ text: "재시도 상한", contract: "C3", blocks: "U2" }]);
+  });
+
+  test("`None.` is a declaration; prose is a section this reader could not read", () => {
+    expect(parseDeclaredOpenQuestions("## Open questions\n\nNone.\n")).toMatchObject({
+      sections: 1,
+      none: 1,
+      unread: 0,
+      items: [],
+    });
+    expect(
+      parseDeclaredOpenQuestions("## Open questions\n\n남은 질문은 설계에서 다룬다.\n"),
+    ).toMatchObject({ sections: 1, none: 0, unread: 1, items: [] });
+  });
+
+  test("`## Assumptions & Open Questions` and fenced examples are not this ledger", () => {
+    const p = parseDeclaredOpenQuestions(
+      "## Assumptions & Open Questions\n\n- x\n\n```md\n## Open Questions\n- 예시\n```\n",
+    );
+    expect(p.sections).toBe(0);
+  });
+
+  test("read from the two declared artifacts, ownerless, and never summed with items", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-declared-"));
+    const write = (rel: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), text);
+    };
+    write(
+      "inception/requirements-analysis/requirements.md",
+      "## Open Questions\n\n- **OQ1**: 스키마 버전 필드는 `domain-design`에서 확정한다.\n",
+    );
+    write(
+      "inception/contract-design/contract-summary.md",
+      "## Open Questions\n\n| Contract | Question | Blocks |\n| --- | --- | --- |\n| C1 | 오류 코드 | `code-generation` |\n",
+    );
+    // Not a declared artifact: a stray `## Open Questions` elsewhere is not the ledger.
+    write("inception/units-generation/unit-of-work.md", "## Open Questions\n\n- 무관한 것\n");
+    try {
+      const r = readDeferrals(root, {
+        stageStatuses: new Map([["code-generation", ["active"] as StageInfo["status"][]]]),
+      });
+      expect(r.items).toEqual([]);
+      expect(
+        r.declared.questions.map((q) => ({ source: q.source, text: q.text, rel: q.rel })),
+      ).toEqual([
+        {
+          source: "requirements",
+          text: "OQ1: 스키마 버전 필드는 `domain-design`에서 확정한다.",
+          rel: "inception/requirements-analysis/requirements.md",
+        },
+        {
+          source: "contract",
+          text: "오류 코드",
+          rel: "inception/contract-design/contract-summary.md",
+        },
+      ]);
+      // Blocks names what the point blocks, not a stage contracted to answer it — the
+      // engine's own template says "which unit each blocks" — so no owner is claimed.
+      expect(r.declared.questions[1]).not.toHaveProperty("ownerStage");
+      expect(r.declared.ledgers.map((l) => [l.source, l.status, l.count])).toEqual([
+        ["requirements", "read", 1],
+        ["contract", "read", 1],
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a declared artifact without the section is reported, not silently skipped", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-declared-"));
+    const abs = path.join(root, "inception/requirements-analysis/requirements.md");
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, "# Requirements\n\n## Functional Requirements\n\n- FR1\n");
+    try {
+      const r = readDeferrals(root);
+      expect(r.declared.ledgers).toMatchObject([{ source: "requirements", status: "missing" }]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

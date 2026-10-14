@@ -167,8 +167,10 @@ describe("assemble on the fixture workspace", () => {
 
   test("deferral ledger resolves every owner state the fixture encodes", () => {
     const d = m.deferrals;
-    expect(d.sections).toBe(4);
-    expect(d.emptySections).toBe(1); // one artifact declares `None.`
+    expect(d.sections).toBe(6);
+    // One artifact declares `None.`, and so do the two that carry a declared ledger.
+    expect(d.emptySections).toBe(3);
+    expect(d.unreadSections).toEqual([]);
     expect(d.rows).toBe(7);
     expect(d.items.length).toBe(6); // one item is restated downstream (fan-in)
     expect(d.counts).toEqual({
@@ -180,6 +182,10 @@ describe("assemble on the fixture workspace", () => {
       unassigned: 1,
     });
     expect(d.catalogMissing).toBe(false);
+    expect(d.declared.ledgers.map((l) => [l.source, l.status, l.count])).toEqual([
+      ["requirements", "read", 2],
+      ["contract", "read", 1],
+    ]);
   });
 
   test("a deferral restated downstream is ONE decision, dated from its first record", () => {
@@ -657,6 +663,50 @@ describe("render", () => {
     expect(body).toContain("배정된 자리별 집계");
     // Assignment cells arrive backticked; they render inside <code> without them.
     expect(body).toContain("<code>code-generation (NEW-codegen-layout)</code>");
+  });
+
+  test("the stage-declared open questions render as their own ledger, unassigned", () => {
+    // requirements-analysis and contract-design write Open questions in their own
+    // primary artifact, outside `## Assumptions & Open Questions`; on run E five items
+    // lived there and the panel showed none of them.
+    const body = renderBody(m);
+    expect(body).toContain("stage 선언 미결 질문");
+    expect(body).toContain("stage 산출물이 직접 선언한 미결 질문 3건 — 배정 없음");
+    expect(body).toContain("OQ1: The retention window for migrated records");
+    expect(body).toContain("Is an empty store an empty list or an explicit signal?");
+    expect(body).toContain("막는 대상 <code>PU-B-ui</code>");
+    // Not summed with the owner-bearing items: those counts are what they were.
+    expect(body).toContain("지난 단계로 배정됨 · 2건");
+    expect(m.deferrals.items.some((i) => i.item.includes("retention window"))).toBe(false);
+    const en = renderBody(m, "en");
+    expect(en).toContain("stage-declared open questions");
+    expect(en).toContain("blocks <code>PU-B-ui</code>");
+  });
+
+  test("an unreadable ledger section is reported beside the items that were read", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-gap-"));
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const record = path.join(root, "aidlc/spaces/default/intents/260101-demo-migration");
+      fs.writeFileSync(
+        path.join(record, "inception/units-generation/unit-of-work-dependency.md"),
+        "## Assumptions & Open Questions\n\n산문으로만 적은 절이다.\n",
+      );
+      fs.writeFileSync(
+        path.join(record, "inception/contract-design/contract-summary.md"),
+        "## Open Questions\n\n남은 계약 질문은 설계에서 다룬다.\n",
+      );
+      const after = assemble(root);
+      expect(after.deferrals.items.length).toBeGreaterThan(0);
+      const body = renderBody(after);
+      expect(body).toContain("절 1곳은 이 리더가 아는 모양이 아닙니다");
+      expect(body).toContain("<code>inception/units-generation/unit-of-work-dependency.md</code>");
+      expect(body).toContain(
+        "<code>inception/contract-design/contract-summary.md</code>의 <code>Open questions</code> 절은",
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("the stage-diary card is gone, and no empty slot is left where it was", () => {

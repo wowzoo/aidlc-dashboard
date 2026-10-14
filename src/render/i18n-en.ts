@@ -461,6 +461,36 @@ const deferrals: DeferralStrings = {
   ledgerAssumptionsSource: "<code>[assumption]</code> entries in the same section",
   ledgerDiary: "stage diary open items",
   ledgerDiarySource: "<code>## Open questions</code> in each stage's <code>memory.md</code>",
+  ledgerDeclared: "stage-declared open questions",
+  ledgerDeclaredSource:
+    "<code>Open questions</code> in <code>requirements.md</code> and <code>contract-summary.md</code>",
+  declaredFaces: {
+    requirements: {
+      label: "requirements",
+      tip: "requirements-analysis's own Open questions — remaining uncertainties for later stages",
+    },
+    contract: {
+      label: "contract",
+      tip: "contract-design's Open questions table — an unresolved contract point and what it blocks",
+    },
+  },
+  declaredSummary: (count) =>
+    `${count} open question${count === 1 ? "" : "s"} declared by a stage's own artifact — unassigned`,
+  declaredNote: `Read from the <code>Open questions</code> that requirements-analysis (<code>requirements.md</code>)
+  and contract-design (<code>contract-summary.md</code>) are told to write — outside the
+  <code>## Assumptions &amp; Open Questions</code> section. Neither has an assignment cell: <code>Blocks</code> names what
+  the point blocks, not a stage that will answer it, so <b>no owner is claimed and these are never summed</b> with the
+  artifact items above.`,
+  contractLabel: "contract",
+  blocksLabel: "blocks",
+  declaredUnread: (files) =>
+    `The <code>Open questions</code> section of ${files} is in a shape this reader does not know —
+    <b>not read, which is not the same as empty</b>.`,
+  declaredMissing: (files) =>
+    `${files} carries no <code>Open questions</code> section, though its stage file asks for one.`,
+  unreadAlongside: (unread, files) =>
+    `<b>${unread} <code>## Assumptions &amp; Open Questions</code> section${unread === 1 ? " is" : "s are"} in a shape
+    this reader does not know</b> (${files}) — whatever ${unread === 1 ? "it holds is" : "they hold is"} not in the counts above.`,
   chipUnassignedTip:
     "Prose, so there is no assignment cell — it stays an assumption until the user confirms it in that stage's questions file",
   chipFollowUp: "follow-up",
@@ -468,8 +498,8 @@ const deferrals: DeferralStrings = {
   chipOther: "other",
   chipOtherTip:
     "Filed under the open-questions section but with no follow-up wording in the sentence — the heading is the declaration, so it still counts",
-  ledgersNote: `The three ledgers are <b>different reads</b> — only the first row has an assignment cell, and the
-other two have nowhere assigned to ask them. <b>They are not summed.</b>`,
+  ledgersNote: `These ledgers are <b>different reads</b> — only the first row has an assignment cell, and the
+others have nowhere assigned to ask them. <b>They are not summed.</b>`,
   noSections: (artifacts) =>
     `No artifact carries an <code>## Assumptions &amp; Open Questions</code> section — either this run left no
     open-item ledger, or it has not written artifacts yet. (${artifacts} artifact${artifacts === 1 ? "" : "s"} read)`,
@@ -482,7 +512,7 @@ other two have nowhere assigned to ask them. <b>They are not summed.</b>`,
   noOpenPill: "no open items",
   noOpenPillTip: "The ledger section is present and empty — an explicit declaration of 'none'",
   allNone: (sections) =>
-    ` Every open-item ledger across ${sections} artifact${sections === 1 ? "" : "s"} reads <code>None.</code>`,
+    ` Every <code>## Assumptions &amp; Open Questions</code> section across ${sections} artifact${sections === 1 ? "" : "s"} reads <code>None.</code>`,
   lead: (items, sections, rows, exits) =>
     `<b>${items}</b> open item${items === 1 ? "" : "s"} · ${sections} artifact${sections === 1 ? "" : "s"} carry an
   <code>## Assumptions &amp; Open Questions</code> ledger (${rows} raw row${rows === 1 ? "" : "s"} → ${items} after de-duplication)${

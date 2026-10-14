@@ -108,6 +108,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { type DeclaredOpenQuestions, readDeclaredOpenQuestions } from "./declared-open-questions";
 import type { StageStatus } from "./parser";
 import { visibleLines } from "./visible-lines";
 
@@ -186,6 +187,14 @@ export interface DeferralReport {
   sections: number;
   /** Sections whose body held only `None.` — an explicit "nothing open". */
   emptySections: number;
+  /**
+   * Record-relative path of every section that yielded nothing and declared nothing —
+   * one entry per section, so an artifact holding two such sections appears twice.
+   * Reported whatever the other sections yielded: a gap is a gap beside a full table too.
+   */
+  unreadSections: string[];
+  /** The two stage-declared ledgers outside this section (scan/declared-open-questions.ts). */
+  declared: DeclaredOpenQuestions;
   /** Table rows read before fan-in dedup. */
   rows: number;
   /** True when no stage catalogue widened the slug oracle beyond state.md. */
@@ -246,7 +255,16 @@ interface ParsedSection {
    * silence rather than a claim.
    */
   declaredNone: boolean;
+  /**
+   * One outcome per section, in file order. The read is judged PER SECTION: an
+   * artifact-level flag let a parsed section vouch for an unparsed sibling, and counted
+   * two `None.` sections as one declaration.
+   */
+  outcomes: SectionOutcome[];
 }
+
+/** What one section yielded: entries, an explicit `None.`, or nothing this reader knows. */
+export type SectionOutcome = "read" | "none" | "unread";
 
 function splitRow(line: string): string[] {
   const m = TABLE_ROW_RE.exec(line);
@@ -269,7 +287,13 @@ function tidy(s: string): string {
  * itself becomes an open item called "항목".
  */
 export function parseDeferralSections(text: string): ParsedSection {
-  const out: ParsedSection = { rows: [], assumptions: [], sections: 0, declaredNone: false };
+  const out: ParsedSection = {
+    rows: [],
+    assumptions: [],
+    sections: 0,
+    declaredNone: false,
+    outcomes: [],
+  };
   // Visible lines only (scan/visible-lines.ts): a section quoted in a fence or left in
   // a comment is not the engine's ledger. An unclosed block is read as text, as before.
   const lines = visibleLines(text).lines;
@@ -407,14 +431,10 @@ export function parseDeferralSections(text: string): ParsedSection {
       flushBullet();
     }
     flushBullet();
-    if (
-      out.rows.length === rowsBefore &&
-      out.assumptions.length === assumptionsBefore &&
-      bodyLines > 0 &&
-      noneLines === bodyLines
-    ) {
-      out.declaredNone = true;
-    }
+    const read = out.rows.length > rowsBefore || out.assumptions.length > assumptionsBefore;
+    const none = !read && bodyLines > 0 && noneLines === bodyLines;
+    if (none) out.declaredNone = true;
+    out.outcomes.push(read ? "read" : none ? "none" : "unread");
   }
   return out;
 }
@@ -570,6 +590,7 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
   const located = locateArtifacts(recordDir, opts.isStage);
   let sections = 0;
   let emptySections = 0;
+  const unreadSections: string[] = [];
   let rows = 0;
 
   // Fan-in: the same item is often restated by a downstream artifact. Keyed on the
@@ -594,14 +615,15 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
     // the sections whose shape this reader does not cover, so the panel's own header
     // hid the gap it was reporting.
     sections += parsed.sections;
-    const found = parsed.rows.length > 0 || parsed.assumptions.length > 0;
-    if (!found) {
-      // Only an explicit `None.` is an empty section; a section this reader simply
-      // could not parse is not the engine claiming there is nothing open.
-      if (parsed.declaredNone) emptySections++;
-      continue;
-    }
     const rel = loc.relParts.join("/");
+    // Only an explicit `None.` is an empty section; a section this reader simply
+    // could not parse is not the engine claiming there is nothing open — and that holds
+    // for each section on its own, whatever its siblings yielded.
+    for (const outcome of parsed.outcomes) {
+      if (outcome === "none") emptySections++;
+      else if (outcome === "unread") unreadSections.push(rel);
+    }
+    if (parsed.rows.length === 0 && parsed.assumptions.length === 0) continue;
     const since = statMtime(abs);
 
     for (const row of parsed.rows) {
@@ -688,7 +710,9 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
     artifacts: located.length,
     sections,
     emptySections,
+    unreadSections,
     rows,
+    declared: readDeclaredOpenQuestions(recordDir),
     catalogMissing: opts.catalogSlugs === undefined,
   };
 }

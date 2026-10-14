@@ -26,6 +26,7 @@
 
 import type { Locale, SourceKind } from "../model/types";
 import type { CheckpointKind, ProofFault, UnreadableCause } from "../scan/checkpoint-proofs";
+import type { DeclaredSource } from "../scan/declared-open-questions";
 import type { OwnerStatus } from "../scan/deferrals";
 import type { CellState, ReceiptReason } from "../scan/matrix";
 import type { StageEndKind } from "../scan/timing";
@@ -467,6 +468,21 @@ export interface DeferralStrings {
   readonly ledgerDiary: string;
   /** Raw markup. */
   readonly ledgerDiarySource: string;
+  readonly ledgerDeclared: string;
+  /** Raw markup. */
+  readonly ledgerDeclaredSource: string;
+  readonly declaredFaces: Record<DeclaredSource, { readonly label: string; readonly tip: string }>;
+  declaredSummary(count: number): string;
+  /** Raw markup. */
+  readonly declaredNote: string;
+  readonly contractLabel: string;
+  readonly blocksLabel: string;
+  /** Raw markup; `files` is already-escaped markup. */
+  declaredUnread(files: string): string;
+  /** Raw markup; `files` is already-escaped markup. */
+  declaredMissing(files: string): string;
+  /** Raw markup; `files` is already-escaped markup. */
+  unreadAlongside(unread: number, files: string): string;
   readonly chipUnassignedTip: string;
   readonly chipFollowUp: string;
   readonly chipFollowUpTip: string;

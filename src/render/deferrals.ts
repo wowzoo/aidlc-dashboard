@@ -4,10 +4,12 @@
 // does it come back?" Nothing else on the page answers it. The blocker panel reads a
 // blank `[Answer]:`, and a finished run has none while still owing 230 decisions.
 //
-// It carries THREE ledgers, kept separate because they are separate claims: the
+// It carries FOUR ledgers, kept separate because they are separate claims: the
 // artifacts' `## Assumptions & Open Questions` (items, with an assigned stage where
-// the tree names one), its `[assumption]` entries (no owner), and each stage's
-// `memory.md` `## Open questions` (diaryOpenBlock, no owner). The stage-diary card
+// the tree names one), its `[assumption]` entries (no owner), the Open questions two
+// stages declare in their own primary artifact (declaredBlock, no owner — `Blocks`
+// names a unit), and each stage's `memory.md` `## Open questions` (diaryOpenBlock, no
+// owner). The stage-diary card
 // that used to sit here read all four memory.md axes and was unmounted for it
 // (render/health.ts, SHOW_DIARY) — three of those axes are the orchestrator's
 // reasoning and state no debt. Only the Open questions axis does, so only it came
@@ -33,6 +35,7 @@
 //      four numbers do. Same rule as the timing panel's bar length vs bar colour.
 
 import type { DashboardModel } from "../model/types";
+import type { DeclaredLedger, DeclaredSource } from "../scan/declared-open-questions";
 import type { DeferralItem, OwnerStatus } from "../scan/deferrals";
 import { dur, esc, pill, section, shortTs } from "./common";
 import type { Strings } from "./i18n";
@@ -230,7 +233,71 @@ function diaryOpenBlock(m: DashboardModel, s: Strings): string {
 }
 
 /**
- * The three ledgers, one row each.
+ * The Open questions that requirements-analysis and contract-design declare in their
+ * own primary artifact (scan/declared-open-questions.ts). Kept apart from the items
+ * above for the same reason as the diary: no assignment cell. `Blocks` is shown as
+ * what it is — what the point blocks — and never resolved to an owner.
+ */
+function declaredBlock(m: DashboardModel, s: Strings): string {
+  const t = s.deferrals;
+  const list = m.deferrals.declared.questions;
+  if (list.length === 0) return "";
+  const rows = list
+    .map((q) => {
+      const f = t.declaredFaces[q.source];
+      const detail = [
+        q.contract ? `${esc(t.contractLabel)} <code>${esc(q.contract)}</code>` : "",
+        q.blocks ? `${esc(t.blocksLabel)} <code>${esc(q.blocks.replace(/`/g, ""))}</code>` : "",
+      ]
+        .filter((x) => x.length > 0)
+        .join(" · ");
+      return `<li class="dfr-item">
+  <div class="dfr-meta">${pill(f.label, "mute", f.tip)}
+    <span class="dfr-route"><span class="dfr-from">${esc(q.stage)}</span></span>
+    <a class="dfr-source" href="/view?rel=${encodeURIComponent(q.rel)}" title="${esc(
+      t.viewTip(q.rel),
+    )}">${esc(t.sourceLink)}</a>
+  </div>
+  <div class="dfr-text">${esc(q.text.length > 260 ? `${q.text.slice(0, 260)}…` : q.text)}</div>
+  ${detail.length > 0 ? `<div class="dfr-assign">${detail}</div>` : ""}
+</li>`;
+    })
+    .join("");
+  return `<details class="dfr-assum"><summary>${esc(t.declaredSummary(list.length))}</summary>
+  <p class="note">${t.declaredNote}</p>
+  <ul class="dfr-list">${rows}</ul>
+</details>`;
+}
+
+/**
+ * What could not be read, said beside whatever could. Each gap is stated on its own:
+ * a ledger that yielded items elsewhere does not vouch for a section it could not parse.
+ */
+function gapNotes(d: DashboardModel["deferrals"], s: Strings, withItems: boolean): string {
+  const t = s.deferrals;
+  const out: string[] = [];
+  // Paths arrive as raw markup, so they are escaped here, once.
+  const files = (rels: string[]) =>
+    [...new Set(rels)].map((r) => `<code>${esc(r)}</code>`).join(", ");
+  if (withItems && d.unreadSections.length > 0) {
+    out.push(
+      `<p class="note warn">${t.unreadAlongside(
+        d.unreadSections.length,
+        files(d.unreadSections),
+      )}</p>`,
+    );
+  }
+  const of = (st: DeclaredLedger["status"]) =>
+    d.declared.ledgers.filter((l) => l.status === st).map((l) => l.rel);
+  const unread = of("unread");
+  if (unread.length > 0) out.push(`<p class="note warn">${t.declaredUnread(files(unread))}</p>`);
+  const missing = of("missing");
+  if (missing.length > 0) out.push(`<p class="note">${t.declaredMissing(files(missing))}</p>`);
+  return out.join("");
+}
+
+/**
+ * The ledgers, one row each.
  *
  * This started as a six-tile KPI strip and that was the wrong shape for the content:
  * six numbers side by side in identical tiles read as six comparable measurements of
@@ -286,6 +353,23 @@ function ledgerRows(
       }),
     );
   }
+  const declared = d.declared.questions;
+  if (declared.length > 0) {
+    const bySource = (src: DeclaredSource) => declared.filter((q) => q.source === src).length;
+    rows.push(
+      row({
+        n: declared.length,
+        tone: "mute",
+        label: t.ledgerDeclared,
+        source: t.ledgerDeclaredSource,
+        chips: (["requirements", "contract"] as const)
+          .map((src) =>
+            chip(t.declaredFaces[src].label, bySource(src), "mute", t.declaredFaces[src].tip),
+          )
+          .join(""),
+      }),
+    );
+  }
   if (diaryOpen > 0) {
     rows.push(
       row({
@@ -322,26 +406,30 @@ function row(r: {
 function body(m: DashboardModel, s: Strings): string {
   const t = s.deferrals;
   const d = m.deferrals;
-  const diary = diaryOpenBlock(m, s);
+  // The declared ledgers and the diary are separate reads, so they follow every
+  // branch below — an empty artifact section says nothing about either.
+  const tail = `${gapNotes(d, s, false)}${declaredBlock(m, s)}${diaryOpenBlock(m, s)}`;
   if (d.sections === 0) {
-    return `<p class="note">${t.noSections(d.artifacts)}</p>${diary}`;
+    return `<p class="note">${t.noSections(d.artifacts)}</p>${tail}`;
   }
   if (d.items.length === 0 && d.assumptions.length === 0) {
-    // `emptySections` counts only an explicit `None.`; `sections` counts the heading
-    // wherever it appears. A gap between them is a shape this reader cannot parse,
-    // and calling that "비어 있음" is the one thing this panel must never say — it is
+    // `emptySections` counts only an explicit `None.`, per section; a section that
+    // declared nothing and yielded nothing is a shape this reader cannot parse, and
+    // calling that "비어 있음" is the one thing this panel must never say — it is
     // exactly the false all-clear that reading only the table shape used to produce.
-    const unread = d.sections - d.emptySections;
+    const unread = d.unreadSections.length;
     if (unread > 0) {
       return `<p class="note warn">${t.unreadSections(
         d.sections,
         unread,
         d.emptySections,
-      )}</p>${diary}`;
+      )}</p>${tail}`;
     }
-    return `<p class="note">${pill(t.noOpenPill, "ok", t.noOpenPillTip)}${t.allNone(
+    // The pill claims "no open items", so it is withheld while another ledger has some.
+    const clear = d.declared.questions.length === 0;
+    return `<p class="note">${clear ? pill(t.noOpenPill, "ok", t.noOpenPillTip) : ""}${t.allNone(
       d.sections,
-    )}</p>${diary}`;
+    )}</p>${tail}`;
   }
 
   const diaryOpen = m.diaries.records.filter(
@@ -363,7 +451,7 @@ function body(m: DashboardModel, s: Strings): string {
 
   const warn = d.catalogMissing ? `<p class="note warn">${t.catalogMissingNote}</p>` : "";
 
-  return `${kpis}${lead}${warn}
+  return `${kpis}${lead}${warn}${gapNotes(d, s, true)}
 <div class="dfr-focus">
   <h3>${esc(t.headingPassed(passed.length))}</h3>
   ${itemList(passed, 6, t.faces.passed.label, s)}
@@ -387,7 +475,8 @@ ${
     : ""
 }
 ${assumptionsBlock(m, s)}
-${diary}
+${declaredBlock(m, s)}
+${diaryOpenBlock(m, s)}
 ${ownerTable(m, s)}`;
 }
 
