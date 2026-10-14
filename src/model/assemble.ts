@@ -48,6 +48,7 @@ import {
   supportedEngine,
 } from "../scan/stage-catalog";
 import { buildTiming } from "../scan/timing";
+import { unitArtifactMode } from "../scan/unit-artifact-mode";
 import { buildProvenance, graphLastEvent } from "./freshness";
 import type {
   Blocker,
@@ -637,33 +638,35 @@ export function assemble(
     // The engine's `unitScopePath`: `<root>/aidlc/.aidlc-unit-scope.json`, checkout-local.
     fs.existsSync(path.join(root, "aidlc", ".aidlc-unit-scope.json")),
   );
-  const matrix = construction
-    ? // A mismatched roster means the catalogue describes a different run shape, so the
-      // matrix must not claim contract-awareness. Withholding the catalogue routes it
-      // through the existing, already-loud 2-state degradation instead of inventing a
-      // second "degraded" mode.
-      scanConstructionMatrix(
-        recordDir,
-        construction.stages,
-        rosterMismatch || versionMismatch ? undefined : catalog,
-        // Completion receipts come from the audit. Where a stage uses the unit
-        // lifecycle they outrank artifact presence — the engine's own rule.
-        readUnitLifecycle(ledger.events, policy),
-        // An unverified version does NOT throw the contract away — it withholds the claim
-        // that the judgement matches the engine's. Separate axes, not one.
-        stateCompat,
-      )
-    : undefined;
+  // A plan that skips Units Generation has no units: per-unit stages run once at stage
+  // level, so a matrix would only draw a DAG some earlier plan left in the graph, judged
+  // on paths the engine does not read. The scope grid is the catalogue's, refused or not
+  // — the plan action is the state's own fact, not a contract judgement.
+  const artifactMode = unitArtifactMode(stateText, catalog?.scopeGrid);
+  const matrix =
+    construction && artifactMode !== "stage-level"
+      ? // A mismatched roster means the catalogue describes a different run shape, so the
+        // matrix must not claim contract-awareness. Withholding the catalogue routes it
+        // through the existing, already-loud 2-state degradation instead of inventing a
+        // second "degraded" mode.
+        scanConstructionMatrix(
+          recordDir,
+          construction.stages,
+          rosterMismatch || versionMismatch ? undefined : catalog,
+          // Completion receipts come from the audit. Where a stage uses the unit
+          // lifecycle they outrank artifact presence — the engine's own rule.
+          readUnitLifecycle(ledger.events, policy),
+          // An unverified version does NOT throw the contract away — it withholds the claim
+          // that the judgement matches the engine's. Separate axes, not one.
+          stateCompat,
+        )
+      : undefined;
   // Where the engine's routing resolves a unit checkpoint and so reads its proof:
   // `receiptsRequired` is this reader's `constructionCheckpointsApply`, here only with a
   // scope grid that knows the scope (an unknown scope applies nothing, and with no grid
   // the policy cannot tell); and the run has units of its own — not
   // `usesStageLevelPerUnitArtifacts` (Units Generation neither EXECUTE nor completed).
-  const unitsGeneration = state.phases
-    .flatMap((p) => p.stages)
-    .find((st) => st.slug === "units-generation");
-  const ownUnits =
-    unitsGeneration !== undefined && (unitsGeneration.execute || unitsGeneration.status === "done");
+  const ownUnits = artifactMode === "per-unit";
   const scopeKnown = catalog?.scopeGrid !== undefined && state.scope in catalog.scopeGrid;
   const checkpointProofs =
     matrix && policy.receiptsRequired && scopeKnown && ownUnits
@@ -817,6 +820,7 @@ export function assemble(
     identity,
     state,
     matrix,
+    unitArtifactMode: artifactMode,
     checkpointProofs,
     sensors,
     questions,

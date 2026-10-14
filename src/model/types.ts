@@ -27,6 +27,7 @@ import type { AskKind, QuestionsReport } from "../scan/questions";
 import type { ReworkReport } from "../scan/rework";
 import type { SensorReport } from "../scan/sensors";
 import type { TimingReport } from "../scan/timing";
+import type { UnitArtifactMode } from "../scan/unit-artifact-mode";
 import type { Waits } from "./waits";
 
 /** Where a number came from. */
@@ -237,6 +238,11 @@ export interface DashboardModel {
   identity: RunIdentity;
   state: AidlcState;
   matrix?: ConstructionMatrix;
+  /**
+   * Where per-unit stages write (scan/unit-artifact-mode.ts). `stage-level` — the plan
+   * skips Units Generation — withholds the matrix: there is no unit to draw a column for.
+   */
+  unitArtifactMode: UnitArtifactMode;
   /**
    * Unit checkpoint proofs the engine cannot count verified (scan/checkpoint-proofs.ts) —
    * only where checkpoints are in force. A diagnostic beside the matrix: the next move is

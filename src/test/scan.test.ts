@@ -41,6 +41,7 @@ import {
   classifyGaps,
   shardLabel,
 } from "../scan/timing";
+import { unitArtifactMode } from "../scan/unit-artifact-mode";
 
 describe("audit shard", () => {
   const SHARD = `# AI-DLC Audit Log
@@ -3985,5 +3986,53 @@ describe("a record file that cannot be read is named, never read as absent", () 
       expect(readDeferrals(record).unreadable).toContain(dir);
       expect(readDiaries(record).unreadable).toContain(`${dir}/memory.md`);
     });
+  });
+});
+
+describe("unit artifact mode (usesStageLevelPerUnitArtifacts)", () => {
+  const state = (rows: string, scope = "bugfix") =>
+    `# State\n\n- **Scope**: ${scope}\n\n## Stage Progress\n\n### CONSTRUCTION PHASE\n${rows}\n`;
+  const grid = {
+    bugfix: { "units-generation": "SKIP" as const },
+    full: { "units-generation": "EXECUTE" as const },
+  };
+
+  test("the suffix outranks the grid, and the LAST matching row wins", () => {
+    expect(unitArtifactMode(state("- [ ] units-generation — EXECUTE"), grid)).toBe("per-unit");
+    expect(unitArtifactMode(state("- [ ] units-generation — SKIP", "full"), grid)).toBe(
+      "stage-level",
+    );
+    expect(
+      unitArtifactMode(
+        state("- [ ] units-generation — SKIP\n- [ ] units-generation — EXECUTE"),
+        grid,
+      ),
+    ).toBe("per-unit");
+  });
+
+  test("only a checked row with the em dash keeps the units", () => {
+    expect(unitArtifactMode(state("- [x] units-generation — SKIP"), grid)).toBe("per-unit");
+    for (const box of [" ", "-", "?", "R", "S"]) {
+      expect(unitArtifactMode(state(`- [${box}] units-generation — SKIP`), grid)).toBe(
+        "stage-level",
+      );
+    }
+    // `parseCheckboxes` needs the em dash, so a bare `[x]` row is not completion; the grid's
+    // SKIP then stands.
+    expect(unitArtifactMode(state("- [x] units-generation"), grid)).toBe("stage-level");
+  });
+
+  test("a scope the grid does not know, and no grid, claim neither", () => {
+    expect(unitArtifactMode(state("- [ ] units-generation", "custom"), grid)).toBe("unknown");
+    expect(unitArtifactMode(state("- [ ] units-generation"))).toBe("unknown");
+    expect(unitArtifactMode("- [ ] units-generation\n", grid)).toBe("unknown");
+  });
+
+  test("CRLF state text reads the same", () => {
+    const crlf = state("- [ ] units-generation — SKIP").replace(/\n/g, "\r\n");
+    expect(unitArtifactMode(crlf, grid)).toBe("stage-level");
+    expect(unitArtifactMode(state("- [ ] units-generation").replace(/\n/g, "\r\n"), grid)).toBe(
+      "stage-level",
+    );
   });
 });

@@ -169,7 +169,17 @@ export function renderUnitCard(m: DashboardModel, s: Strings): string {
     return tabbedCard({
       id: "unit",
       title: s.cards.unitTitle,
-      tabs: [{ label: "—", body: rowList([], { empty: s.overview.noUnits }) }],
+      tabs: [
+        {
+          label: "—",
+          body: rowList([], {
+            empty:
+              m.unitArtifactMode === "stage-level"
+                ? s.overview.stageLevelUnits
+                : s.overview.noUnits,
+          }),
+        },
+      ],
       more,
     });
   }

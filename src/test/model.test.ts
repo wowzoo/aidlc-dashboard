@@ -18,6 +18,7 @@ import { renderHealth } from "../render/health";
 import { strings } from "../render/i18n";
 
 const KO = strings("ko");
+const EN = strings("en");
 import { renderUnitCard, renderUnresolvedCard } from "../render/cards";
 import { renderBody, renderPage } from "../render/page";
 import { renderPicker } from "../render/picker";
@@ -424,6 +425,105 @@ describe("render", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  describe("a plan that skips Units Generation runs per-unit stages at stage level", () => {
+    // `usesStageLevelPerUnitArtifacts`: Units Generation neither EXECUTE nor completed
+    // means the per-unit stages run once, writing under `construction/<stage>/`, and the
+    // engine refuses `unit start/complete`. There is no unit to draw a column for.
+    const REC = "aidlc/spaces/default/intents/260101-demo-migration";
+    const withState = (
+      row: string,
+      check: (m: ReturnType<typeof assemble>) => void,
+      opts: {
+        dropDag?: boolean;
+        grid?: Record<string, Record<string, string>>;
+        scope?: string;
+      } = {},
+    ) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-stagelevel-"));
+      try {
+        fs.cpSync(FIXTURE, root, { recursive: true });
+        const sp = path.join(root, REC, "aidlc-state.md");
+        let text = fs.readFileSync(sp, "utf-8").replace("- [x] units-generation — EXECUTE", row);
+        if (opts.scope)
+          text = text.replace("- **Scope**: demo-migration", `- **Scope**: ${opts.scope}`);
+        fs.writeFileSync(sp, text);
+        if (opts.dropDag) {
+          const gp = path.join(root, REC, "runtime-graph.json");
+          const { bolt_dag: _dropped, ...g } = JSON.parse(fs.readFileSync(gp, "utf-8"));
+          fs.writeFileSync(gp, JSON.stringify(g));
+        }
+        if (opts.grid) {
+          const grid = Object.fromEntries(
+            Object.entries(opts.grid).map(([k, stages]) => [k, { stages }]),
+          );
+          fs.writeFileSync(
+            path.join(root, ".kiro/tools/data/scope-grid.json"),
+            JSON.stringify(grid),
+          );
+        }
+        check(assemble(root));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    test("no unit DAG: the note says the plan skips it, not that it was not reached", () => {
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.unitArtifactMode).toBe("stage-level");
+          expect(m.matrix).toBeUndefined();
+          for (const [loc, x] of [
+            ["en", EN],
+            ["ko", KO],
+          ] as const) {
+            const body = renderBody(m, loc);
+            expect(body).toContain(esc(x.overview.stageLevelUnits));
+            expect(body).not.toContain(x.overview.noUnits);
+          }
+        },
+        { dropDag: true },
+      );
+    });
+
+    test("a unit DAG left in the graph draws no column of false absents", () => {
+      // Units Generation compiled a DAG, then the plan dropped it before it completed:
+      // the engine judges `construction/<stage>/`, so a column per unit would read every
+      // cell absent.
+      withState("- [?] units-generation — SKIP", (m) => {
+        expect(m.unitArtifactMode).toBe("stage-level");
+        expect(m.matrix).toBeUndefined();
+        expect(renderBody(m, "en")).toContain(esc(EN.overview.stageLevelUnits));
+        expect(renderUnitCard(m, EN)).toContain(esc(EN.overview.stageLevelUnits));
+      });
+    });
+
+    test("Units Generation that already completed keeps its units (#1401)", () => {
+      withState("- [x] units-generation — SKIP", (m) => {
+        expect(m.unitArtifactMode).toBe("per-unit");
+        expect(m.matrix?.units.map((u) => u.name)).toEqual(["PU-A-core", "PU-B-ui"]);
+      });
+    });
+
+    test("a row with no suffix takes the scope grid's action", () => {
+      withState("- [ ] units-generation", (m) => expect(m.unitArtifactMode).toBe("stage-level"), {
+        grid: { bugfix: { "units-generation": "SKIP" } },
+        scope: "bugfix",
+      });
+      withState("- [ ] units-generation", (m) => expect(m.unitArtifactMode).toBe("per-unit"), {
+        grid: { full: { "units-generation": "EXECUTE" } },
+        scope: "full",
+      });
+    });
+
+    test("no suffix and no grid action claims neither mode, and keeps the matrix", () => {
+      withState("- [ ] units-generation", (m) => {
+        expect(m.unitArtifactMode).toBe("unknown");
+        expect(m.matrix?.units.length).toBe(2);
+      });
+    });
   });
 
   test("a shard the engine refuses is left out, and the page names it", () => {

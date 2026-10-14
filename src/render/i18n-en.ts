@@ -254,6 +254,9 @@ const overview: OverviewStrings = {
     "state.md's <code>## Unit Progress</code> — an <b>authoritative</b> projection the engine rewrites on every\n  <code>next</code> from receipts, reviews and gates. Hand edits are never routing or completion evidence. The matrix below is a separate diagnostic, reconstructed from disk.",
   noUnits: "No unit information — units-generation has not been reached.",
   noUnitsPill: "n/a",
+  stageLevelUnits:
+    "No per-unit matrix — this plan skips Units Generation, so there are no units. Each per-unit Construction stage runs once at stage level and writes under construction/<stage>/ (see Phase · Stage above).",
+  stageLevelUnitsPill: "stage level",
 
   tipPartial: (missing) => `missing: ${missing.join(", ")}`,
   tipComplete: (present) => `complete: ${present.join(", ")}`,

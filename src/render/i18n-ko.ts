@@ -240,6 +240,9 @@ const overview: OverviewStrings = {
     "state.md 의 <code>## Unit Progress</code> — 엔진이 수령증·리뷰·게이트를 반영해 매 <code>next</code> 마다 다시 쓰는\n  <b>권위 있는 값</b>입니다. 손으로 고친 내용은 라우팅·완료 근거가 되지 않습니다. 아래 매트릭스는 디스크에서 재구성한 별개의 진단입니다.",
   noUnits: "유닛 정보 없음 — units-generation 미진입.",
   noUnitsPill: "해당 없음",
+  stageLevelUnits:
+    "유닛별 매트릭스 없음 — 이 계획은 Units Generation 을 건너뛰므로 유닛이 없습니다. 유닛별 Construction stage 는 stage 단위로 한 번 실행되고, 산출물은 construction/<stage>/ 에 씁니다(위 Phase · Stage 참고).",
+  stageLevelUnitsPill: "stage 단위",
 
   tipPartial: (missing) => `미완: ${missing.join(", ")}`,
   tipComplete: (present) => `완료: ${present.join(", ")}`,

@@ -378,7 +378,9 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
         // The absent node is runtime-graph.json's `bolt_dag` (a legacy name for
         // what is really the Unit-of-Work DAG). The field name is kept out of the
         // note: it names a concept — Bolt — that this dashboard never shows.
-        `<p class="note">${esc(s.overview.noUnits)} ${pill(s.overview.noUnitsPill, "mute")}</p>`,
+        m.unitArtifactMode === "stage-level"
+          ? `<p class="note">${esc(s.overview.stageLevelUnits)} ${pill(s.overview.stageLevelUnitsPill, "mute")}</p>`
+          : `<p class="note">${esc(s.overview.noUnits)} ${pill(s.overview.noUnitsPill, "mute")}</p>`,
       ),
     );
   }
