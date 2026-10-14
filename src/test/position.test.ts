@@ -755,6 +755,12 @@ describe("second-review regressions", () => {
     const unread = w(STATE(ROW, team), { miss: "absent" }, { events: open, teamGate: stuck });
     expect(unread.teamGate).toBeUndefined();
     expect(unread.teamGateUnread).toBe(true);
+    // It names its unit and stage, so it reads apart from a stage-level leftover cache.
+    expect(unread.teamGateUnreadAt).toEqual({
+      stage: "code-generation",
+      unit: "unit-b",
+      scopeVerified: false,
+    });
     // Outside team ownership there is no unit gate to read.
     const solo = w(STATE(ROW), { miss: "absent" }, { events: open });
     expect(solo.teamGate).toBeUndefined();
@@ -832,6 +838,31 @@ describe("second-review regressions", () => {
     });
     expect(offRoster.teamGate).toBeUndefined();
     expect(offRoster.teamGateUnread).toBe(false);
+    // ...unless an applicable scope stamp names it: the router then walks `[stamp.unit]`
+    // instead of the roster (`emitTeamUnitMajorRunStage`), so that unit is routable.
+    const stamped = w(STATE(ROW, `${team}\n${cache}`), none, {
+      events: open("unit-b"),
+      teamGate: { ...teamGate, stampUnit: "unit-b" },
+      position: off,
+    });
+    expect(stamped.teamGate?.unit).toBe("unit-b");
+    // An unreadable roster stops per-unit routing before any stamp is read.
+    const unknown = at({ ...input, rosterUnits: null, marker: none });
+    expect(unknown.offRoster).toBe("unknown");
+    const malformed = w(STATE(ROW, `${team}\n${cache}`), none, {
+      events: open("unit-b"),
+      teamGate: { ...teamGate, stampUnit: "unit-b" },
+      position: unknown,
+    });
+    expect(malformed.teamGate).toBeUndefined();
+    // A current marker is the hook's own source, roster or not.
+    const markerB = { marker: { kind: "ask", stage: "code-generation", unit: "unit-b" } };
+    const viaMarker = w(STATE(ROW, `${team}\n${cache}`), markerB as never, {
+      events: open("unit-b"),
+      teamGate,
+      position: at({ ...input, rosterUnits: null, marker: markerB as never }),
+    });
+    expect(viaMarker.teamGate?.scopeVerified).toBe(true);
     // On the roster, the cache scopes it, unconfirmed — as it scopes a decision.
     const on = w(STATE(ROW, `${team}\n${cache}`), none, {
       events: open("unit-b"),

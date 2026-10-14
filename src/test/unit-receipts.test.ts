@@ -512,7 +512,8 @@ describe("team ownership, end to end", () => {
   test("an unresolvable claim and an unreadable roster each say so, and do not mix", () => {
     // `claim-unresolved` is a cell's reason, so it needs a roster to draw on: with the
     // authored DAG unreadable (#26's `malformed`) there is no matrix and the roster warning
-    // stands alone. The team unit gate reads only the audit, so it is unaffected.
+    // stands alone. (The team unit gate reads only the audit; an unreadable roster leaves
+    // it scoped by a current marker alone — see position.test.ts.)
     const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
     const REC = "aidlc/spaces/default/intents/260101-demo-migration";
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-team-mix-"));

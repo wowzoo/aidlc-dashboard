@@ -111,6 +111,8 @@ export interface Waits {
   };
   /** Team ownership with a unit position whose gate this reader could not decide. */
   teamGateUnread: boolean;
+  /** Which unit and stage that undecided gate is — beside a stage-level leftover, it must say. */
+  teamGateUnreadAt?: { stage: string; unit: string; scopeVerified: boolean };
   /**
    * The stop-hook record names the state it blocked on (the signature's digest) and that
    * state is not the current one — the count is history, whatever its size.
@@ -141,7 +143,12 @@ export interface WaitsInput {
    * scope `effectiveUnitGateRhythm` gives (`unknown` when the stamp's applicability cannot
    * be read). Absent outside team ownership.
    */
-  teamGate?: { claim: ClaimFilter; scope: "per-stage" | "unit-end" | "unknown" };
+  teamGate?: {
+    claim: ClaimFilter;
+    scope: "per-stage" | "unit-end" | "unknown";
+    /** The applicable scope stamp's unit: the router walks `[stamp.unit]`, not the roster. */
+    stampUnit?: string;
+  };
   marker: { marker: DirectiveMarker } | { miss: MarkerMiss };
   events: AuditEvent[];
   questions: QuestionsReport;
@@ -353,12 +360,17 @@ export function buildWaits(w: WaitsInput): Waits {
   // effective gate scope. Its `activeStage`/`activeUnit` are the hook's own probe
   // (`directive.unit ?? marker.unit`), so the scope follows the decision's — a current
   // marker, else the unit cache, unconfirmed. At stage level `position` already holds no
-  // cached unit (the router returns before team unit routing, so only a marker names one);
-  // and a cache unit off the resolved roster is not where the engine is, so no gate is
-  // read for it.
-  const cacheOffRoster = !marker && !!position.offRoster;
+  // cached unit (the router returns before team unit routing, so only a marker names one).
+  // A cache unit off the resolved roster is not where the engine is — unless an applicable
+  // scope stamp names it, since the team router then walks `[stamp.unit]` instead of the
+  // roster (`emitTeamUnitMajorRunStage`); an unreadable roster stops that walk too.
+  const cacheOffRoster =
+    !marker &&
+    (position.offRoster === "unknown" ||
+      (position.offRoster === "absent" && w.teamGate?.stampUnit !== position.unit));
   let teamGate: Waits["teamGate"];
   let teamGateUnread = false;
+  let teamGateUnreadAt: Waits["teamGateUnreadAt"];
   if (w.teamGate && scope.stage && scope.unit && !cacheOffRoster) {
     const status =
       w.teamGate.scope === "unknown"
@@ -371,8 +383,10 @@ export function buildWaits(w: WaitsInput): Waits {
             w.teamGate.claim,
             w.stageIndex,
           );
-    if (status === "unknown") teamGateUnread = true;
-    else if (status === "awaiting-approval" || status === "revising") {
+    if (status === "unknown") {
+      teamGateUnread = true;
+      teamGateUnreadAt = { stage: scope.stage, unit: scope.unit, scopeVerified };
+    } else if (status === "awaiting-approval" || status === "revising") {
       teamGate = { stage: scope.stage, unit: scope.unit, status, scopeVerified };
     }
   }
@@ -407,6 +421,7 @@ export function buildWaits(w: WaitsInput): Waits {
     checkoutPark: w.checkoutParkFile && !parked,
     teamGate,
     teamGateUnread,
+    ...(teamGateUnreadAt ? { teamGateUnreadAt } : {}),
     guardRecordStale,
   };
 }

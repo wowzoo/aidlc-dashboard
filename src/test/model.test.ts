@@ -1531,6 +1531,15 @@ describe("absence sentences claim only what their source read", () => {
     const en = renderBody(m, "en");
     expect(en).toContain(EN.timeline.awaitingTeamUnread);
     expect(en).not.toContain(EN.timeline.awaitingNone);
+    // With its scope, the row names the unit and stage it could not decide.
+    const at = { stage: "code-generation", unit: "PU-B-ui", scopeVerified: true };
+    const named = renderBody(
+      { ...base, waits: { ...base.waits, teamGateUnread: true, teamGateUnreadAt: at } },
+      "en",
+    );
+    expect(named).toContain(
+      `${esc(EN.status.humanTeamGateUnread)}<span class="mr-sub"> · PU-B-ui · code-generation</span>`,
+    );
   });
 
   test("an open team unit gate is named on the line and counted in the answers tab", () => {

@@ -26,6 +26,7 @@ import { type AuditLedger, readAuditLedger } from "../scan/audit";
 import { readCheckpointProofs } from "../scan/checkpoint-proofs";
 import {
   type ClaimInputs,
+  applicableStamp,
   claimFilter,
   readClaimInputs,
   unitGateRhythm,
@@ -282,6 +283,16 @@ function receiptPolicy(
     unitScoped: team || unitMajor,
     receiptsRequired: checkpoints && !team && codeStage,
     stageIndex: catalog ? (s) => catalog.stages.findIndex((x) => x.slug === s) : undefined,
+  };
+}
+
+/** The team unit gate's inputs: the claim filter, the gate scope and the stamp's unit. */
+function teamGateInput(claim: ClaimInputs, stateText: string) {
+  const stamp = applicableStamp(claim);
+  return {
+    claim: claimFilter(claim),
+    scope: unitGateRhythm(claim, stateText),
+    ...(stamp && stamp !== "unknown" ? { stampUnit: stamp.unit } : {}),
   };
 }
 
@@ -547,9 +558,7 @@ export function assemble(
     state,
     position,
     marker,
-    teamGate: claim.team
-      ? { claim: claimFilter(claim), scope: unitGateRhythm(claim, stateText) }
-      : undefined,
+    teamGate: claim.team ? teamGateInput(claim, stateText) : undefined,
     events: ledger.events,
     questions,
     blockers,

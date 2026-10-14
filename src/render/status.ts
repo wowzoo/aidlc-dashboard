@@ -235,8 +235,16 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
     );
   }
   if (w?.teamGateUnread) {
+    const at = w.teamGateUnreadAt;
+    const where = at
+      ? sub(
+          at.scopeVerified
+            ? `${at.unit} · ${at.stage}`
+            : `${at.unit} · ${at.stage} · ${x.humanDecisionUnscoped}`,
+        )
+      : "";
     rows.push({
-      label: esc(x.humanTeamGateUnread),
+      label: `${esc(x.humanTeamGateUnread)}${where}`,
       value: "—",
       dashed: true,
       tip: x.humanTeamGateUnreadTip,
