@@ -286,10 +286,12 @@ export function buildWaits(w: WaitsInput): Waits {
   // record of that is a current directive marker; the unit cache is a mirror the
   // engine keeps for cheap status reads, so a decision scoped by it alone is said to be
   // unconfirmed rather than claimed as the hook's.
-  // At stage level the probe's directive carries no unit (`emitPerUnitRunStage`), so a
-  // marker's unit does not scope the decision either.
+  // At stage level too: the hook's `directive.unit ?? activeMarker.unit` lets a stage-level
+  // probe's null unit fall through to the marker's, so the marker scopes the decision as
+  // it does per unit. The unit cache is what stage level drops, and it reaches here only
+  // through `position` (scan/run-position.ts).
   const scope = marker
-    ? { stage: marker.stage, unit: stageLevel ? undefined : marker.unit }
+    ? { stage: marker.stage, unit: marker.unit }
     : { stage: position.stage, unit: position.unit };
   const scopeVerified = !!marker || (position.basis === "current-stage" && position.verified);
   const teamScope = team && state.constructionIteration === "unit-major" && !!scope.unit;

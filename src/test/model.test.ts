@@ -631,12 +631,21 @@ describe("render", () => {
           tail: UP,
         },
       );
-      // With no table at all there is nothing missing: the engine derives one only from a
-      // valid Unit DAG, which a plan that skips Units Generation does not have.
+      // With no table and no unit DAG there is nothing missing: the engine derives one
+      // only from a valid non-empty Unit DAG. Stage level alone does not prove there is
+      // none — derivation does not refuse it — so a DAG left in the graph keeps the warning.
       withState(
         "- [ ] units-generation — SKIP",
         (m) => expect(m.warnings.map((w) => w.code)).not.toContain("unit-progress-missing"),
         { dropDag: true, runtime: LEFTOVER, info: "- **Unit Ownership**: team" },
+      );
+      withState(
+        "- [?] units-generation — SKIP",
+        (m) => {
+          expect(m.unitArtifactMode).toBe("stage-level");
+          expect(m.warnings.map((w) => w.code)).toContain("unit-progress-missing");
+        },
+        { runtime: LEFTOVER, info: "- **Unit Ownership**: team" },
       );
     });
 

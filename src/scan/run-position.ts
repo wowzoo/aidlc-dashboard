@@ -27,9 +27,13 @@
 // once with `unit: null` (2.11 aidlc-orchestrate.ts `emitPerUnitRunStage`), both
 // unit-major walks return null before reading a unit, and `unit start/pause/complete` is
 // refused (aidlc-state.ts) — so nothing writes `Unit Stage`/`Active Unit` there, and a
-// pair in the state is a leftover of an earlier plan: reported, never a position. A
-// current directive gives the stage but not a unit (the engine issues none with one), and
-// `Current Stage` cannot lag, because there is no later unit step for it to trail.
+// pair in the state is a leftover: reported, never a position. A current directive is
+// read whole, unit included: the stop hook takes `directive.unit ?? activeMarker.unit`
+// (aidlc-continue-workflow.ts), so a stage-level probe's null unit falls through to the
+// marker's, and a unit-named one is reachable here (the team report path has no
+// stage-level guard; a guard-recovery ask carries the refusal's unit). The hook never
+// reads the unit cache. `Current Stage` cannot lag, because there is no later unit step
+// for it to trail.
 //
 // THE DIGEST is a transcription of the engine's `stateDigest` /
 // `projectStateForDigest` (aidlc-lib.ts): drop empty lines, the `## Unit Progress`
@@ -404,7 +408,15 @@ export function resolvePosition(p: PositionInput): RunPosition {
     const leftover = p.activeUnit
       ? { leftoverUnit: { unit: p.activeUnit, ...(p.unitStage ? { stage: p.unitStage } : {}) } }
       : {};
-    if (marker) return { stage: marker.stage, basis: "directive", verified: true, ...leftover };
+    if (marker) {
+      return {
+        stage: marker.stage,
+        ...(marker.unit ? { unit: marker.unit } : {}),
+        basis: "directive",
+        verified: true,
+        ...leftover,
+      };
+    }
     const stage = p.currentStage && p.currentStage !== "none" ? p.currentStage : undefined;
     return { stage, basis: "current-stage", verified: true, markerMiss, ...leftover };
   }

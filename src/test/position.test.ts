@@ -795,12 +795,27 @@ describe("stage level (usesStageLevelPerUnitArtifacts)", () => {
     ).toBe(true);
   });
 
-  test("a current directive names the stage, never a unit", () => {
-    const marker = { marker: { kind: "run-stage", stage: "code-generation", unit: "unit-a" } };
-    expect(resolvePosition({ ...base, stageLevel: true, marker })).toEqual({
+  test("a current directive keeps its unit — the hook recovers it from the marker", () => {
+    // The stop hook takes `directive.unit ?? activeMarker.unit` (aidlc-continue-workflow.ts),
+    // so a stage-level probe's null unit falls through to the marker's. A unit-named
+    // marker is reachable here: the team report path has no stage-level guard and a
+    // guard-recovery ask carries the refusal's unit. Only the state's unit cache, which
+    // the hook never reads, is dropped.
+    const marker = { marker: { kind: "ask", stage: "code-generation", unit: "unit-a" } };
+    expect(
+      resolvePosition({
+        ...base,
+        unitStage: "functional-design",
+        activeUnit: "unit-b",
+        stageLevel: true,
+        marker,
+      }),
+    ).toEqual({
       stage: "code-generation",
+      unit: "unit-a",
       basis: "directive",
       verified: true,
+      leftoverUnit: { unit: "unit-b", stage: "functional-design" },
     });
   });
 
@@ -846,11 +861,12 @@ describe("stage level (usesStageLevelPerUnitArtifacts)", () => {
     expect(w("", true).unitCacheLeftover).toBeUndefined();
   });
 
-  test("a current marker's unit does not scope a decision at stage level", () => {
-    // The hook scopes a decision by its own `next` probe; at stage level that directive
-    // carries no unit, so the decision is the stage's (`openDecisionBlock` on a `[-]`
-    // row), never a unit's claim attempt.
-    const stateText = `## Project Information\n- **Unit Ownership**: team\n${STATE("")}`;
+  test("with no marker, a leftover unit cache does not scope a decision to a unit", () => {
+    // The hook scopes a decision by `directive.unit ?? marker.unit` and never by the
+    // state's unit cache. With neither naming a unit, a team run on a `[-]` row reads the
+    // stage's own decision (`openDecisionBlock`). Per unit, the dashboard's position
+    // took the cache's unit and read a team-scoped attempt the stage's row is not in.
+    const stateText = `## Project Information\n- **Unit Ownership**: team\n${STATE(PAUSED)}`;
     const row = (event: string, fields: Record<string, string>): AuditEvent => ({
       ts: event === "STAGE_STARTED" ? "2026-10-09T00:00:00Z" : "2026-10-09T01:00:00Z",
       event,
@@ -861,11 +877,20 @@ describe("stage level (usesStageLevelPerUnitArtifacts)", () => {
       row("STAGE_STARTED", {}),
       row("DECISION_RECORDED", { Checkpoint: "Anything to add?", Decision: "pending" }),
     ];
-    const run = (stageLevel: boolean) =>
-      buildWaits({
-        state: parseState(stateText),
-        position: pos,
-        marker: { marker: { kind: "ask", stage: "code-generation", unit: "unit-a" } },
+    const run = (stageLevel: boolean) => {
+      const state = parseState(stateText);
+      const position = resolvePosition({
+        currentStage: state.currentStage,
+        unitStage: state.runtime.unitStage,
+        activeUnit: state.runtime.activeUnit,
+        constructionIteration: state.constructionIteration ?? "",
+        marker: { miss: "absent" },
+        stageLevel,
+      });
+      return buildWaits({
+        state,
+        position,
+        marker: { miss: "absent" },
         events,
         questions: empty,
         checkoutParkFile: false,
@@ -875,13 +900,46 @@ describe("stage level (usesStageLevelPerUnitArtifacts)", () => {
         now: "2026-10-09T12:00:00Z",
         stageLevel,
       });
-    // Per unit, the marker's unit makes it a team-scoped read, which a stage's row is not.
+    };
     expect(run(false).decision).toBeUndefined();
     expect(run(true).decision).toMatchObject({
       stage: "code-generation",
       checkpoint: "Anything to add?",
-      scopeVerified: true,
     });
     expect(run(true).decision?.unit).toBeUndefined();
+  });
+
+  test("a current marker's unit still scopes a decision at stage level", () => {
+    const stateText = `## Project Information\n- **Unit Ownership**: team\n${STATE("")}`;
+    const events: AuditEvent[] = [
+      {
+        ts: "2026-10-09T00:00:00Z",
+        event: "STAGE_STARTED",
+        fields: { Stage: "code-generation" },
+        shard: "a",
+      },
+      {
+        ts: "2026-10-09T01:00:00Z",
+        event: "DECISION_RECORDED",
+        fields: { Stage: "code-generation", Checkpoint: "Anything to add?", Decision: "pending" },
+        shard: "a",
+      },
+    ];
+    const at = buildWaits({
+      state: parseState(stateText),
+      position: { stage: "code-generation", unit: "unit-a", basis: "directive", verified: true },
+      marker: { marker: { kind: "ask", stage: "code-generation", unit: "unit-a" } },
+      events,
+      questions: empty,
+      checkoutParkFile: false,
+      hookHeartbeats: { present: false, stamps: [] },
+      blockers: [],
+      marks: {},
+      now: "2026-10-09T12:00:00Z",
+      stageLevel: true,
+    });
+    // The hook reads unit-a's workflow attempt, where a row with no Unit is not — so the
+    // stage's decision is not what it waits on.
+    expect(at.decision).toBeUndefined();
   });
 });

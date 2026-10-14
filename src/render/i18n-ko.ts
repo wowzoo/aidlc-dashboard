@@ -177,7 +177,7 @@ const status: StatusStrings = {
   humanUnitCacheLeftover: (unit, stage, paused) =>
     `유닛 ${unit}${stage ? ` (${stage})` : ""}${paused ? " 일시정지" : ""} 기록은 남은 값입니다 — 이 계획에는 유닛이 없습니다`,
   humanUnitCacheLeftoverTip:
-    "이 계획은 Units Generation 을 건너뛰므로, 엔진은 유닛별 stage 를 stage 단위로 한 번 실행하고 유닛 시작·일시정지·완료를 거부합니다. state 의 Active Unit / Unit Stage 는 이전 계획에서 남은 값이고, 엔진은 이 값이 아니라 Current Stage 로 진행과 질문을 정합니다.",
+    "이 계획은 Units Generation 을 건너뛰므로, 엔진은 유닛별 stage 를 stage 단위로 한 번 실행하고 유닛 시작·일시정지·완료를 거부합니다. 이 방식에서는 state 의 Active Unit / Unit Stage 를 쓰는 단계가 없고, stop hook 도 이 값을 읽지 않습니다. 무엇을 기다리는지는 Current Stage 와 엔진의 현재 지시로 정해집니다.",
   humanEngineAsk: (askType, where) =>
     `엔진 질문 대기 — ${askType ? (KO_ASK[askType] ?? askType) : "질문"} · ${where}`,
   humanEngineAskSource: "active-directive.json",
@@ -262,9 +262,9 @@ const overview: OverviewStrings = {
       .join(" · ")}). 마지막으로 쓰인 표이며, 엔진은 다음 \`next\` 에서 다시 씁니다.`,
   unitProgressStaleDag:
     "유닛 목록(unit-of-work-dependency.md)을 읽을 수 없어 엔진이 이 표를 다시 만들지 못합니다 — 보이는 것은 마지막으로 쓰인 표이지 지금의 권위 있는 값이 아닙니다.",
-  sectionUnitProgressStageLevel: "유닛 진행 (state.md — 이 계획의 진행 기준 아님)",
+  sectionUnitProgressStageLevel: "유닛 진행 (state.md — 이 계획은 stage 단위로 실행)",
   unitProgressStageLevelNote:
-    "state.md 의 <code>## Unit Progress</code> 는 유닛별 계획에서 남은 표입니다. 이 계획은 Units Generation 을 건너뛰므로 엔진은 유닛별 stage 를 stage 단위로 한 번 실행하고, 이 표로 진행을 정하지 않습니다.",
+    "state.md 의 <code>## Unit Progress</code> 입니다. 이 계획은 Units Generation 을 건너뛰므로 엔진은 유닛별 stage 를 stage 단위로 한 번 실행하고, 그때는 이 표를 따라 유닛을 순회하지 않습니다. 유닛 claim 처럼 다른 곳에서는 여전히 이 표를 읽을 수 있습니다.",
   noUnits: "유닛 정보 없음 — units-generation 미진입.",
   noUnitsPill: "해당 없음",
   stageLevelUnits:

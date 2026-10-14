@@ -322,9 +322,9 @@ ${definite}${indefinite}${undetermined}`;
  * The state's own `## Unit Progress` table, when there is one. This is the AUTHORITY in
  * team/unit-major — an engine-owned projection of receipts, reviews and gates — so it is
  * shown before the disk matrix and labelled as such, rather than being reconstructed.
- * At stage level it is not: the engine routes that plan before any team unit router and
- * derives the table only from a Unit DAG the plan does not have, so the same rows are a
- * leftover and the note says so (`note`).
+ * At stage level it is not: the stage body router returns before any team unit router,
+ * so the engine does not walk units by it there — though the derivation does not refuse
+ * stage level and unit claims still read it, so the note claims no provenance (`note`).
  */
 function unitProgressTable(
   up: NonNullable<AidlcState["unitProgress"]>,

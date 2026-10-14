@@ -675,12 +675,14 @@ export function assemble(
       constructionIteration: state.constructionIteration,
     });
   }
-  // The engine derives the table only from a valid Unit DAG (`deriveTeamUnitProgressModel`),
-  // which a plan that skips Units Generation does not have — so its absence there is not
-  // a missing projection.
+  // The engine derives the table only from a valid non-empty Unit DAG
+  // (`deriveTeamUnitProgressModel` refuses any `resolveBoltDag` result but a non-empty `ok`).
+  // At stage level with no such roster its absence is not a missing projection; stage level
+  // alone does not prove there is none, because the derivation does not refuse stage level.
+  const derivable = unitDag.state === "ok" && unitDag.units.length > 0;
   if (state.unitProgress?.malformed) {
     warnings.push({ code: "unit-progress-malformed" });
-  } else if (teamMode && !state.unitProgress && artifactMode !== "stage-level") {
+  } else if (teamMode && !state.unitProgress && (artifactMode !== "stage-level" || derivable)) {
     warnings.push({ code: "unit-progress-missing" });
   }
 
