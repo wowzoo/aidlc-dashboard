@@ -68,7 +68,8 @@ export function renderRunLine(m: DashboardModel, s: Strings): string {
           x.runConflict(conflict.unit ? `${conflict.stage} · ${conflict.unit}` : conflict.stage),
         )}</span>`
       : ` <span class="rl-sub" title="${esc(x.runUnverifiedTip)}">· ${esc(x.runUnverified)}</span>`;
-  return `<div class="runline" title="${esc(x.runTip)}"><span class="rl-dot run"></span><b>${esc(
+  const tip = m.partialAudit ? x.runTipPartial(m.partialAudit.refused) : x.runTip;
+  return `<div class="runline" title="${esc(tip)}"><span class="rl-dot run"></span><b>${esc(
     x.running,
   )}</b><span class="rl-sub">${esc(x.runningSub(where, dur(st.run.lastEventAgeSec)))}</span>${unverified}</div>`;
 }

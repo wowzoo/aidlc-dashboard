@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import type { DashboardModel } from "../model/types";
-import { hours } from "../render/common";
+import { esc, hours } from "../render/common";
 import { strings } from "../render/i18n";
 import { KPI_CSS, renderKpis } from "../render/kpi";
 import { renderBody } from "../render/page";
@@ -70,12 +70,18 @@ describe("KPI strip", () => {
     expect(base.timing.parallel).toBe(true);
     expect(base.timing.overlapSec).toBe(0);
     expect(tile(renderKpis(base, ko), 2)).toContain(
-      ko.kpi.personTime(person, base.timing.clones, false),
+      ko.kpi.personTime(person, base.timing.clones, false, 0),
     );
     const overlapped = withTiming({ overlapSec: 3600 });
     expect(tile(renderKpis(overlapped, ko), 2)).toContain(
-      ko.kpi.personTime(person, base.timing.clones, true),
+      ko.kpi.personTime(person, base.timing.clones, true, 0),
     );
+    // With an audit path refused, "in turn" is a reading of the clones read.
+    const partial = { ...base, partialAudit: { refused: 1 } };
+    expect(tile(renderKpis(partial, en), 2)).toContain(
+      esc(en.kpi.personTime(person, base.timing.clones, false, 1)),
+    );
+    expect(en.kpi.personTime(person, 2, false, 1)).toContain("1 audit path refused");
     // One shard: the merged figure IS the person's, so nothing is added.
     const solo = withTiming({ parallel: false });
     expect(tile(renderKpis(solo, ko), 2)).not.toContain("사람 시간 합계");

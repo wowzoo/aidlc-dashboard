@@ -544,8 +544,13 @@ function body(m: DashboardModel, s: Strings): string {
   const x = s.timeline;
   const t = m.timing;
   const partial = m.partialAudit;
+  // Said once, first, rather than beside every figure: the window, the split, "no
+  // overlap" in the worker table and the rework counts all stand on the events read.
+  const partialNote = partial
+    ? `<p class="note warn">${esc(x.partialAuditNote(partial.refused))}</p>\n`
+    : "";
   if (t.stages.length === 0 || !t.firstTs) {
-    return `<p class="note">${esc(
+    return `${partialNote}<p class="note">${esc(
       partial ? x.noStageSpansPartial(partial.refused) : x.noStageSpans,
     )}</p>`;
   }
@@ -573,11 +578,6 @@ function body(m: DashboardModel, s: Strings): string {
   const mergedNote = t.parallel
     ? `<p class="note warn">${x.mergedNote(t.workers.length, t.clones)}</p>`
     : "";
-  // Said once rather than beside every figure: the window, the split, "no overlap" in
-  // the worker table and the rework counts all stand on the clones that were read.
-  const partialNote = partial
-    ? `<p class="note warn">${esc(x.partialAuditNote(partial.refused, t.clones))}</p>`
-    : "";
 
   // The window total is the DENOMINATOR of everything below it, not a sixth bucket, so
   // it stands alone. `분류 대상` is stated beside it because that — not the window — is
@@ -587,7 +587,7 @@ function body(m: DashboardModel, s: Strings): string {
   // within five lines. The number still has to be stated somewhere — an open run's
   // window grows on every poll while the ledger does not — but once is enough.
   const classified = runSpan - t.sinceLastEventSec;
-  const kpis = `<div class="time-head">
+  const kpis = `${partialNote}<div class="time-head">
   <span class="time-head-n" title="${esc(
     t.sinceLastEventSec > 0 ? x.windowTipOpen(hours(t.sinceLastEventSec)) : x.windowTipClosed,
   )}">${esc(hours(runSpan))}</span>
@@ -610,7 +610,6 @@ ${
     x.delegated(hours(t.total.delegatedSec)),
   )}</p>
 ${nowLine}
-${partialNote}
 ${mergedNote}
 <details${m.rework.rejected > 0 ? " open" : ""}><summary>${esc(
     x.reworkSummary(m.rework.rejected, hours(m.rework.reworkSec)),

@@ -126,7 +126,8 @@ export interface KpiStrings {
   readonly timeTip: string;
   /** Multi-shard runs only: person-time, which the merged figure is not. `concurrent`
    *  = the clones' windows actually overlapped. */
-  personTime(total: string, clones: number, concurrent: boolean): string;
+  /** `refused` > 0 while `DashboardModel.partialAudit` is set — a clone may be missing. */
+  personTime(total: string, clones: number, concurrent: boolean, refused: number): string;
   readonly progressChartTitle: string;
   readonly progressChartNote: string;
   progressChartAria(completed: number): string;
@@ -145,6 +146,7 @@ export interface KpiStrings {
   readonly legendChat: string;
   readonly legendSilence: string;
   readonly noEvents: string;
+  noEventsPartial(refused: number): string;
 }
 
 /** `model.warnings`, one member per `Warning` code — see model/types.ts. */
@@ -207,6 +209,8 @@ export interface StatusStrings {
   /** `age` is how long since the newest audit event, already formatted. */
   runningSub(stage: string, age: string): string;
   readonly runTip: string;
+  /** `runTip` while `DashboardModel.partialAudit` is set: the run may be writing to a refused shard. */
+  runTipPartial(refused: number): string;
   /** Appended to the stage when the position names the unit the run is on. */
   runningUnit(unit: string): string;
   /** The position fell back to a Current Stage that can lag (unit-major). */
@@ -493,7 +497,7 @@ export interface TimelineStrings {
   readonly noStageSpans: string;
   noStageSpansPartial(refused: number): string;
   /** Said once at the head of the panel while `DashboardModel.partialAudit` is set. */
-  partialAuditNote(refused: number, clones: number): string;
+  partialAuditNote(refused: number): string;
 
   // buckets
   readonly bucketWait: string;

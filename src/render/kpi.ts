@@ -185,11 +185,16 @@ function completions(t: TimingReport): number[] {
   return out.filter(Number.isFinite).sort((a, b) => a - b);
 }
 
+/** "No audit events", or "none read" while some audit paths were refused. */
+function noEvents(m: DashboardModel, k: Strings["kpi"]): string {
+  return m.partialAudit ? k.noEventsPartial(m.partialAudit.refused) : k.noEvents;
+}
+
 function progressChart(m: DashboardModel, s: Strings): string {
   const t = m.timing;
   const ax = axisOf(t);
   const k = s.kpi;
-  if (!ax) return chartBox(k.progressChartTitle, `<p class="note">${esc(k.noEvents)}</p>`);
+  if (!ax) return chartBox(k.progressChartTitle, `<p class="note">${esc(noEvents(m, k))}</p>`);
   const done = completions(t);
   const top = Math.max(done.length, 1);
   const yOf = (n: number) => PAD.top + PLOT_H - (n / top) * PLOT_H;
@@ -296,7 +301,7 @@ function timeChart(m: DashboardModel, s: Strings): string {
   const t = m.timing;
   const ax = axisOf(t);
   const k = s.kpi;
-  if (!ax) return chartBox(k.timeChartTitle, `<p class="note">${esc(k.noEvents)}</p>`);
+  if (!ax) return chartBox(k.timeChartTitle, `<p class="note">${esc(noEvents(m, k))}</p>`);
   const peak = Math.max(0, ...t.bins.map(workChat));
   const base = PAD.top + PLOT_H;
   const hOf = (sec: number) => (peak > 0 ? (sec / peak) * PLOT_H : 0);
@@ -359,13 +364,16 @@ function timeTile(m: DashboardModel, s: Strings): Tile {
         hours(t.personObservedSec + t.personConversationSec),
         t.clones,
         t.overlapSec > 0,
+        m.partialAudit?.refused ?? 0,
       ),
     );
   }
   return {
     label: k.timeLabel,
     value: none ? "—" : hours(t.total.observedSec + t.total.conversationSec),
-    sub: none ? k.noEvents : k.timeSub(hours(t.total.observedSec), hours(t.total.conversationSec)),
+    sub: none
+      ? noEvents(m, k)
+      : k.timeSub(hours(t.total.observedSec), hours(t.total.conversationSec)),
     note: notes.length > 0 ? notes.join(" · ") : undefined,
     tip: k.timeTip,
     missing: none,

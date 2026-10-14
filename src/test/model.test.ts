@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { UsageError, expandHome, parseArgs } from "../cli";
 import { projectSlug } from "../credit/claude/transcript-reader";
 import { NoRunError, assemble } from "../model/assemble";
-import { dur, hours } from "../render/common";
+import { dur, esc, hours } from "../render/common";
 import { renderHealth } from "../render/health";
 import { strings } from "../render/i18n";
 
@@ -486,7 +486,7 @@ describe("render", () => {
           expect(ko).not.toContain(KO.timeline.reworkNone);
           expect(en).toContain(EN.timeline.reworkNonePartial(1));
           expect(ko).toContain(KO.timeline.reworkNonePartial(1));
-          expect(en).toContain(EN.timeline.partialAuditNote(1, 1));
+          expect(en).toContain(EN.timeline.partialAuditNote(1));
           // "Nothing in flight" and "no spans" are claims about the ledger too.
           const settled = {
             ...m,
@@ -502,6 +502,18 @@ describe("render", () => {
           const spanless = { ...m, timing: { ...m.timing, stages: [] } };
           expect(renderBody(spanless, "en")).not.toContain(EN.timeline.noStageSpans);
           expect(renderBody(spanless, "en")).toContain(EN.timeline.noStageSpansPartial(1));
+          // The note stands first, so the early return keeps it too.
+          expect(renderBody(spanless, "en")).toContain(EN.timeline.partialAuditNote(1));
+          // The run line's age is the newest row READ; the run may be writing elsewhere.
+          expect(en).toContain(esc(EN.status.runTipPartial(1)));
+          expect(en).not.toContain(esc(EN.status.runTip));
+          // A readable shard with no rows says "none read", not "none".
+          const empty = {
+            ...spanless,
+            timing: { ...spanless.timing, bins: [], firstTs: undefined },
+          };
+          expect(renderBody(empty, "en")).toContain(EN.kpi.noEventsPartial(1));
+          expect(renderBody(empty, "en")).not.toContain(`>${EN.kpi.noEvents}<`);
         },
       );
     });
@@ -514,7 +526,7 @@ describe("render", () => {
           const en = renderBody(m, "en");
           expect(en).toContain(EN.timeline.reworkNone);
           expect(en).not.toContain(EN.timeline.reworkNonePartial(1));
-          expect(en).not.toContain(EN.timeline.partialAuditNote(1, 1));
+          expect(en).not.toContain(EN.timeline.partialAuditNote(1));
         },
       );
     });
@@ -531,7 +543,7 @@ describe("render", () => {
           const en = renderBody(m, "en");
           expect(en).toContain(EN.timeline.noStageSpans);
           expect(en).toContain(EN.status.checksNone);
-          expect(en).not.toContain(EN.timeline.partialAuditNote(2, 0));
+          expect(en).not.toContain(EN.timeline.partialAuditNote(2));
         },
       );
     });

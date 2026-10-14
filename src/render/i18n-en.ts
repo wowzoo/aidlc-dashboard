@@ -54,7 +54,7 @@ const warn: WarnStrings = {
 
   auditEmpty: "The audit ledger is empty — the hooks may never have fired",
   auditShardRefused: (paths) =>
-    `${plural(paths.length, "audit path")} not read, by the engine's rules — reached through a symlink, outside the workspace root, or not a regular file (a symlinked root itself is fine). Audit-derived figures cover only what was read: ${paths.join(", ")}`,
+    `${plural(paths.length, "audit path")} not read, by the engine's rules — reached through a symlink, outside the workspace root, or not a regular file (a symlinked root itself is fine). Audit-derived figures, history and absences cover only what was read: ${paths.join(", ")}`,
 
   stateVersionMismatch: (stateVersion, harnessVersion, harnessDir) =>
     `state.md declares State Version ${stateVersion}, but the harness supports ${harnessVersion} (${harnessDir}/tools/aidlc-lib.ts) — the engine refuses next, report and doctor on this combination. Contract judgements cannot be made against a different generation, so they were withheld`,
@@ -139,6 +139,8 @@ const status: StatusStrings = {
   runningSub: (stage, age) => `${stage} · last record ${age} ago`,
   runTip:
     "The last record is the newest event in the audit log. If it keeps growing, the run is not writing anything",
+  runTipPartial: (refused) =>
+    `The last record is the newest event in the audit shards read — ${plural(refused, "audit path")} refused, so a growing age does not show that the run stopped writing`,
   runningUnit: (unit) => `unit ${unit}`,
   runUnverified: "position unverified",
   runConflict: (where) => `engine directive says ${where}`,
@@ -475,8 +477,8 @@ const timeline: TimelineStrings = {
   noStageSpans: "The audit ledger holds no stage spans.",
   noStageSpansPartial: (refused) =>
     `The audit shards read hold no stage spans — ${plural(refused, "audit path")} refused.`,
-  partialAuditNote: (refused, clones) =>
-    `${plural(refused, "audit path")} refused, so this panel covers the ${plural(clones, "clone")} read: a clone recorded only in a refused path is missing from the times, the rework and the worker table, and an absence below is an absence in what was read.`,
+  partialAuditNote: (refused) =>
+    `${plural(refused, "audit path")} refused. The times, the rework and the worker table below use only the events read, and a missing event can change a duration, a classification or an inferred state — an absence here is not an absence across the run.`,
 
   bucketWait: "user wait",
   bucketWaitTip: "From a gate or question opening until a human answered",
@@ -947,10 +949,11 @@ const kpi: KpiStrings = {
   timeExcluded: (unknown) => `${unknown} unclassified, not included`,
   timeTip:
     "Observed work time plus conversation time. Human waits, parked time, unclassified gaps and the stretch after the last event are left out. This is not elapsed wall-clock time.",
-  personTime: (total, clones, concurrent) =>
-    concurrent
+  personTime: (total, clones, concurrent, refused) =>
+    (concurrent
       ? `${clones} clones worked at once — the figure is the team's; ${total} of person-time`
-      : `${clones} clones worked in turn — the figure is the team's; ${total} of person-time`,
+      : `${clones} clones worked in turn — the figure is the team's; ${total} of person-time`) +
+    (refused > 0 ? ` (in the audit shards read; ${plural(refused, "audit path")} refused)` : ""),
   progressChartTitle: "Stages first completed, cumulative",
   progressChartNote:
     "Counts each stage slug once, at its first STAGE_COMPLETED in the audit. Construction's per-unit repeats and later re-runs are not reflected, so a reopened stage stays counted. The progress figure above is state.md's checkbox count, so the two can differ.",
@@ -964,6 +967,7 @@ const kpi: KpiStrings = {
   legendChat: "chat",
   legendSilence: "since the last event",
   noEvents: "No audit events",
+  noEventsPartial: (refused) => `No audit events read — ${plural(refused, "audit path")} refused`,
 };
 
 export const EN: Strings = {

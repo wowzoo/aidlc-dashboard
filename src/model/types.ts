@@ -278,13 +278,18 @@ export interface DashboardModel {
    * sentence that claims something of the whole run — "every gate passed first time",
    * "no stage in flight", "N checks passed" — would rest on an absence the refusal
    * can explain, and is hedged instead. Absent when nothing was refused, and when
-   * nothing was read: an empty ledger makes no such claim, and its panels already say
-   * so beside the warning.
+   * nothing was read: that page reads as it did before this field — its panels say
+   * the ledger holds nothing, beside the warning naming every refused path.
    *
-   * Engine-parity verdicts are NOT hedged by it — the waits and the receipt matrix.
-   * The engine's lenient readers (2.11.0 `readAuditShardEvents` / `readAllAuditShards`,
-   * which the decision pairing and the unit lifecycle read) skip a refused shard the
-   * same way, so those already say what the engine itself concludes on this checkout.
+   * The waits and the receipt matrix are NOT hedged by it. They transcribe engine
+   * readers that read through the lenient 2.11.0 `readAuditShardEvents` /
+   * `readAllAuditShards` (the decision pairing, the unit gate, the unit lifecycle),
+   * which skip a refused shard the same way — so the refusal does not move them away
+   * from those readers. The strict `readActiveAuditShardEvents`, which refuses the
+   * whole history, backs `audit history` and `log answers`, not a wait.
+   *
+   * Only refusals: a shard that failed to read for another reason is skipped without a
+   * trace (scan/audit.ts), so this field being absent is not proof of a whole ledger.
    */
   partialAudit?: { refused: number };
   /** Freshness per source, keyed by source kind. */

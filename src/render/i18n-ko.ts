@@ -47,7 +47,7 @@ const warn: WarnStrings = {
 
   auditEmpty: "감사 기록 비어 있음 — hook 미발화 가능성",
   auditShardRefused: (paths) =>
-    `엔진 규칙대로 감사 기록 경로 ${paths.length}곳을 읽지 않았습니다 — symlink 를 거치거나, 워크스페이스 루트 밖이거나, 일반 파일이 아닙니다(루트 자체의 symlink 는 괜찮습니다). 감사에서 나온 수치는 읽은 기록만의 것입니다: ${paths.join(", ")}`,
+    `엔진 규칙대로 감사 기록 경로 ${paths.length}곳을 읽지 않았습니다 — symlink 를 거치거나, 워크스페이스 루트 밖이거나, 일반 파일이 아닙니다(루트 자체의 symlink 는 괜찮습니다). 감사에서 나온 수치·이력·'없음'은 읽은 기록만의 것입니다: ${paths.join(", ")}`,
 
   stateVersionMismatch: (stateVersion, harnessVersion, harnessDir) =>
     `state.md 은 State Version ${stateVersion}, harness 는 ${harnessVersion} 을 지원합니다 (${harnessDir}/tools/aidlc-lib.ts) — 엔진은 이 조합에서 next·report·doctor 를 모두 거부합니다. 다른 세대의 계약으로 판정할 수 없어 산출물 계약 판정을 내렸습니다`,
@@ -128,6 +128,8 @@ const status: StatusStrings = {
   runningSub: (stage, age) => `${stage} · 마지막 기록 ${age} 전`,
   runTip:
     "마지막 기록은 감사 로그의 가장 최근 이벤트입니다. 이 값이 계속 커지면 run 이 아무것도 쓰지 않고 있다는 뜻입니다",
+  runTipPartial: (refused) =>
+    `마지막 기록은 읽은 감사 기록의 가장 최근 이벤트입니다 — 감사 기록 경로 ${refused}곳을 읽지 않아, 이 값이 커져도 run 이 쓰기를 멈췄다고 볼 수 없습니다`,
   runningUnit: (unit) => `유닛 ${unit}`,
   runUnverified: "위치 미확인",
   runConflict: (where) => `엔진 지시는 ${where}`,
@@ -452,8 +454,8 @@ const timeline: TimelineStrings = {
   noStageSpans: "감사 기록에 stage 구간 없음.",
   noStageSpansPartial: (refused) =>
     `읽은 감사 기록에 stage 구간 없음 — 감사 기록 경로 ${refused}곳은 읽지 않았습니다.`,
-  partialAuditNote: (refused, clones) =>
-    `감사 기록 경로 ${refused}곳을 읽지 않아 이 패널은 읽은 clone ${clones}개만 다룹니다. 그쪽에만 기록된 clone 은 시간·재작업·작업자 표에서 빠지고, 아래의 '없음'은 읽은 기록 안에서의 없음입니다.`,
+  partialAuditNote: (refused) =>
+    `감사 기록 경로 ${refused}곳을 읽지 않았습니다. 아래의 시간·재작업·작업자 표는 읽은 이벤트만 쓰며, 빠진 이벤트는 시간·분류·추정 상태를 바꿀 수 있습니다 — 여기의 '없음'은 전체 실행에서의 없음이 아닙니다.`,
 
   bucketWait: "사용자 대기",
   bucketWaitTip: "관문·질문이 열린 뒤 사람이 답하기까지",
@@ -911,10 +913,11 @@ const kpi: KpiStrings = {
   timeExcluded: (unknown) => `미분류 ${unknown}은 포함하지 않음`,
   timeTip:
     "관측된 작업 시간과 대화 시간의 합입니다. 사람 대기·일시중지·미분류 구간과 마지막 기록 이후는 넣지 않았습니다. 벽시계 경과 시간이 아닙니다.",
-  personTime: (total, clones, concurrent) =>
-    concurrent
+  personTime: (total, clones, concurrent, refused) =>
+    (concurrent
       ? `clone ${clones}개가 동시에 작업 — 위 수치는 팀 기준, 사람 시간 합계 ${total}`
-      : `clone ${clones}개가 차례로 작업 — 위 수치는 팀 기준, 사람 시간 합계 ${total}`,
+      : `clone ${clones}개가 차례로 작업 — 위 수치는 팀 기준, 사람 시간 합계 ${total}`) +
+    (refused > 0 ? ` (읽은 감사 기록 기준, 읽지 않은 경로 ${refused}곳)` : ""),
   progressChartTitle: "처음 완료된 stage 누적",
   progressChartNote:
     "audit 의 STAGE_COMPLETED 를 stage slug 마다 처음 완료된 시각에 한 번만 셉니다. Construction 의 unit 별 반복과 이후 재실행은 반영하지 않으므로, 다시 열린 stage 도 완료로 남습니다. 위 진행률은 state.md 체크박스 기준이라 두 수가 다를 수 있습니다.",
@@ -927,6 +930,8 @@ const kpi: KpiStrings = {
   legendChat: "대화",
   legendSilence: "마지막 기록 이후",
   noEvents: "audit 기록이 없습니다",
+  noEventsPartial: (refused) =>
+    `읽은 audit 기록이 없습니다 — 감사 기록 경로 ${refused}곳은 읽지 않았습니다`,
 };
 
 export const KO: Strings = {
