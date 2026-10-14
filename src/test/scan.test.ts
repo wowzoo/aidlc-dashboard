@@ -716,6 +716,18 @@ describe("construction matrix", () => {
       expect(st(pair("UNIT_PAUSED", "UNIT_COMPLETED"))).toBe("unsettled");
       expect(st(pair("UNIT_COMPLETED", "UNIT_PAUSED"))).toBe("unsettled");
       expect(st(pair("UNIT_COMPLETED", "UNIT_COMPLETED"))).toBe("settled");
+      // Under team ownership the engine runs the same reduction after its claim-attempt
+      // filter (`eventMatchesClaimAttempt`), which reads checkout state this reader does
+      // not have — so a tie is never settled here, in either order.
+      for (const p of [
+        pair("UNIT_PAUSED", "UNIT_COMPLETED"),
+        pair("UNIT_COMPLETED", "UNIT_PAUSED"),
+      ]) {
+        expect(readUnitLifecycle(p, { teamOwnership: true }).state("api", S)).toEqual({
+          state: "unverifiable",
+          reason: "team-claim",
+        });
+      }
     });
 
     test("wave mode is judged on THIS attempt's rows only", () => {
@@ -3246,6 +3258,87 @@ describe("unit view", () => {
     expect(spans[0]?.segments.map((g) => [g.startedAt, g.startInferred ?? false])).toEqual([
       ["2026-01-01T00:00:00Z", true],
       ["2026-01-01T01:00:00Z", false],
+    ]);
+  });
+
+  // Two clones' rows in one second are causally unordered; the engine keeps each shard's
+  // last row and then the safest one (PAUSED > STARTED/RESUMED > COMPLETED/SKIPPED,
+  // `currentUnitLifecycleRows`). Both orderings are asserted — the merge puts shards in
+  // listing order, so a one-direction fixture passes by luck of the shard names.
+  test("cross-shard lifecycle rows in one second reduce by the engine's safety rank", () => {
+    const at = "2026-01-01T00:30:00Z";
+    const pair = (first: [string, string], second: [string, string]) =>
+      buildUnitSpans(
+        [
+          u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A", "cg", "a.md"),
+          u(at, first[0], "A", "cg", first[1]),
+          u(at, second[0], "A", "cg", second[1]),
+        ],
+        at,
+      )[0]!;
+    for (const span of [
+      pair(["UNIT_COMPLETED", "a.md"], ["UNIT_PAUSED", "b.md"]),
+      pair(["UNIT_PAUSED", "a.md"], ["UNIT_COMPLETED", "b.md"]),
+    ]) {
+      expect(span.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([["paused", 1800]]);
+      expect(span.endKind).toBe("paused");
+    }
+    // A possible resume keeps the unit open; only unanimous terminal rows close it.
+    for (const span of [
+      pair(["UNIT_COMPLETED", "a.md"], ["UNIT_RESUMED", "b.md"]),
+      pair(["UNIT_RESUMED", "a.md"], ["UNIT_COMPLETED", "b.md"]),
+    ]) {
+      expect(span.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([["in-flight", 1800]]);
+    }
+    const both = pair(["UNIT_COMPLETED", "a.md"], ["UNIT_COMPLETED", "b.md"]);
+    expect(both.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([["completed", 1800]]);
+    // A start that loses to another clone's pause leaves nothing open; the engine reads the
+    // unit as paused, so it stays on screen as a tick rather than vanishing.
+    const lost = buildUnitSpans(
+      [u(at, "UNIT_STARTED", "A", "cg", "a.md"), u(at, "UNIT_PAUSED", "A", "cg", "b.md")],
+      at,
+    );
+    expect(lost.map((x) => x.segments.map((g) => [g.endKind, g.elapsedSec]))).toEqual([
+      [["paused", 0]],
+    ]);
+  });
+
+  // One shard's rows are in append order, which IS causal — the reduction is for ties the
+  // merge cannot order, so a receipt written in the second its work closed stays a segment.
+  test("one shard's rows in one second keep their order", () => {
+    const at = "2026-01-01T00:30:00Z";
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A", "cg", "a.md"),
+        u(at, "UNIT_PAUSED", "A", "cg", "a.md"),
+        u(at, "UNIT_RESUMED", "A", "cg", "a.md"),
+        u("2026-01-01T00:40:00Z", "UNIT_COMPLETED", "A", "cg", "a.md"),
+      ],
+      "2026-01-01T00:40:00Z",
+    );
+    expect(spans[0]?.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([
+      ["paused", 1800],
+      ["completed", 600],
+    ]);
+  });
+
+  // The engine reduces only the current attempt's rows (it filters to the unit's `Run
+  // floor` first), so a row of another attempt is never one of the candidates.
+  test("rows of different attempts in one second are not one tie", () => {
+    const at = "2026-01-01T00:30:00Z";
+    const reopened = `GATE_REJECTED:${at}#1`;
+    const spans = buildUnitSpans(
+      [
+        u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A", "cg", "a.md"),
+        u(at, "UNIT_PAUSED", "A", "cg", "a.md"),
+        u(at, "UNIT_STARTED", "A", "cg", "b.md", reopened),
+        u("2026-01-01T00:40:00Z", "UNIT_COMPLETED", "A", "cg", "b.md", reopened),
+      ],
+      "2026-01-01T00:40:00Z",
+    );
+    expect(spans[0]?.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([
+      ["paused", 1800],
+      ["completed", 600],
     ]);
   });
 

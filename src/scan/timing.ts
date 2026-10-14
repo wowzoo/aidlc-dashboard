@@ -367,7 +367,10 @@ export interface StageSpan extends GapSplit {
  * open at the end ends at the last event, as a stage does. A second `UNIT_STARTED` for an
  * open pair is a new attempt only when its `Run floor` differs — within one attempt the
  * engine acknowledges a repeated start without writing a receipt (`unit start`,
- * aidlc-state.ts) — and then the earlier segment is superseded.
+ * aidlc-state.ts) — and then the earlier segment is superseded. Two clones' rows for one
+ * pair in one second are causally unordered, so they are reduced as the engine reduces
+ * them (`crossShardTieLosers`): a possible pause wins, and a pause left with nothing open
+ * is a tick, because the engine reads that unit as paused.
  *
  * A RECEIPT CAN BE MINTED AFTER THE WORK. The protocol brackets a unit with `unit start`
  * before its body (stage-protocol-construction.md, "Unit lifecycle receipts"), but when a
@@ -914,6 +917,59 @@ function floorTs(floor: string | undefined): string | undefined {
   return floor ? /:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)#/.exec(floor)?.[1] : undefined;
 }
 
+const UNIT_LIFECYCLE = new Set([
+  "UNIT_STARTED",
+  "UNIT_PAUSED",
+  "UNIT_RESUMED",
+  "UNIT_COMPLETED",
+  "UNIT_SKIPPED",
+]);
+
+/**
+ * The lifecycle rows of the shards that lose the engine's same-second reduction
+ * (`currentUnitLifecycleRows`, aidlc-lib.ts): within one second, per unit, it keeps each
+ * shard's last row and then the highest-ranked of those — PAUSED over STARTED/RESUMED over
+ * COMPLETED/SKIPPED, ties to the later shard — because rows from different clones in one
+ * second are causally unordered and "a possible pause blocks all progress". Only groups
+ * spanning more than one shard are reduced here, and the winning shard keeps its earlier
+ * rows in that second: one shard's rows are in append order, which is causal, and the view
+ * reads them literally (a start receipt written in the second its work closed is still a
+ * segment); the state they leave is the winner's either way. The key carries the `Run
+ * floor` because the engine reduces only the current attempt's rows. `events` is in the
+ * ledger's order — time, then shard index, then position — so iteration order breaks the
+ * rank ties. The engine runs this in every ownership mode; team ownership only filters the
+ * rows by claim attempt first, which a timing view has no use for.
+ */
+function crossShardTieLosers(events: readonly AuditEvent[]): Set<AuditEvent> {
+  const groups = new Map<string, AuditEvent[]>();
+  for (const e of events) {
+    const stage = e.fields.Stage;
+    const unit = e.fields.Unit;
+    if (!UNIT_LIFECYCLE.has(e.event) || !stage || !unit) continue;
+    const key = `${e.ts}\0${stage}\0${unit}\0${e.fields["Run floor"] ?? ""}`;
+    const list = groups.get(key) ?? [];
+    list.push(e);
+    groups.set(key, list);
+  }
+  const rank = (event: string): number =>
+    event === "UNIT_PAUSED" ? 2 : event === "UNIT_COMPLETED" || event === "UNIT_SKIPPED" ? 0 : 1;
+  const losers = new Set<AuditEvent>();
+  for (const list of groups.values()) {
+    const lastByShard = new Map<string, AuditEvent>();
+    for (const e of list) lastByShard.set(e.shard, e);
+    if (lastByShard.size < 2) continue;
+    // Highest rank wins; among equals the later one, as the engine's ascending sort + last.
+    let winner: AuditEvent | undefined;
+    for (const e of lastByShard.values()) {
+      if (!winner || rank(e.event) >= rank(winner.event)) winner = e;
+    }
+    // The winner's own earlier rows stay: within its shard they are causal, and the view
+    // reads them as the engine never needs to (a start and its pause in one second).
+    for (const e of list) if (e.shard !== winner?.shard) losers.add(e);
+  }
+  return losers;
+}
+
 export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): UnitSpan[] {
   interface Open {
     startedAt: string;
@@ -946,7 +1002,9 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
     open.delete(key);
   };
 
+  const tied = crossShardTieLosers(events);
   for (const e of events) {
+    if (tied.has(e)) continue;
     if (!e.event.startsWith("UNIT_")) {
       if (e.event !== "ARTIFACT_CREATED" && e.event !== "ARTIFACT_UPDATED") continue;
       const stage = e.fields.Stage || e.stage;
@@ -988,7 +1046,12 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
     } else if (e.event === "UNIT_RESUMED") {
       if (!current) open.set(key, { startedAt: e.ts, shard: e.shard, floor });
     } else if (e.event === "UNIT_PAUSED") {
-      close(key, e.ts, "paused");
+      if (current) close(key, e.ts, "paused");
+      else if (raw.get(key)!.at(-1)?.endKind !== "paused") {
+        // Nothing open — its start was another clone's row in this second and lost the tie,
+        // or never written. The engine reads the unit as paused, so it stays visible: a tick.
+        raw.get(key)!.push({ startedAt: e.ts, endedAt: e.ts, endKind: "paused", shard: e.shard });
+      }
     } else if (e.event === "UNIT_COMPLETED") {
       if (current) close(key, e.ts, "completed");
       else {

@@ -578,7 +578,9 @@ const timeline: TimelineStrings = {
   colUnitTrack: "occupancy (units' window)",
   unitNote: `Read from the unit lifecycle rows: a segment opens at <code>UNIT_STARTED</code> or
   <code>UNIT_RESUMED</code> and closes at <code>UNIT_PAUSED</code> (dotted) or <code>UNIT_COMPLETED</code>;
-  <code>UNIT_SKIPPED</code> closes an open segment and is otherwise a tick. The view runs THROUGH completion — the unit
+  <code>UNIT_SKIPPED</code> closes an open segment and is otherwise a tick. Two clones' rows for one unit in the same
+  second cannot be ordered, so they are reduced as the engine reduces them: a possible pause wins, then a start or
+  resume, and a pause with nothing open is a tick. The view runs THROUGH completion — the unit
   checkpoint work after it (verification, the unit-end gate) is not in it. A start receipt can be written after the
   work, and a wave or recovery completion has none, so a segment may start at the unit's first record write in the
   stage instead, within the same attempt and clone (<b>~</b> on the row, details in the bar's tooltip): that is the
