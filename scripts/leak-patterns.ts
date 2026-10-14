@@ -230,13 +230,14 @@ export interface CustomerSource {
  *
  * ONLY FULL DIRECTORY NAMES MATCH. The first version also added each name's stem
  * before the first `-`/`_`, so that a document writing `acme` would be caught
- * alongside `acme_thinkbig`. That turned a real account dir named `table-order`
- * into the pattern `table`, which hit **57 lines** of ordinary HTML and CSS on the
- * first run — the exact "audit that cries wolf gets silenced" failure the note on
- * `/Users/me/` above warns about, walked into within the hour. The stem was also
- * unnecessary: every account whose stem mattered (`acme`, `acme`) already has a
- * bare directory of its own, so the full-name match covers it. Only a trailing
- * version segment is stripped.
+ * alongside an `acme_labs` dir. That turned a real account dir whose first segment is
+ * an ordinary English word into that word as a pattern, which hit **57 lines** of
+ * ordinary HTML and CSS on the first run — the exact "audit that cries wolf gets
+ * silenced" failure the note on `/Users/me/` above warns about, walked into within the
+ * hour. The stem was also unnecessary: every account whose stem mattered already has
+ * a bare directory of its own, so the full-name match covers it. Only a trailing
+ * version segment is stripped. Never cite a real account name here as an example —
+ * this file is exempt from the static patterns, but not from the customer ones.
  */
 export function customerNames(): CustomerSource {
   const names = new Set<string>();

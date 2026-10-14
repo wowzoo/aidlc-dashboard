@@ -41,6 +41,11 @@ const ROOT = path.join(import.meta.dir, "..");
 /**
  * The pattern list exempts itself — see the warning at the top of leak-patterns.ts.
  * Also exempt: this file, which names the exemption and would match on the mention.
+ *
+ * Exempt from the STATIC patterns only. Customer names are never written in either
+ * file — they are read at runtime — so nothing here can match a customer pattern by
+ * describing it, and both files are checked against those. The full exemption had let
+ * real account names sit in two comments, as examples, for six weeks without a hit.
  */
 const EXEMPT = new Set(["scripts/leak-patterns.ts", "scripts/audit-repo.ts"]);
 
@@ -122,7 +127,7 @@ function scanText(
 
 const customers = customerNames();
 const customerPatterns = customers.names.map((n) => ({
-  // Word-ish boundary: `acme` must match `acme` and `acme-mo-next` but not a
+  // Word-ish boundary: an `acme` dir must match `Acme` and `acme-web-next` but not a
   // longer unrelated word. Korean text has no \b, hence the explicit class.
   pattern: new RegExp(
     `(^|[^a-z0-9가-힣])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`,
@@ -146,10 +151,25 @@ const unread: string[] = [];
 
 for (const file of files) {
   if (EXEMPT.has(file)) {
-    // Counted, not dropped. An exempt file is as unchecked as a skipped one, and
-    // folding it into the denominator alone is what made `121/123` unreadable: the
-    // gap could equally have meant two files fell out of coverage.
+    // Counted, not dropped. An exempt file is as unchecked as a skipped one by the
+    // static patterns, and folding it into the denominator alone is what made
+    // `121/123` unreadable: the gap could equally have meant two files fell out of
+    // coverage. The customer patterns still run (see EXEMPT).
     exempt.push(file);
+    let exemptBody = "";
+    try {
+      exemptBody = fs.readFileSync(path.join(ROOT, file), "utf-8");
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      hits.push({
+        file,
+        line: 1,
+        why: "면제 파일을 읽지 못했다 — 고객사 이름 검사가 이 파일을 보지 못한다",
+        redacted: "읽기 실패",
+        excerpt: why.slice(0, 110),
+      });
+    }
+    scanText(file, exemptBody, customerPatterns, hits);
     continue;
   }
   const abs = path.join(ROOT, file);
@@ -236,7 +256,6 @@ if (wantHistory) {
     const sha = row.slice(0, sp);
     const name = row.slice(sp + 1);
     if (types.get(sha) !== "blob") continue;
-    if (EXEMPT.has(name)) continue;
     const body = spawnSync("git", ["cat-file", "-p", sha], {
       cwd: ROOT,
       encoding: "utf-8",
@@ -244,7 +263,7 @@ if (wantHistory) {
     }).stdout;
     if (!body || body.includes("\u0000")) continue;
     const found: Hit[] = [];
-    scanText(`${name}@${sha.slice(0, 8)}`, body, ALL, found);
+    scanText(`${name}@${sha.slice(0, 8)}`, body, EXEMPT.has(name) ? customerPatterns : ALL, found);
     if (found.length > 0) {
       historyHits += found.length;
       hits.push(...found);
@@ -306,7 +325,9 @@ console.log(
 // Exempt and skipped files are both UNCHECKED, so both are named rather than folded
 // into a count — and the exempt ones say who has to read them, since no check does.
 if (exempt.length > 0) {
-  console.log(`  면제: ${[...exempt].sort().join(", ")} — 검사가 읽지 않으므로 사람이 봐야 한다`);
+  console.log(
+    `  면제: ${[...exempt].sort().join(", ")} — 고객사 이름만 검사했다. 나머지 패턴은 사람이 봐야 한다`,
+  );
 }
 for (const s of skipped) console.log(`  건너뜀: ${s}`);
 if (!wantHistory) console.log("  이력은 검사하지 않았다 — 필요하면 `bun run audit -- --history`");
