@@ -18,7 +18,7 @@ import { renderHealth } from "../render/health";
 import { strings } from "../render/i18n";
 
 const KO = strings("ko");
-import { renderUnitCard } from "../render/cards";
+import { renderUnitCard, renderUnresolvedCard } from "../render/cards";
 import { renderBody, renderPage } from "../render/page";
 import { renderPicker } from "../render/picker";
 import { listStageArtifacts } from "../scan/artifacts";
@@ -788,6 +788,45 @@ describe("render", () => {
       );
     });
 
+    test("the Unresolved card does not say 'none' for a ledger it could not wholly read", () => {
+      withTree(
+        (record) => {
+          allNone(record);
+          toDir(record, AOQ);
+        },
+        (m) => {
+          const card = renderUnresolvedCard(noDiary(m), EN);
+          expect(card).not.toContain(EN.cards.noDecisions);
+          expect(card).toContain(EN.cards.notAllRead);
+          expect(card).toContain(">0+<");
+        },
+      );
+    });
+
+    test("the only A&OQ artifact unreadable does not say no artifact carries one", () => {
+      withTree(
+        (record) => {
+          // AOQ is the one artifact left with the section; the rest carry none.
+          for (const rel of [
+            "construction/PU-A-core/functional-design/business-rules.md",
+            "construction/PU-B-ui/functional-design/frontend-components.md",
+            "ideation/intent-capture/intent-capture-questions.md",
+            "inception/requirements-analysis/requirements.md",
+            "inception/contract-design/contract-summary.md",
+          ]) {
+            fs.writeFileSync(path.join(record, rel), "# notes\n");
+          }
+          toDir(record, AOQ);
+        },
+        (m) => {
+          expect(m.deferrals.sections).toBe(0);
+          const body = renderBody(m, "en");
+          expect(body).toContain(EN.deferrals.noSections(m.deferrals.artifacts, 1));
+          expect(body).not.toContain(EN.deferrals.noSections(m.deferrals.artifacts, 0));
+        },
+      );
+    });
+
     test("the same artifact deleted keeps the pill and warns nothing (negative control)", () => {
       withTree(
         (record) => {
@@ -832,6 +871,12 @@ describe("render", () => {
           const body = renderBody(m, "en");
           expect(body).toContain(EN.status.humanUnreadable(1));
           expect(body).toContain(EN.warn.recordFileUnreadable([QFILE], true));
+          // Not a floor: an unread file can also un-explain a marker's ask, so the
+          // count is marked incomplete rather than "N+".
+          expect(body).toMatch(/class="mc-n warn">\d+\?</);
+          // A finished run lists its loose ends, and this is one of them.
+          const done = { ...m, state: { ...m.state, complete: true } };
+          expect(renderBody(done, "en")).toContain(EN.status.humanUnreadable(1));
         },
       );
     });

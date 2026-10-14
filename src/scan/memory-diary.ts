@@ -20,9 +20,8 @@
 //
 // Node fs only, never throws.
 
-import * as fs from "node:fs";
 import * as path from "node:path";
-import { listRecordDir, readRecordText } from "./record-read";
+import { entryKind, listRecordDir, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /** The four canonical diary axes, in document order. */
@@ -193,14 +192,6 @@ function normalizeRecords(stages: StageDiary[]): DiaryRecord[] {
   });
 }
 
-function isDir(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 /** Read one memory.md into a StageDiary; absent is undefined, a failure is named. */
 function readOne(
   recordDir: string,
@@ -238,25 +229,33 @@ function readOne(
 export function readDiaries(recordDir: string): DiaryReport {
   const stages: StageDiary[] = [];
   const unreadable: string[] = [];
-  // A dir that exists and cannot be listed hides every diary below it.
+  // A dir that exists and cannot be listed hides every diary below it. Dot-names are
+  // skipped, as the questions walk skips them.
   const names = (relParts: string[]): string[] => {
     const listed = listRecordDir(path.join(recordDir, ...relParts));
-    if (listed.kind === "listed") return listed.entries.map((e) => e.name);
+    if (listed.kind === "listed") {
+      return listed.entries.map((e) => e.name).filter((n) => !n.startsWith("."));
+    }
     if (listed.kind === "unreadable") unreadable.push(relParts.join("/"));
     return [];
   };
+  // A stat that fails on something present — a dangling link, a parent that can be
+  // listed but not searched — is named rather than read as "not a dir".
+  const dirAt = (relParts: string[]): boolean => {
+    const kind = entryKind(path.join(recordDir, ...relParts));
+    if (kind === "unreadable") unreadable.push(relParts.join("/"));
+    return kind === "dir";
+  };
 
   for (const phase of PHASE_DIRS) {
-    const phaseAbs = path.join(recordDir, phase);
-    if (!isDir(phaseAbs)) continue;
+    if (!dirAt([phase])) continue;
     for (const child of names([phase])) {
-      const childAbs = path.join(phaseAbs, child);
-      if (!isDir(childAbs)) continue;
+      if (!dirAt([phase, child])) continue;
 
       // Same unit-vs-stage disambiguation as questions.ts: a unit dir contains
       // stage dirs, a stage dir contains files. A child that cannot be listed still
       // gets its own memory.md tried below, which names it if that fails too.
-      const stageSubdirs = names([phase, child]).filter((g) => isDir(path.join(childAbs, g)));
+      const stageSubdirs = names([phase, child]).filter((g) => dirAt([phase, child, g]));
 
       for (const stage of stageSubdirs) {
         const d = readOne(recordDir, [phase, child, stage], phase, stage, child, unreadable);

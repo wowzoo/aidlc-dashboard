@@ -13,7 +13,9 @@
 // So only ENOENT on a path where nothing exists is absence. ENOENT through a link that
 // is there is a dangling link — something was put at that path and cannot be read —
 // and every other error is a failure. Callers collect what fails and `assemble` names
-// it (`record-file-unreadable`).
+// it (`record-file-unreadable`). This classifies an error; it is not a snapshot — the
+// read and the `lstat` are two calls — and "unreadable" does not prove the file exists
+// (a parent that cannot be searched hides that too), only that it is not known absent.
 //
 // The engine's stop hook skips the same failures (`aidlc-continue-workflow.ts`, a
 // failed read is "not pending"), and the readers that transcribe a hook decision keep
@@ -51,6 +53,21 @@ export function readRecordText(abs: string): TextRead {
     return { kind: "text", text: fs.readFileSync(abs, "utf-8") };
   } catch (e) {
     return code(e) === "ENOENT" && nothingAt(abs) ? { kind: "absent" } : { kind: "unreadable" };
+  }
+}
+
+export type EntryKind = "dir" | "other" | "absent" | "unreadable";
+
+/**
+ * What a listed entry is, following links. A boolean "is it a dir" answered false for
+ * a stat that FAILED — a dangling link, a loop, or a parent that can be listed but not
+ * searched — so a stage dir that could not be checked dropped out like a file.
+ */
+export function entryKind(abs: string): EntryKind {
+  try {
+    return fs.statSync(abs).isDirectory() ? "dir" : "other";
+  } catch (e) {
+    return code(e) === "ENOENT" && nothingAt(abs) ? "absent" : "unreadable";
   }
 }
 

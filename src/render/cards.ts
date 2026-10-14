@@ -274,38 +274,48 @@ export function renderUnresolvedCard(m: DashboardModel, s: Strings): string {
   const questions = openQuestionRows(m);
   const declared = declaredRows(m, s);
   const head: [string, string] = [s.cards.colItemOwner, s.cards.colAge];
+  // This card is on the default screen and the full panel is a closed drill-down, so a
+  // tab whose ledger was not wholly read cannot print a plain count or "none" here: the
+  // count is a floor and the empty text says what it is of (the panel names the gaps).
+  const gaps = {
+    decisions: m.deferrals.unreadable.length > 0 || m.deferrals.unreadSections.length > 0,
+    questions: m.diaries.unreadable.length > 0,
+    declared: m.deferrals.declared.ledgers.some((l) => l.status !== "none" && l.status !== "read"),
+  };
+  const count = (n: number, gap: boolean) => ({ text: gap ? `${n}+` : String(n) });
+  const empty = (text: string, gap: boolean) => (gap ? s.cards.notAllRead : text);
   return tabbedCard({
     id: "unresolved",
     title: s.cards.unresolvedTitle,
     tabs: [
       {
         label: s.cards.decisionsTab,
-        count: { text: String(decisions.length) },
+        count: count(decisions.length, gaps.decisions),
         body: rowList(decisions, {
           head,
           max: CARD_ROWS,
           moreText: s.cards.moreRows,
-          empty: s.cards.noDecisions,
+          empty: empty(s.cards.noDecisions, gaps.decisions),
         }),
       },
       {
         label: s.cards.openQsTab,
-        count: { text: String(questions.length) },
+        count: count(questions.length, gaps.questions),
         body: rowList(questions, {
           head: [s.cards.colStage, s.cards.colAge],
           max: CARD_ROWS,
           moreText: s.cards.moreRows,
-          empty: s.cards.noOpenQs,
+          empty: empty(s.cards.noOpenQs, gaps.questions),
         }),
       },
       {
         label: s.cards.declaredTab,
-        count: { text: String(declared.length) },
+        count: count(declared.length, gaps.declared),
         body: rowList(declared, {
           head: [s.cards.colItemOwner, s.cards.colAge],
           max: CARD_ROWS,
           moreText: s.cards.moreRows,
-          empty: s.cards.noDeclared,
+          empty: empty(s.cards.noDeclared, gaps.declared),
         }),
       },
     ],

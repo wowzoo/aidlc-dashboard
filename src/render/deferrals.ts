@@ -426,7 +426,7 @@ function body(m: DashboardModel, s: Strings): string {
   // branch below — an empty artifact section says nothing about either.
   const tail = `${gapNotes(d, m.diaries.unreadable, s, false)}${declaredBlock(m, s)}${diaryOpenBlock(m, s)}`;
   if (d.sections === 0) {
-    return `<p class="note">${t.noSections(d.artifacts)}</p>${tail}`;
+    return `<p class="note">${t.noSections(d.artifacts, d.unreadable.length)}</p>${tail}`;
   }
   if (d.items.length === 0 && d.assumptions.length === 0) {
     // `emptySections` counts only an explicit `None.`, per section; a section that
@@ -453,6 +453,7 @@ function body(m: DashboardModel, s: Strings): string {
       !m.diaries.records.some((r) => r.axis === "openQuestions" && r.questionStatus !== "resolved");
     return `<p class="note">${clear ? pill(t.noOpenPill, "ok", t.noOpenPillTip) : ""}${t.allNone(
       d.sections,
+      d.unreadable.length > 0,
     )}</p>${tail}`;
   }
 

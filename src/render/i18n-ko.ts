@@ -88,7 +88,7 @@ const warn: WarnStrings = {
     `닫히지 않은 코드 블록·주석이 있는 질문 파일 ${files.length}개 — 숨기지 않고 본문으로 읽었습니다(블로커를 감추지 않으려고). 엔진은 다르게 읽을 수 있으니 파일을 확인하세요: ${files.join(", ")}`,
 
   recordFileUnreadable: (files, questions) =>
-    `있지만 읽을 수 없는 기록 파일·폴더 ${files.length}곳 — 권한이 없거나, 파일 자리에 폴더가 있거나, 끊긴 링크이거나, 따라가지 않는 폴더 링크입니다. 없는 것으로 치지 않습니다${questions ? ": 질문 파일이 포함돼 있어 블로커 수는 최소값입니다" : ""}. ${files.join(", ")}`,
+    `기록 경로 ${files.length}곳을 읽거나 확인하지 못했습니다(예: 권한 없음, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크) — 없는 것으로 치지 않습니다${questions ? ". 질문 파일을 찾는 범위가 포함돼 있어 블로커 목록이 불완전할 수 있습니다" : ""}: ${files.join(", ")}`,
 
   tokenUsageFailed: (detail) => `토큰 사용량 조립 실패 — 사용량 패널만 하락: ${detail}`,
 
@@ -166,9 +166,9 @@ const status: StatusStrings = {
   humanEngineAskSource: "active-directive.json",
   humanEngineAskTip:
     "엔진이 마지막으로 내준 지시가 사람에게 묻는 질문입니다. 지금 state 와 digest 가 맞는 지시만 읽으며, 대부분 질문 파일 없이 대화로만 묻습니다",
-  humanUnreadable: (n) => `읽지 못한 질문 파일·폴더 ${n}곳 — 그 안의 블로커는 세지 않았습니다`,
+  humanUnreadable: (n) => `읽지 못한 질문 경로 ${n}곳 — 그 안의 질문은 세지 않았습니다`,
   humanUnreadableTip:
-    "있지만 읽을 수 없습니다(권한, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크). 그 안에 빈 답이 있을 수 있으니 위 수는 최소값입니다. 경로는 페이지 위 경고에 있습니다",
+    "읽거나 확인하지 못했습니다(예: 권한 없음, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크). 그 안의 빈 답은 빠지고, 그 파일이 설명했을 엔진 질문은 따로 셀 수 있어서 위 수는 어느 쪽으로든 불완전합니다. 경로는 페이지 위 경고에 있습니다",
   humanTeamGateUnread: "팀 유닛 게이트 — 판독하지 않음",
   humanTeamGateUnreadTip:
     "팀 소유에서는 유닛 게이트를 state 행이 아니라 감사 로그의 유닛·게이트 범위·claim 시도로 판정합니다. claim 상태는 이 대시보드가 볼 수 없어, 승인 대기 여부를 판정하지 않았습니다 — '대기 없음'이라는 뜻이 아닙니다",
@@ -477,9 +477,9 @@ const deferrals: DeferralStrings = {
   declaredUnreadable: (files) =>
     `${files}는 있지만 파일로 읽을 수 없습니다 — <b>그 안의 미결 질문은 읽지 못했습니다</b>.`,
   aoqUnreadable: (files) =>
-    `${files}는 있지만 읽을 수 없습니다 — <b>그 안의 <code>## Assumptions &amp; Open Questions</code> 절은 위 숫자에 들어 있지 않습니다</b>.`,
+    `${files}를 읽거나 확인하지 못했습니다 — <b>그 안에 <code>## Assumptions &amp; Open Questions</code> 절이 있다면 위 숫자에 들어 있지 않습니다</b>.`,
   diaryUnreadable: (files) =>
-    `stage 일지 ${files}는 있지만 읽을 수 없습니다 — <b>그 안의 미결 질문은 읽지 못했습니다</b>.`,
+    `stage 일지 경로 ${files}를 읽거나 확인하지 못했습니다 — <b>그 안의 미결 질문은 읽지 못했습니다</b>.`,
   unreadAlongside: (unread, files) =>
     `<b><code>## Assumptions &amp; Open Questions</code> 절 ${unread}곳은 이 리더가 아는 모양이 아닙니다</b>
     (${files}) — 그 안의 미결은 위 숫자에 들어 있지 않습니다.`,
@@ -492,8 +492,11 @@ const deferrals: DeferralStrings = {
     "미결 소절에 적혀 있으나 문장에 후속 신호는 없는 항목 — 소절 자체가 미결 선언이라 그대로 셉니다",
   ledgersNote: `이 대장들은 <b>서로 다른 읽기</b>입니다 — 배정 칸이 있는 것은 첫 줄뿐이고,
 나머지는 물어볼 자리가 정해져 있지 않습니다. <b>합산하지 않습니다.</b>`,
-  noSections: (artifacts) =>
-    `산출물에 <code>## Assumptions &amp; Open Questions</code> 절이 없습니다 — 이 실행은
+  noSections: (artifacts, unreadable) =>
+    unreadable > 0
+      ? `읽은 산출물에는 <code>## Assumptions &amp; Open Questions</code> 절이 없습니다 —
+    <b>읽지 못한 경로 ${unreadable}곳</b>에 그 절이 있다면 세지 않았습니다. (읽은 산출물 ${artifacts}개)`
+      : `산출물에 <code>## Assumptions &amp; Open Questions</code> 절이 없습니다 — 이 실행은
     미결 대장을 남기지 않았거나 아직 산출물을 쓰지 않았습니다. (읽은 산출물 ${artifacts}개)`,
   unreadSections: (sections, unread, emptySections) =>
     `<code>## Assumptions &amp; Open Questions</code> 절이 ${sections}곳 있고, 그중 <b>${unread}곳은 이 리더가 아는 모양이 아닙니다</b> — 표(<code>| 항목 | 배정 |</code>)도,
@@ -502,8 +505,10 @@ const deferrals: DeferralStrings = {
       명시적으로 <code>None.</code>을 선언한 절은 ${emptySections}곳입니다.`,
   noOpenPill: "미결 없음",
   noOpenPillTip: "미결 대장 절은 있고 그 안이 비어 있음 — 명시적으로 '없음'을 선언한 상태",
-  allNone: (sections) =>
-    ` <code>## Assumptions &amp; Open Questions</code> 절 ${sections}곳이 모두 <code>None.</code>입니다.`,
+  allNone: (sections, partial) =>
+    partial
+      ? ` 읽은 <code>## Assumptions &amp; Open Questions</code> 절 ${sections}곳은 모두 <code>None.</code>입니다.`
+      : ` <code>## Assumptions &amp; Open Questions</code> 절 ${sections}곳이 모두 <code>None.</code>입니다.`,
   lead: (items, sections, rows, exits) =>
     `미결 <b>${items}건</b> · <code>## Assumptions &amp; Open Questions</code> 절 ${sections}곳 (원시 ${rows}행 → 중복 정리 후 ${items}건)${
       exits > 0 ? ` · 이번 차수 밖으로 명시적으로 밀어낸 것 ${exits}건은 위 숫자에 없습니다` : ""
@@ -758,7 +763,7 @@ const picker: PickerStrings = {
   summaryProgressTip: (done, total, asOf) =>
     `state.md 기준 ${done}/${total} · 갱신 ${asOf} (전환 시점에 기록되므로 stage 진행 중에는 뒤처집니다)`,
   summaryBlockersTip: (asked) => `질문 ${asked}건 중 미답변 · 디스크에서 방금 읽음`,
-  summaryBlockersUnreadableTip: (n) => `읽지 못한 질문 파일·폴더 ${n}곳이 있어 최소값입니다`,
+  summaryBlockersUnreadableTip: (n) => `읽지 못한 질문 경로 ${n}곳이 있어 최소값입니다`,
   footer: (path) => `현재 워크스페이스 · <code>${path}</code> ·
          <a href="/">대시보드로 돌아가기</a>`,
 };
@@ -960,6 +965,7 @@ const cards: CardStrings = {
   noDecisions: "미결 결정 없음",
   noOpenQs: "열린 질문 없음",
   noDeclared: "stage 가 선언한 미결 질문 없음",
+  notAllRead: "읽은 기록에는 없음 — 읽지 못한 곳은 미결 패널에 적혀 있습니다",
   answersTab: "내 답변",
   stuckTab: "막힘",
   checksTab: "검사 실패",

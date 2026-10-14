@@ -115,6 +115,16 @@ function askRow(b: Blocker, s: Strings, maxWait: number, parked = !b.isCurrentSt
   };
 }
 
+function unreadRow(unread: number, s: Strings): Row {
+  return {
+    label: esc(s.status.humanUnreadable(unread)),
+    value: "—",
+    dashed: true,
+    tone: "warn",
+    tip: s.status.humanUnreadableTip,
+  };
+}
+
 function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings): Tab {
   const x = s.status;
   const maxWait = Math.max(0, ...m.blockers.map((b) => b.waitingSec ?? 0));
@@ -214,17 +224,9 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
   // buildBlockers already sorts current-stage asks first; parked ones follow, dimmed.
   for (const b of m.blockers) rows.push(askRow(b, s, maxWait));
   // A questions file that exists and could not be read may hold a blank answer, so
-  // its absence from the list above is not "nothing awaiting you" (scan/record-read.ts).
-  const unread = m.questions.unreadable.length;
-  if (unread > 0) {
-    rows.push({
-      label: esc(x.humanUnreadable(unread)),
-      value: "—",
-      dashed: true,
-      tone: "warn",
-      tip: x.humanUnreadableTip,
-    });
-  }
+  // its absence from the list above is not "nothing awaiting you" (HumanReading.unread).
+  const unread = h?.unread ?? 0;
+  if (unread > 0) rows.push(unreadRow(unread, s));
   for (const rel of w?.engineOnly ?? []) {
     rows.push({
       label: `${esc(x.humanEngineOnly(rel.split("/").pop() ?? rel))}<span class="mr-sub"> · ${viewLink(
@@ -275,13 +277,15 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
     (w?.decision ? 1 : 0) +
     (w?.compose ? 1 : 0);
   const open = (current > 0 ? current : h?.awaitingGate ? 1 : 0) + holds;
-  // An unread questions file makes the count a floor — never a green zero.
-  const floor = unread > 0;
+  // An unread questions file makes the count incomplete either way — it can miss a
+  // blank answer, and it can count a plan-approval marker the file would have
+  // explained — so it is neither a green zero nor a floor.
+  const incomplete = unread > 0;
   return {
     label: s.cards.answersTab,
     count: {
-      text: floor ? `${open}+` : String(open),
-      tone: open > 0 || floor ? "warn" : "ok",
+      text: incomplete ? `${open}?` : String(open),
+      tone: open > 0 || incomplete ? "warn" : "ok",
     },
     // Not capped. This card is the only place the asks are listed — the "see all" link
     // goes to the timeline, which does not list them — so a "+N more" here would make
@@ -447,6 +451,7 @@ export function renderRunHealth(m: DashboardModel, s: Strings): string {
       { label: esc(s.status.runComplete), value: "", tone: "ok" },
       ...m.blockers.map((b) => askRow(b, s, maxWait, true)),
     ];
+    if (st.human?.unread) rows.push(unreadRow(st.human.unread, s));
     return tabbedCard({
       id: "health",
       title: s.cards.healthTitle,

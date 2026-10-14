@@ -85,6 +85,8 @@ export interface CardStrings {
   readonly noDecisions: string;
   readonly noOpenQs: string;
   readonly noDeclared: string;
+  /** A tab's empty text when part of its ledger could not be read or parsed. */
+  readonly notAllRead: string;
   readonly answersTab: string;
   readonly stuckTab: string;
   readonly checksTab: string;
@@ -504,13 +506,15 @@ export interface DeferralStrings {
   /** Raw markup. */
   readonly ledgersNote: string;
   /** Raw markup. */
-  noSections(artifacts: number): string;
+  /** `unreadable` > 0: some artifacts or dirs could not be read, so "none" is only of what was. */
+  noSections(artifacts: number, unreadable: number): string;
   /** Raw markup. */
   unreadSections(sections: number, unread: number, emptySections: number): string;
   readonly noOpenPill: string;
   readonly noOpenPillTip: string;
   /** Raw markup. */
-  allNone(sections: number): string;
+  /** `partial`: something could not be read, so "all" is all of what was. */
+  allNone(sections: number, partial: boolean): string;
   /** Raw markup. */
   lead(items: number, sections: number, rows: number, exits: number): string;
   /** Raw markup. */

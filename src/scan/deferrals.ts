@@ -110,7 +110,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type DeclaredOpenQuestions, readDeclaredOpenQuestions } from "./declared-open-questions";
 import type { StageStatus } from "./parser";
-import { listRecordDir, readRecordText } from "./record-read";
+import { entryKind, listRecordDir, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /** Where the decision an item was deferred to actually sits. */
@@ -484,21 +484,30 @@ function statMtime(p: string): string {
   }
 }
 
-function isDir(p: string): boolean {
-  try {
-    return fs.statSync(p).isDirectory();
-  } catch {
-    return false;
-  }
+/** Record-relative POSIX form of `p`. */
+function relOf(recordDir: string, p: string): string {
+  return path.relative(recordDir, p).split(path.sep).join("/");
 }
 
-/** List `p`'s names; a dir that exists and cannot be listed is named in `unreadable`. */
+/**
+ * List `p`'s names; a dir that exists and cannot be listed is named in `unreadable`.
+ * Dot-names are skipped, as the questions walk skips them — an editor's lock link
+ * (`.#notes.md`) is neither an artifact nor a gap.
+ */
 function readDir(recordDir: string, p: string, unreadable: string[]): string[] {
   const listed = listRecordDir(p);
-  if (listed.kind === "listed") return listed.entries.map((e) => e.name);
-  if (listed.kind === "unreadable")
-    unreadable.push(path.relative(recordDir, p).split(path.sep).join("/"));
+  if (listed.kind === "listed") {
+    return listed.entries.map((e) => e.name).filter((n) => !n.startsWith("."));
+  }
+  if (listed.kind === "unreadable") unreadable.push(relOf(recordDir, p));
   return [];
+}
+
+/** Is `p` a dir? A stat that fails on something present is named, not read as "no". */
+function isDirOrNamed(recordDir: string, p: string, unreadable: string[]): boolean {
+  const kind = entryKind(p);
+  if (kind === "unreadable") unreadable.push(relOf(recordDir, p));
+  return kind === "dir";
 }
 
 /** One artifact location in the record tree. */
@@ -525,6 +534,7 @@ function locateArtifacts(
   isStage?: (slug: string) => boolean,
 ): Located[] {
   const list = (p: string) => readDir(recordDir, p, unreadable);
+  const isDir = (p: string) => isDirOrNamed(recordDir, p, unreadable);
   const out: Located[] = [];
   const scanFiles = (
     relParts: string[],
@@ -552,6 +562,8 @@ function locateArtifacts(
 
   for (const phase of PHASE_DIRS) {
     const phaseAbs = path.join(recordDir, phase);
+    // A phase dir may simply not exist; `isDir` names it only when it is there and
+    // cannot be checked.
     if (!isDir(phaseAbs)) continue;
     for (const child of list(phaseAbs)) {
       const childAbs = path.join(phaseAbs, child);
@@ -604,6 +616,7 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
   const located = locateArtifacts(recordDir, unreadable, opts.isStage);
   let sections = 0;
   let emptySections = 0;
+  let readCount = 0;
   const unreadSections: string[] = [];
   let rows = 0;
 
@@ -620,6 +633,7 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
       if (read.kind === "unreadable") unreadable.push(loc.relParts.join("/"));
       continue;
     }
+    readCount++;
     const text = read.text;
     // Cheap reject before the line walk: most artifacts do not carry the section.
     if (!/Assumptions\s*&\s*Open\s*Questions/i.test(text)) continue;
@@ -721,7 +735,7 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
         b.count - a.count ||
         (a.stage ?? "").localeCompare(b.stage ?? ""),
     ),
-    artifacts: located.length,
+    artifacts: readCount,
     sections,
     emptySections,
     unreadSections,

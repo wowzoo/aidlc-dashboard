@@ -3927,6 +3927,56 @@ describe("a record file that cannot be read is named, never read as absent", () 
     });
   });
 
+  test("a *-questions.md that is a directory is named, not walked into", () => {
+    withRecord((record) => {
+      fs.rmSync(path.join(record, QFILE));
+      fs.mkdirSync(path.join(record, QFILE));
+      expect(readQuestions(record).unreadable).toEqual([QFILE]);
+    });
+  });
+
+  test.skipIf(noModes)("a dir that can be listed but not searched names what it hides", () => {
+    // r-- without x: the names come back, every stat beneath them fails. A boolean
+    // "is it a dir" read that failure as "no" and the stages fell out like files.
+    withRecord((record) => {
+      const unit = "construction/PU-B-ui";
+      fs.chmodSync(path.join(record, unit), 0o444);
+      expect(readDeferrals(record).unreadable).toContain(`${unit}/code-generation`);
+      expect(readDiaries(record).unreadable).toContain(`${unit}/code-generation`);
+      expect(readQuestions(record).unreadable).toContain(`${unit}/code-generation`);
+    });
+  });
+
+  test("a dangling link where a stage dir would be is named by every reader", () => {
+    withRecord((record) => {
+      const link = "construction/PU-Z-gone";
+      fs.symlinkSync(path.join(record, "nowhere"), path.join(record, link));
+      expect(readDeferrals(record).unreadable).toEqual([link]);
+      expect(readDiaries(record).unreadable).toEqual([link]);
+      expect(readQuestions(record).unreadable).toEqual([link]);
+    });
+  });
+
+  test("an editor's dangling lock link is neither an artifact nor a gap", () => {
+    withRecord((record) => {
+      const dir = path.join(record, "inception/units-generation");
+      fs.symlinkSync("user@host.1234:1700000000", path.join(dir, ".#unit-of-work-dependency.md"));
+      expect(readDeferrals(record).unreadable).toEqual([]);
+      expect(readDiaries(record).unreadable).toEqual([]);
+      expect(readQuestions(record).unreadable).toEqual([]);
+    });
+  });
+
+  test("a dangling link at a declared ledger's path is unreadable, not absent", () => {
+    withRecord((record) => {
+      const rel = "inception/requirements-analysis/requirements.md";
+      fs.rmSync(path.join(record, rel));
+      fs.symlinkSync(path.join(record, "nowhere.md"), path.join(record, rel));
+      const ledger = readDeferrals(record).declared.ledgers.find((l) => l.rel === rel);
+      expect(ledger?.status).toBe("unreadable");
+    });
+  });
+
   test.skipIf(noModes)("a stage dir that cannot be listed is named by every reader", () => {
     withRecord((record) => {
       const dir = "construction/PU-B-ui/code-generation";

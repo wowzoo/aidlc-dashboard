@@ -95,7 +95,7 @@ const warn: WarnStrings = {
     `${plural(files.length, "questions file")} with a code block or comment that is never closed — read as text rather than hidden, so no blocker is hidden by it. The engine may read it differently; check the file: ${files.join(", ")}`,
 
   recordFileUnreadable: (files, questions) =>
-    `${plural(files.length, "record path")} present but unreadable — no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow. Not counted as absent${questions ? ": questions files are among them, so the blocker count is a floor" : ""}. ${files.join(", ")}`,
+    `${plural(files.length, "record path")} could not be read or confirmed (for example no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow) — not counted as absent${questions ? ". Part of the questions walk is among them, so the blocker list may be incomplete" : ""}: ${files.join(", ")}`,
 
   tokenUsageFailed: (detail) =>
     `Token usage assembly failed — only the usage panel is degraded: ${detail}`,
@@ -179,9 +179,9 @@ const status: StatusStrings = {
   humanEngineAskTip:
     "The directive the engine last handed out asks you something. Only a directive whose digest matches the current state is read; most of these are asked in the conversation with no questions file",
   humanUnreadable: (n) =>
-    `${plural(n, "questions path")} could not be read — blockers in ${n === 1 ? "it" : "them"} are not counted`,
+    `${plural(n, "questions path")} could not be read — the questions in ${n === 1 ? "it" : "them"} are not counted`,
   humanUnreadableTip:
-    "Present but unreadable (permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow). A blank answer may be in it, so the count above is a floor. The paths are in the warnings at the top of the page",
+    "Could not be read or confirmed (for example no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow). A blank answer in it is missing, and an engine ask the file would have explained may be counted on its own, so the count above can be off either way. The paths are in the warnings at the top of the page",
   humanTeamGateUnread: "Team unit gate — not read",
   humanTeamGateUnreadTip:
     "Under team ownership a unit's gate is decided from the audit by unit, gate scope and claim attempt, not by the state row. The claim state is not visible to this dashboard, so whether an approval is pending was not determined — this does not mean nothing is waiting",
@@ -499,9 +499,9 @@ const deferrals: DeferralStrings = {
   declaredUnreadable: (files) =>
     `${files} is present but could not be read as a file — <b>its open questions were not read</b>.`,
   aoqUnreadable: (files) =>
-    `${files} is present but could not be read — <b>any <code>## Assumptions &amp; Open Questions</code> section in it is not in the counts above</b>.`,
+    `${files} could not be read or confirmed — <b>any <code>## Assumptions &amp; Open Questions</code> section in it is not in the counts above</b>.`,
   diaryUnreadable: (files) =>
-    `The stage diary ${files} is present but could not be read — <b>its open questions were not read</b>.`,
+    `Stage diary path ${files} could not be read or confirmed — <b>any open question in it was not read</b>.`,
   unreadAlongside: (unread, files) =>
     `<b>${unread} <code>## Assumptions &amp; Open Questions</code> section${unread === 1 ? " is" : "s are"} in a shape
     this reader does not know</b> (${files}) — whatever ${unread === 1 ? "it holds is" : "they hold is"} not in the counts above.`,
@@ -514,8 +514,11 @@ const deferrals: DeferralStrings = {
     "Filed under the open-questions section but with no follow-up wording in the sentence — the heading is the declaration, so it still counts",
   ledgersNote: `These ledgers are <b>different reads</b> — only the first row has an assignment cell, and the
 others have nowhere assigned to ask them. <b>They are not summed.</b>`,
-  noSections: (artifacts) =>
-    `No artifact carries an <code>## Assumptions &amp; Open Questions</code> section — either this run left no
+  noSections: (artifacts, unreadable) =>
+    unreadable > 0
+      ? `No artifact that could be read carries an <code>## Assumptions &amp; Open Questions</code> section —
+    <b>${unreadable} path${unreadable === 1 ? "" : "s"} could not be read</b>, and a section there is not counted. (${artifacts} artifact${artifacts === 1 ? "" : "s"} read)`
+      : `No artifact carries an <code>## Assumptions &amp; Open Questions</code> section — either this run left no
     open-item ledger, or it has not written artifacts yet. (${artifacts} artifact${artifacts === 1 ? "" : "s"} read)`,
   unreadSections: (sections, unread, emptySections) =>
     `There ${sections === 1 ? "is" : "are"} ${sections} <code>## Assumptions &amp; Open Questions</code>
@@ -525,8 +528,10 @@ others have nowhere assigned to ask them. <b>They are not summed.</b>`,
       ${emptySections} section${emptySections === 1 ? "" : "s"} declared <code>None.</code> explicitly.`,
   noOpenPill: "no open items",
   noOpenPillTip: "The ledger section is present and empty — an explicit declaration of 'none'",
-  allNone: (sections) =>
-    ` All ${sections} <code>## Assumptions &amp; Open Questions</code> section${sections === 1 ? "" : "s"} read <code>None.</code>`,
+  allNone: (sections, partial) =>
+    partial
+      ? ` The ${sections} <code>## Assumptions &amp; Open Questions</code> section${sections === 1 ? "" : "s"} that could be read ${sections === 1 ? "reads" : "all read"} <code>None.</code>`
+      : ` All ${sections} <code>## Assumptions &amp; Open Questions</code> section${sections === 1 ? "" : "s"} read <code>None.</code>`,
   lead: (items, sections, rows, exits) =>
     `<b>${items}</b> open item${items === 1 ? "" : "s"} · ${sections} <code>## Assumptions &amp; Open Questions</code>
   section${sections === 1 ? "" : "s"} (${rows} raw row${rows === 1 ? "" : "s"} → ${items} after de-duplication)${
@@ -1000,6 +1005,7 @@ const cards: CardStrings = {
   noDecisions: "No open decisions",
   noOpenQs: "No open questions",
   noDeclared: "No stage-declared open questions",
+  notAllRead: "None in what could be read — the Unresolved panel names what was not",
   answersTab: "Your answers",
   stuckTab: "Stuck",
   checksTab: "Failed checks",

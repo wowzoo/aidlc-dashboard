@@ -139,7 +139,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { listRecordDir, readRecordText } from "./record-read";
+import { entryKind, listRecordDir, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /**
@@ -597,19 +597,13 @@ function readFileEntry(
   };
 }
 
-function isDirThroughLink(abs: string): boolean {
-  try {
-    return fs.statSync(abs).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Every `*-questions.md` below `dirs`, as the dir segments under the phase dir. A dir
- * that cannot be listed, and a link to a dir, are named in `unreadable` — the first
- * holds files this walk never saw, the second is not followed (a link could loop), and
- * either way a blank answer inside would be missing without a word.
+ * Every `*-questions.md` below `dirs`, as the dir segments under the phase dir. Named
+ * in `unreadable` instead, because a blank answer inside would otherwise be missing
+ * without a word: a dir that cannot be listed (it holds files this walk never saw), a
+ * `*-questions.md` that is a directory, and a link this walk does not follow (a link
+ * could loop) — one to a dir, or one whose target cannot be checked and whose name
+ * carries no extension, the shape a stage or unit dir has.
  */
 function walk(
   recordDir: string,
@@ -627,11 +621,18 @@ function walk(
   }
   for (const e of listed.entries) {
     if (e.name.startsWith(".")) continue;
+    const isQuestions = dirs.length > 0 && e.name.endsWith("-questions.md");
+    const rel = [phase, ...dirs, e.name].join("/");
     // `isDirectory()` on a Dirent does not follow a symlink, so a link cannot loop.
-    if (e.isDirectory()) walk(recordDir, phase, [...dirs, e.name], out, unreadable);
-    else if (dirs.length > 0 && e.name.endsWith("-questions.md")) out.push([...dirs, e.name]);
-    else if (e.isSymbolicLink() && isDirThroughLink(path.join(recordDir, phase, ...dirs, e.name))) {
-      unreadable.push([phase, ...dirs, e.name].join("/"));
+    if (e.isDirectory()) {
+      if (isQuestions) unreadable.push(rel);
+      else walk(recordDir, phase, [...dirs, e.name], out, unreadable);
+    } else if (isQuestions) out.push([...dirs, e.name]);
+    else if (e.isSymbolicLink()) {
+      const kind = entryKind(path.join(recordDir, phase, ...dirs, e.name));
+      if (kind === "dir" || (kind === "unreadable" && !/\.[^/]+$/.test(e.name))) {
+        unreadable.push(rel);
+      }
     }
   }
 }

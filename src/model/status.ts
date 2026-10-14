@@ -75,6 +75,14 @@ export interface HumanReading {
   earlier: number;
   /** The run's other holds, read from the engine's own records — see model/waits.ts. */
   waits?: Waits;
+  /**
+   * Questions paths that exist and could not be read (scan/record-read.ts). Absent when
+   * none. While set, no count here is complete in EITHER direction: a blank answer in
+   * them is missing, and a plan-approval marker the file would have explained is not
+   * deduplicated against it (model/waits.ts `planInFile`) — so "nothing awaiting you"
+   * cannot be said, and the count is not a floor either.
+   */
+  unread?: number;
 }
 
 export type ChecksReading =
@@ -106,7 +114,7 @@ export interface StatusStrip {
 
 type StatusInput = Pick<
   DashboardModel,
-  "state" | "health" | "blockers" | "sensors" | "timing" | "provenance" | "waits"
+  "state" | "health" | "blockers" | "sensors" | "timing" | "provenance" | "waits" | "questions"
 >;
 
 /** The stop hook's default cap — see rule 3 in the header. */
@@ -146,12 +154,14 @@ function readHuman(m: StatusInput): HumanReading {
   const waits = current
     .map((b) => b.waitingSec)
     .filter((w): w is number => w !== undefined && Number.isFinite(w));
+  const unread = m.questions.unreadable.length;
   return {
     current: current.length,
     oldestWaitingSec: waits.length > 0 ? Math.max(...waits) : undefined,
     awaitingGate: m.waits.gate?.stage,
     earlier: m.blockers.length - current.length,
     waits: m.waits,
+    ...(unread > 0 ? { unread } : {}),
   };
 }
 
@@ -176,10 +186,13 @@ export function buildStatus(m: StatusInput): StatusStrip {
     // not: it is a loose end the run left behind, and since the asks list lives under
     // this chip, dropping the chip would leave it unreachable. It is reported as
     // parked — nothing is waiting on it for the run to proceed.
-    if (m.blockers.length === 0) return { run: { state: "complete" } };
+    // A questions file that could not be read is the same kind of loose end: an
+    // answer left blank in it would be listed here if it could be read.
+    const unread = m.questions.unreadable.length;
+    if (m.blockers.length === 0 && unread === 0) return { run: { state: "complete" } };
     return {
       run: { state: "complete" },
-      human: { current: 0, earlier: m.blockers.length },
+      human: { current: 0, earlier: m.blockers.length, ...(unread > 0 ? { unread } : {}) },
     };
   }
   const pos = m.waits.position;

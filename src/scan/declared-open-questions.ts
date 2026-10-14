@@ -31,6 +31,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { entryKind, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /** Which declared ledger an item came from. */
@@ -327,16 +328,16 @@ export function readDeclaredOpenQuestions(recordDir: string): DeclaredOpenQuesti
   const ledgers: DeclaredLedger[] = [];
   for (const d of DECLARED_LEDGERS) {
     const abs = path.join(recordDir, ...d.rel.split("/"));
-    let text: string;
-    try {
-      if (!fs.statSync(abs).isFile()) throw new Error("not a file");
-      text = fs.readFileSync(abs, "utf-8");
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-        ledgers.push({ source: d.source, rel: d.rel, status: "unreadable", count: 0 });
-      }
+    // Nothing at the path is the one legal absence; a dangling link is not (see
+    // scan/record-read.ts), and neither is a dir or anything that will not read.
+    const kind = entryKind(abs);
+    if (kind === "absent") continue;
+    const read = kind === "other" ? readRecordText(abs) : undefined;
+    if (read?.kind !== "text") {
+      ledgers.push({ source: d.source, rel: d.rel, status: "unreadable", count: 0 });
       continue;
     }
+    const text = read.text;
     const parsed = parseDeclaredOpenQuestions(text);
     const since = mtime(abs);
     for (const e of parsed.items) {
