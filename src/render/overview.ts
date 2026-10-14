@@ -361,7 +361,21 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
 
   const up = m.state.unitProgress;
   if (up && !up.malformed && up.rows.length > 0) {
-    parts.push(section(s.overview.sectionUnitProgress, unitProgressTable(up, s), "unit-progress"));
+    const stale = m.unitProgressStale;
+    const staleNote = stale
+      ? `<p class="note warn">${esc(
+          stale.kind === "roster"
+            ? s.overview.unitProgressStaleRoster(stale.missing, stale.extra)
+            : s.overview.unitProgressStaleDag,
+        )}</p>`
+      : "";
+    parts.push(
+      section(
+        s.overview.sectionUnitProgress,
+        unitProgressTable(up, s) + staleNote,
+        "unit-progress",
+      ),
+    );
   }
   if (m.matrix) {
     parts.push(
@@ -388,7 +402,10 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
         m.unitArtifactMode === "stage-level"
           ? `<p class="note">${esc(s.overview.stageLevelUnits)} ${pill(s.overview.stageLevelUnitsPill, "mute")}</p>`
           : m.unitDag.state === "malformed"
-            ? `<p class="note warn">${esc(s.overview.unitDagMalformed(m.unitDag.reason))} ${pill(s.overview.unitDagMalformedPill, "warn")}</p>`
+            ? `<p class="note warn">${esc(s.overview.unitDagMalformed(m.unitDag.reason, m.unitDag.stop))} ${pill(
+                s.overview.unitDagMalformedPill(m.unitDag.stop),
+                m.unitDag.stop === "construction" ? "warn" : "mute",
+              )}</p>`
             : `<p class="note">${esc(s.overview.noUnits)} ${pill(s.overview.noUnitsPill, "mute")}</p>`,
       ),
     );

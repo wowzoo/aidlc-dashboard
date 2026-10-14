@@ -99,8 +99,12 @@ const warn: WarnStrings = {
   recordFileUnreadable: (files, questions) =>
     `${plural(files.length, "record path")} could not be read or confirmed (for example no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow) — not counted as absent${questions ? ". Part of the questions walk is among them, so the blocker list may be incomplete" : ""}: ${files.join(", ")}`,
 
-  unitDagMalformed: (reason, detail) =>
-    `The units block in inception/units-generation/unit-of-work-dependency.md cannot be read (${reason}: ${detail}). The engine stops at the per-unit Construction stages until it is rewritten, so the unit matrix is withheld rather than drawn from runtime-graph.json's older roster.`,
+  unitDagMalformed: (reason, detail, stop) =>
+    `The units block in inception/units-generation/unit-of-work-dependency.md cannot be read (${reason}: ${detail}). ${
+      stop === "construction"
+        ? "The engine stops at the per-unit Construction stages until it is rewritten"
+        : "The engine will not open the Units Generation gate until it can read it — while that stage is still open the file may simply be mid-write"
+    }, so the unit matrix is withheld rather than drawn from runtime-graph.json's cached roster.`,
 
   tokenUsageFailed: (detail) =>
     `Token usage assembly failed — only the usage panel is degraded: ${detail}`,
@@ -152,6 +156,10 @@ const status: StatusStrings = {
   runningUnit: (unit) => `unit ${unit}`,
   runUnverified: "position unverified",
   runConflict: (where) => `engine directive says ${where}`,
+  runOffRoster: (unit, why) =>
+    why === "absent" ? `unit ${unit} is not in the unit roster` : "the unit roster cannot be read",
+  runOffRosterTip:
+    "The unit position in state.md (Active Unit) is a cache. The engine walks only the units in unit-of-work-dependency.md and resumes an active unit only from among them, so a cached unit the roster does not list — or a roster it cannot read — is not a position this dashboard can confirm",
   runConflictTip:
     "The unit position in state.md (Unit Stage, Active Unit) and the engine directive matching the current state (active-directive.json) point to different places. Neither is the engine's routing authority, so this dashboard does not pick one",
   runUnverifiedTip:
@@ -255,6 +263,17 @@ const overview: OverviewStrings = {
     "Units inside a batch can run in parallel — batches are the topological order of their dependencies.",
   unitProgressNote:
     "state.md's <code>## Unit Progress</code> — an <b>authoritative</b> projection the engine rewrites on every\n  <code>next</code> from receipts, reviews and gates. Hand edits are never routing or completion evidence. The matrix below is a separate diagnostic, reconstructed from disk.",
+  unitProgressStaleRoster: (missing, extra) =>
+    `This table no longer matches the unit roster the engine rebuilds it from (${[
+      missing.length ? `not in the table: ${missing.join(", ")}` : "",
+      extra.length ? `not in the roster: ${extra.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(
+        " · ",
+      )}). It is the last projection written; the engine rewrites it on the next \`next\`.`,
+  unitProgressStaleDag:
+    "The unit roster (unit-of-work-dependency.md) cannot be read, and the engine refuses to rebuild this table without it — what is shown is the last projection written, not the current authority.",
   noUnits: "No unit information — units-generation has not been reached.",
   noUnitsPill: "n/a",
   stageLevelUnits:
@@ -262,11 +281,13 @@ const overview: OverviewStrings = {
   stageLevelUnitsPill: "stage level",
   unitModeUnknown:
     "Neither the state file nor the scope grid says whether Units Generation runs, so this matrix assumes artifacts are per unit.",
-  unitDagMalformed: (reason) =>
-    `No per-unit matrix — the engine cannot read the units block in unit-of-work-dependency.md (${reason}), so the unit set is unknown until it is rewritten. The runtime graph's older roster is not drawn in its place.`,
-  unitDagMalformedPill: "blocked",
+  unitDagMalformed: (reason, stop) =>
+    `No per-unit matrix — the engine cannot read the units block in unit-of-work-dependency.md (${reason}), so the unit set is unknown until it is rewritten${
+      stop === "construction" ? "" : " (Units Generation is still open, so it may be mid-write)"
+    }. The runtime graph's cached roster is not drawn in its place.`,
+  unitDagMalformedPill: (stop) => (stop === "construction" ? "blocked" : "not readable yet"),
   unitDagHealed:
-    "Units read from unit-of-work-dependency.md, as the engine reads them — runtime-graph.json still holds an older roster, because it is recompiled only on a transition event.",
+    "Units read from unit-of-work-dependency.md, as the engine reads them — the copy cached in runtime-graph.json differs from it (in its batches or unit kinds), so the engine does not use that copy either.",
 
   tipPartial: (missing) => `missing: ${missing.join(", ")}`,
   tipComplete: (present) => `complete: ${present.join(", ")}`,

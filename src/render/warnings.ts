@@ -48,7 +48,7 @@ export function warningTextIn(w: Warning, s: Strings): string {
     case "record-file-unreadable":
       return t.recordFileUnreadable(w.files, w.questions);
     case "unit-dag-malformed":
-      return t.unitDagMalformed(w.reason, w.detail);
+      return t.unitDagMalformed(w.reason, w.detail, w.stop);
     case "token-usage-failed":
       return t.tokenUsageFailed(w.detail);
     case "credit-assembly-failed":

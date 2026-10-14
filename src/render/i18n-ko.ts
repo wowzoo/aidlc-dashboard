@@ -92,8 +92,12 @@ const warn: WarnStrings = {
   recordFileUnreadable: (files, questions) =>
     `기록 경로 ${files.length}곳을 읽거나 확인하지 못했습니다(예: 권한 없음, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크) — 없는 것으로 치지 않습니다${questions ? ". 질문 파일을 찾는 범위가 포함돼 있어 블로커 목록이 불완전할 수 있습니다" : ""}: ${files.join(", ")}`,
 
-  unitDagMalformed: (reason, detail) =>
-    `inception/units-generation/unit-of-work-dependency.md 의 units 블록을 읽을 수 없습니다(${reason}: ${detail}). 다시 쓸 때까지 엔진은 유닛별 Construction stage 에서 멈추므로, runtime-graph.json 에 남은 이전 유닛 목록으로 매트릭스를 그리지 않습니다.`,
+  unitDagMalformed: (reason, detail, stop) =>
+    `inception/units-generation/unit-of-work-dependency.md 의 units 블록을 읽을 수 없습니다(${reason}: ${detail}). ${
+      stop === "construction"
+        ? "다시 쓸 때까지 엔진은 유닛별 Construction stage 에서 멈추므로"
+        : "엔진은 이 블록을 읽을 수 있을 때까지 Units Generation 관문을 열지 않습니다. 그 stage 가 아직 진행 중이면 파일을 쓰는 중일 수 있으므로"
+    }, runtime-graph.json 에 캐시된 유닛 목록으로 대신 그리지 않습니다.`,
 
   tokenUsageFailed: (detail) => `토큰 사용량 조립 실패 — 사용량 패널만 하락: ${detail}`,
 
@@ -141,6 +145,10 @@ const status: StatusStrings = {
   runningUnit: (unit) => `유닛 ${unit}`,
   runUnverified: "위치 미확인",
   runConflict: (where) => `엔진 지시는 ${where}`,
+  runOffRoster: (unit, why) =>
+    why === "absent" ? `유닛 ${unit} 은 유닛 목록에 없음` : "유닛 목록을 읽을 수 없음",
+  runOffRosterTip:
+    "state.md 의 유닛 위치(Active Unit)는 캐시입니다. 엔진은 unit-of-work-dependency.md 에 있는 유닛만 진행하고, 진행 중인 유닛도 그 안에서만 이어 가므로, 목록에 없는 유닛이나 읽을 수 없는 목록으로는 위치를 확인할 수 없습니다",
   runConflictTip:
     "state.md 의 유닛 위치(Unit Stage·Active Unit)와 지금 state 에 맞는 엔진 지시(active-directive.json)가 서로 다른 곳을 가리킵니다. 둘 다 엔진의 라우팅 근거가 아니라 어느 쪽이 맞는지 이 대시보드는 판정하지 않습니다",
   runUnverifiedTip:
@@ -241,6 +249,15 @@ const overview: OverviewStrings = {
   batchNote: "배치 안의 유닛은 병렬 가능 — 의존 순서대로 묶인 위상 배치.",
   unitProgressNote:
     "state.md 의 <code>## Unit Progress</code> — 엔진이 수령증·리뷰·게이트를 반영해 매 <code>next</code> 마다 다시 쓰는\n  <b>권위 있는 값</b>입니다. 손으로 고친 내용은 라우팅·완료 근거가 되지 않습니다. 아래 매트릭스는 디스크에서 재구성한 별개의 진단입니다.",
+  unitProgressStaleRoster: (missing, extra) =>
+    `이 표는 엔진이 다시 만들 때 쓰는 유닛 목록과 맞지 않습니다(${[
+      missing.length ? `표에 없는 유닛: ${missing.join(", ")}` : "",
+      extra.length ? `목록에 없는 행: ${extra.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ")}). 마지막으로 쓰인 표이며, 엔진은 다음 \`next\` 에서 다시 씁니다.`,
+  unitProgressStaleDag:
+    "유닛 목록(unit-of-work-dependency.md)을 읽을 수 없어 엔진이 이 표를 다시 만들지 못합니다 — 보이는 것은 마지막으로 쓰인 표이지 지금의 권위 있는 값이 아닙니다.",
   noUnits: "유닛 정보 없음 — units-generation 미진입.",
   noUnitsPill: "해당 없음",
   stageLevelUnits:
@@ -248,11 +265,13 @@ const overview: OverviewStrings = {
   stageLevelUnitsPill: "stage 단위",
   unitModeUnknown:
     "state 파일과 scope grid 어디에서도 Units Generation 의 실행 여부를 읽지 못해, 이 매트릭스는 산출물이 유닛별로 있다고 가정하고 그렸습니다.",
-  unitDagMalformed: (reason) =>
-    `유닛별 매트릭스 없음 — 엔진이 unit-of-work-dependency.md 의 units 블록을 읽지 못해(${reason}) 다시 쓸 때까지 유닛 목록을 알 수 없습니다. runtime graph 에 남은 이전 목록으로 대신 그리지 않습니다.`,
-  unitDagMalformedPill: "막힘",
+  unitDagMalformed: (reason, stop) =>
+    `유닛별 매트릭스 없음 — 엔진이 unit-of-work-dependency.md 의 units 블록을 읽지 못해(${reason}) 다시 쓸 때까지 유닛 목록을 알 수 없습니다${
+      stop === "construction" ? "" : "(Units Generation 이 아직 진행 중이라 쓰는 중일 수 있습니다)"
+    }. runtime graph 에 캐시된 목록으로 대신 그리지 않습니다.`,
+  unitDagMalformedPill: (stop) => (stop === "construction" ? "막힘" : "아직 읽을 수 없음"),
   unitDagHealed:
-    "유닛 목록은 엔진처럼 unit-of-work-dependency.md 에서 읽었습니다 — runtime-graph.json 은 전이 이벤트 때만 다시 컴파일돼서 아직 이전 목록을 담고 있습니다.",
+    "유닛 목록은 엔진처럼 unit-of-work-dependency.md 에서 읽었습니다 — runtime-graph.json 에 캐시된 목록은 이 파일과 배치 또는 유닛 kind 가 달라, 엔진도 그 캐시를 쓰지 않습니다.",
 
   tipPartial: (missing) => `미완: ${missing.join(", ")}`,
   tipComplete: (present) => `완료: ${present.join(", ")}`,

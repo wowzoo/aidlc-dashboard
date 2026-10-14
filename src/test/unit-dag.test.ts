@@ -170,8 +170,29 @@ describe("the page reads the resolved roster", () => {
         const w = m.warnings.find((x) => x.code === "unit-dag-malformed");
         expect(w).toBeDefined();
         const html = renderBody(m, "en");
-        expect(html).toContain(esc(EN.overview.unitDagMalformed("absent")));
+        expect(html).toContain(esc(EN.overview.unitDagMalformed("absent", "construction")));
         expect(html).not.toContain(EN.overview.noUnits);
+      },
+    );
+  });
+
+  test("while Units Generation is still open, an unreadable block is not yet a stop", () => {
+    withFixture(
+      (rec) => {
+        fs.writeFileSync(path.join(rec, DEP), "# Unit of Work Dependency\n\nStill writing.\n");
+        const sp = path.join(rec, "aidlc-state.md");
+        fs.writeFileSync(
+          sp,
+          fs.readFileSync(sp, "utf-8").replace("- [x] units-generation", "- [-] units-generation"),
+        );
+      },
+      (root) => {
+        const m = assemble(root);
+        expect(m.matrix).toBeUndefined();
+        expect(m.unitDag.state === "malformed" && m.unitDag.stop).toBe("units-generation-gate");
+        const html = renderBody(m, "en");
+        expect(html).toContain(esc(EN.overview.unitDagMalformedPill("units-generation-gate")));
+        expect(html).not.toContain(`>${EN.overview.unitDagMalformedPill("construction")}<`);
       },
     );
   });
@@ -195,5 +216,114 @@ describe("the page reads the resolved roster", () => {
         expect(renderBody(m, "en")).toContain(esc(EN.overview.unitDagHealed));
       },
     );
+  });
+});
+
+describe("the run position checks the unit cache against the resolved roster", () => {
+  const STATE = "aidlc-state.md";
+  const withUnitCache = (unit: string, dep: string | undefined, fn: (root: string) => void) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dag-pos-"));
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const rec = path.join(root, RECORD);
+      const sp = path.join(rec, STATE);
+      fs.writeFileSync(
+        sp,
+        fs
+          .readFileSync(sp, "utf-8")
+          .replace(
+            "## Runtime State\n",
+            `## Runtime State\n- **Unit Stage**: code-generation\n- **Active Unit**: ${unit}\n`,
+          ),
+      );
+      if (dep !== undefined) fs.writeFileSync(path.join(rec, DEP), dep);
+      fn(root);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  test("an Active Unit the roster has is read as before", () => {
+    withUnitCache("PU-B-ui", undefined, (root) => {
+      const p = assemble(root).waits.position;
+      expect(p.unit).toBe("PU-B-ui");
+      expect(p.verified).toBe(true);
+      expect(p.offRoster).toBeUndefined();
+    });
+  });
+
+  test("an Active Unit the authored DAG no longer lists is not a verified position", () => {
+    const dep = yaml("  - name: PU-A-core\n    depends_on: []\n    kind: library\n");
+    withUnitCache("PU-B-ui", dep, (root) => {
+      const m = assemble(root);
+      expect(m.waits.position.verified).toBe(false);
+      expect(m.waits.position.offRoster).toBe("absent");
+      expect(renderBody(m, "en")).toContain(esc(EN.status.runOffRoster("PU-B-ui", "absent")));
+    });
+  });
+
+  test("with the roster unreadable, a cached unit cannot be checked either", () => {
+    withUnitCache("PU-B-ui", "# Unit of Work Dependency\n\nNo block.\n", (root) => {
+      const p = assemble(root).waits.position;
+      expect(p.verified).toBe(false);
+      expect(p.offRoster).toBe("unknown");
+    });
+  });
+});
+
+describe("## Unit Progress is checked against the roster the engine rebuilds it from", () => {
+  const TEAM = "\n- **Unit Ownership**: team\n- **Construction Iteration**: unit-major";
+  const TABLE =
+    "\n## Unit Progress\n\n| unit | owner | code-generation | gate |\n| --- | --- | --- | --- |\n" +
+    "| PU-A-core | jiho | [x] | [x] |\n| PU-B-ui | - | [-] | [ ] |\n";
+  const withTeam = (dep: string | undefined, fn: (root: string) => void) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dag-up-"));
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const rec = path.join(root, RECORD);
+      const sp = path.join(rec, "aidlc-state.md");
+      const base = fs.readFileSync(sp, "utf-8");
+      fs.writeFileSync(
+        sp,
+        base.replace("- **State Version**: 8", `- **State Version**: 8${TEAM}`) + TABLE,
+      );
+      if (dep !== undefined) fs.writeFileSync(path.join(rec, DEP), dep);
+      fn(root);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  test("a table matching the roster renders as before", () => {
+    withTeam(undefined, (root) => {
+      const m = assemble(root);
+      expect(m.state.unitProgress?.rows.length).toBe(2);
+      expect(m.unitProgressStale).toBeUndefined();
+    });
+  });
+
+  test("a table naming units the roster lost, or missing one it gained, is a past projection", () => {
+    const dep = yaml(
+      "  - name: PU-A-core\n    depends_on: []\n    kind: library\n  - name: PU-C-api\n    depends_on: [PU-A-core]\n",
+    );
+    withTeam(dep, (root) => {
+      const m = assemble(root);
+      expect(m.unitProgressStale).toEqual({
+        kind: "roster",
+        missing: ["PU-C-api"],
+        extra: ["PU-B-ui"],
+      });
+      expect(renderBody(m, "en")).toContain(
+        esc(EN.overview.unitProgressStaleRoster(["PU-C-api"], ["PU-B-ui"])),
+      );
+    });
+  });
+
+  test("with the roster unreadable the engine cannot rebuild the table, and the page says so", () => {
+    withTeam("# Unit of Work Dependency\n\nNo block.\n", (root) => {
+      const m = assemble(root);
+      expect(m.unitProgressStale).toEqual({ kind: "dag-unreadable" });
+      expect(renderBody(m, "en")).toContain(esc(EN.overview.unitProgressStaleDag));
+    });
   });
 });

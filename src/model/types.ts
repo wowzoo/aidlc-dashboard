@@ -174,6 +174,9 @@ export type Locale = "ko" | "en";
  * member without giving it copy is a typecheck failure rather than a blank line on
  * screen.
  */
+/** Where the engine refuses an unreadable unit DAG — see the `unit-dag-malformed` warning. */
+export type UnitDagStop = "units-generation-gate" | "construction";
+
 export type Warning =
   | { code: "catalog-read-failed"; harnessDir: string }
   | { code: "catalog-not-found" }
@@ -196,8 +199,10 @@ export type Warning =
   | { code: "state-version-unreadable"; stateVersion?: string }
   | { code: "team-without-unit-major"; constructionIteration?: string }
   | { code: "unit-progress-malformed" }
-  /** The authored unit DAG the engine refuses (`resolveBoltDag` → `malformed`). */
-  | { code: "unit-dag-malformed"; reason: string; detail: string }
+  /** The authored unit DAG the engine refuses (`resolveBoltDag` → `malformed`). `stop` is
+   *  where the engine refuses it: the Units Generation gate while that stage is open
+   *  (the file may be mid-write), the per-unit Construction stages once it has closed. */
+  | { code: "unit-dag-malformed"; reason: string; detail: string; stop: UnitDagStop }
   | { code: "unit-progress-missing" }
   | {
       code: "roster-mismatch";
@@ -253,7 +258,16 @@ export interface DashboardModel {
   unitDag:
     | { state: "ok"; healed: boolean; graphDiffers: boolean }
     | { state: "none" }
-    | { state: "malformed"; reason: string; detail: string };
+    | { state: "malformed"; reason: string; detail: string; stop: UnitDagStop };
+  /**
+   * `## Unit Progress` disagrees with the roster the engine rebuilds it from
+   * (`deriveTeamUnitProgressModel` re-reads the DAG on every `next`, and refuses one that
+   * is not `ok`): the table is the last projection written, not the current authority.
+   * `missing` = roster units the table lacks, `extra` = table rows the roster lacks.
+   */
+  unitProgressStale?:
+    | { kind: "roster"; missing: string[]; extra: string[] }
+    | { kind: "dag-unreadable" };
   /**
    * Unit checkpoint proofs the engine cannot count verified (scan/checkpoint-proofs.ts) —
    * only where checkpoints are in force. A diagnostic beside the matrix: the next move is

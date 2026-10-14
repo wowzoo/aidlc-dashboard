@@ -177,7 +177,7 @@ export function renderUnitCard(m: DashboardModel, s: Strings): string {
               m.unitArtifactMode === "stage-level"
                 ? s.overview.stageLevelUnits
                 : m.unitDag.state === "malformed"
-                  ? s.overview.unitDagMalformed(m.unitDag.reason)
+                  ? s.overview.unitDagMalformed(m.unitDag.reason, m.unitDag.stop)
                   : s.overview.noUnits,
           }),
         },

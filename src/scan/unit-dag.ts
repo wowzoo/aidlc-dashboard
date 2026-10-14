@@ -8,7 +8,8 @@
 //
 // THE AUTHORED FILE IS AUTHORITATIVE; THE GRAPH IS A CACHE. This module used to read
 // `runtime-graph.json`'s `bolt_dag.units` alone (scan/matrix.ts), which is wrong in three
-// reachable ways, because the graph is recompiled only on a transition event (AGENTS.md,
+// reachable ways, because the graph is a compiled copy — rebuilt by the hook on transition
+// events or by a manual `runtime compile`, not on every edit (AGENTS.md,
 // "runtime-graph.json is not current"):
 //   - the authored DAG changed after the last compile: the engine walks the new roster,
 //     the page drew the old one;
@@ -18,6 +19,14 @@
 //     the engine refuses (`malformed` — "the unit set is unknowable and must fail
 //     closed"), the page drew a plausible, wrong matrix.
 // A cache is accepted only when its batches AND unit kinds still match the authored file.
+// The page says when one was outvoted (`graphDiffers`), and says only that — a kind-only
+// difference sets it too, so it is not evidence of an "older" roster.
+//
+// Other readers of the roster: the run position checks the unit cache against it
+// (scan/run-position.ts, `offRoster`), and `## Unit Progress` is compared to it, because
+// the engine rebuilds that table from this DAG (`deriveTeamUnitProgressModel`). The timing
+// unit view reads audit history and `scan/summary.ts` reads state progress — neither is a
+// roster claim, so neither is filtered by it.
 //
 // ROSTER ORDER IS `batches.flat()`. The compiler writes `bolt_dag.units` in AUTHORED order
 // (`computeBoltDag` → `parsed.units`), not topological, and the engine's own roster is

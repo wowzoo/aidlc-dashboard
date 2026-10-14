@@ -168,6 +168,7 @@ describe("every code has copy", () => {
       code: "unit-dag-malformed",
       reason: "cyclic",
       detail: "dependency cycle detected",
+      stop: "construction",
     },
     "engine-version-unsupported": {
       code: "engine-version-unsupported",

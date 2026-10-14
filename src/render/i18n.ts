@@ -24,7 +24,7 @@
 //
 // See the `### Page language` section in CLAUDE.md for the rest of the reasoning.
 
-import type { Locale, SourceKind } from "../model/types";
+import type { Locale, SourceKind, UnitDagStop } from "../model/types";
 import type { CheckpointKind, ProofFault, UnreadableCause } from "../scan/checkpoint-proofs";
 import type { DeclaredSource } from "../scan/declared-open-questions";
 import type { OwnerStatus } from "../scan/deferrals";
@@ -182,7 +182,7 @@ export interface WarnStrings {
   /** `questions`: a questions file or dir is among them, so the blocker count is a floor. */
   recordFileUnreadable(files: string[], questions: boolean): string;
   /** The authored unit DAG the engine refuses (scan/unit-dag.ts); `reason` is the engine's. */
-  unitDagMalformed(reason: string, detail: string): string;
+  unitDagMalformed(reason: string, detail: string, stop: UnitDagStop): string;
   tokenUsageFailed(detail: string): string;
   creditAssemblyFailed(detail: string): string;
 }
@@ -229,6 +229,9 @@ export interface StatusStrings {
   /** The current directive names another stage/unit than the unit cache. */
   runConflict(where: string): string;
   readonly runConflictTip: string;
+  /** The unit cache names a unit outside the resolved roster, or the roster is unreadable. */
+  runOffRoster(unit: string, why: "absent" | "unknown"): string;
+  readonly runOffRosterTip: string;
   readonly stuckNoRecord: string;
   readonly stuckClear: string;
   stuckEarlier(stage: string): string;
@@ -314,6 +317,10 @@ export interface OverviewStrings {
   readonly batchNote: string;
   /** Carries `<code>`/`<b>` markup, so it is interpolated raw — never through esc(). */
   readonly unitProgressNote: string;
+  /** The table's unit set differs from the resolved roster (DashboardModel.unitProgressStale). */
+  unitProgressStaleRoster(missing: string[], extra: string[]): string;
+  /** The roster cannot be read, so the engine cannot rebuild the table. */
+  readonly unitProgressStaleDag: string;
   readonly noUnits: string;
   readonly noUnitsPill: string;
   /** The plan skips Units Generation (scan/unit-artifact-mode.ts) — there are no units. */
@@ -322,8 +329,8 @@ export interface OverviewStrings {
   /** No readable Units Generation action: the matrix assumes per-unit placement. */
   readonly unitModeUnknown: string;
   /** The authored unit DAG is unreadable to the engine: no roster is drawn in its place. */
-  unitDagMalformed(reason: string): string;
-  readonly unitDagMalformedPill: string;
+  unitDagMalformed(reason: string, stop: UnitDagStop): string;
+  unitDagMalformedPill(stop: UnitDagStop): string;
   /** The authored DAG outvoted a runtime-graph cache that no longer matches it. */
   readonly unitDagHealed: string;
 

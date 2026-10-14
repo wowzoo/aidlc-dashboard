@@ -347,6 +347,13 @@ export interface RunPosition {
   markerMiss?: MarkerMiss;
   /** A current directive naming a different stage or unit than the unit cache. */
   conflict?: { stage: string; unit?: string };
+  /**
+   * The unit cache names a unit the resolved roster does not have (`absent`), or the
+   * roster cannot be read (`unknown`, the engine's `malformed`). The engine walks only the
+   * roster's units and resumes an active one only from among them (`nextUncoveredUnit`),
+   * so neither case is a position this reader can claim.
+   */
+  offRoster?: "absent" | "unknown";
 }
 
 export interface PositionInput {
@@ -356,6 +363,11 @@ export interface PositionInput {
   constructionIteration: string;
   /** True when the catalogue says this stage runs once per unit; absent = no catalogue. */
   isPerUnit?: (slug: string) => boolean;
+  /**
+   * The resolved unit roster (scan/unit-dag.ts): the units, `null` when it is malformed
+   * (unknowable), absent when there is no DAG — then the cache is not checked against one.
+   */
+  rosterUnits?: string[] | null;
   marker: { marker: DirectiveMarker } | { miss: MarkerMiss };
 }
 
@@ -371,12 +383,19 @@ export function resolvePosition(p: PositionInput): RunPosition {
   const markerMiss = "miss" in p.marker ? p.marker.miss : undefined;
   if (p.unitStage && p.activeUnit) {
     const agrees = !marker || (marker.stage === p.unitStage && marker.unit === p.activeUnit);
+    const offRoster =
+      p.rosterUnits === null
+        ? ("unknown" as const)
+        : p.rosterUnits && !p.rosterUnits.includes(p.activeUnit)
+          ? ("absent" as const)
+          : undefined;
     return {
       stage: p.unitStage,
       unit: p.activeUnit,
       basis: "unit-stage",
-      verified: agrees,
+      verified: agrees && !offRoster,
       ...(agrees || !marker ? {} : { conflict: { stage: marker.stage, unit: marker.unit } }),
+      ...(offRoster ? { offRoster } : {}),
     };
   }
   if (marker) return { stage: marker.stage, unit: marker.unit, basis: "directive", verified: true };

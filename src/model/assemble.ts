@@ -29,7 +29,7 @@ import { ENGINE_DIR } from "../scan/engine-dir";
 import { readHealth } from "../scan/hooks-health";
 import { type StateCompat, readUnitLifecycle, scanConstructionMatrix } from "../scan/matrix";
 import { readDiaries } from "../scan/memory-diary";
-import { type StageStatus, parseState } from "../scan/parser";
+import { type StageStatus, type UnitProgress, parseState } from "../scan/parser";
 import { readQuestions } from "../scan/questions";
 import { type NoRunKind, recordDirMatches, resolveState } from "../scan/resolve";
 import { buildRework } from "../scan/rework";
@@ -49,13 +49,14 @@ import {
 } from "../scan/stage-catalog";
 import { buildTiming } from "../scan/timing";
 import { unitArtifactMode } from "../scan/unit-artifact-mode";
-import { resolveUnitDag } from "../scan/unit-dag";
+import { type UnitDag, resolveUnitDag } from "../scan/unit-dag";
 import { buildProvenance, graphLastEvent } from "./freshness";
 import type {
   Blocker,
   DashboardModel,
   GateSummary,
   RunIdentity,
+  UnitDagStop,
   UsageMode,
   UsageView,
   Warning,
@@ -381,6 +382,28 @@ function eventDetail(fields: Record<string, string>): string | undefined {
  * the two harnesses expose usage through different mechanisms. `usageCtx.mode`
  * picks the panel (default `auto` — see resolveUsageKind).
  */
+/**
+ * Whether `## Unit Progress` still describes the roster the engine would rebuild it from.
+ * The engine's `deriveTeamUnitProgressModel` re-reads the DAG on every `next` and refuses
+ * one that is not `ok`, so a table whose unit set differs — or one beside a DAG the engine
+ * cannot read — is the last projection written, not the current authority. Only the unit
+ * SET is compared: the cells are the engine's own and this reader does not re-derive them.
+ */
+function unitProgressStaleness(
+  up: UnitProgress | undefined,
+  dag: UnitDag,
+): Pick<DashboardModel, "unitProgressStale"> {
+  if (!up || up.malformed || up.rows.length === 0 || dag.state === "none") return {};
+  if (dag.state === "malformed") return { unitProgressStale: { kind: "dag-unreadable" } };
+  const table = new Set(up.rows.map((r) => r.unit));
+  const roster = new Set(dag.units);
+  const missing = dag.units.filter((u) => !table.has(u));
+  const extra = up.rows.map((r) => r.unit).filter((u) => !roster.has(u));
+  return missing.length || extra.length
+    ? { unitProgressStale: { kind: "roster", missing, extra } }
+    : {};
+}
+
 export function assemble(
   root: string,
   harnessDir?: string,
@@ -449,12 +472,27 @@ export function assemble(
   // state's own fact, not a contract judgement.
   const artifactMode = unitArtifactMode(stateText, catalog?.scopeGrid);
   // The unit roster, resolved as the engine resolves it: the authored DAG first, the
-  // runtime graph only as a cache that still matches it (scan/unit-dag.ts). The engine
-  // asks for it only where per-unit stages run per unit, so a stage-level plan's
-  // malformed file is no stop and gets no warning.
+  // runtime graph only as a cache that still matches it (scan/unit-dag.ts). The engine's
+  // Construction routing asks for it only where per-unit stages run per unit, so a
+  // stage-level plan's malformed file stops nothing there and gets no warning (other
+  // engine readers — team ownership, the board — still resolve it; none is a stop the
+  // page reports).
   const unitDag = resolveUnitDag(recordDir);
+  // The engine refuses an unreadable block at Units Generation's own gate
+  // (`checkStageCompletionEvidence`), so while that stage is open the file may simply be
+  // mid-write; once it has closed, every per-unit stage stops on it.
+  const unitDagStop: UnitDagStop =
+    state.phases.flatMap((p) => p.stages).find((s) => s.slug === "units-generation")?.status ===
+    "done"
+      ? "construction"
+      : "units-generation-gate";
   if (unitDag.state === "malformed" && artifactMode !== "stage-level") {
-    warnings.push({ code: "unit-dag-malformed", reason: unitDag.reason, detail: unitDag.detail });
+    warnings.push({
+      code: "unit-dag-malformed",
+      reason: unitDag.reason,
+      detail: unitDag.detail,
+      stop: unitDagStop,
+    });
   }
 
   const ledger = readAuditLedger(recordDir, isStage, root);
@@ -481,6 +519,15 @@ export function assemble(
     constructionIteration: state.constructionIteration ?? "",
     isPerUnit: catalog ? (s) => catalog?.bySlug.get(s)?.forEach === "unit-of-work" : undefined,
     marker,
+    // A stage-level plan has no units to check the cache against (scan/unit-artifact-mode.ts).
+    rosterUnits:
+      artifactMode === "stage-level"
+        ? undefined
+        : unitDag.state === "ok"
+          ? unitDag.units
+          : unitDag.state === "malformed"
+            ? null
+            : undefined,
   });
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
@@ -842,7 +889,10 @@ export function assemble(
     unitDag:
       unitDag.state === "ok"
         ? { state: "ok", healed: unitDag.healed, graphDiffers: unitDag.graphDiffers }
-        : unitDag,
+        : unitDag.state === "malformed"
+          ? { ...unitDag, stop: unitDagStop }
+          : unitDag,
+    ...unitProgressStaleness(state.unitProgress, unitDag),
     checkpointProofs,
     sensors,
     questions,
