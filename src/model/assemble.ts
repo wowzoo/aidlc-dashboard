@@ -791,6 +791,10 @@ export function assemble(
     eventCounts: [...ledger.counts].sort((a, b) => b[1] - a[1]),
     recentEvents: recent,
     totalEvents: ledger.events.length,
+    partialAudit:
+      ledger.refused && ledger.refused.length > 0 && ledger.shards.length > 0
+        ? { refused: ledger.refused.length }
+        : undefined,
     provenance,
     warnings,
     artifacts,

@@ -445,6 +445,98 @@ describe("render", () => {
     }
   });
 
+  describe("a partly refused ledger does not make claims about the whole run", () => {
+    // The fixture's second clone holds the run's only GATE_REJECTED. Refuse that shard
+    // and the readable rest has no rejection at all — which the rework panel used to
+    // print as "every gate passed first time", under the very warning that said a
+    // shard was not read.
+    const EN = strings("en");
+    const withAudit = (
+      change: (audit: string, root: string) => void,
+      check: (m: ReturnType<typeof assemble>) => void,
+    ) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-part-"));
+      const audit = path.join(root, "aidlc/spaces/default/intents/260101-demo-migration/audit");
+      try {
+        fs.cpSync(FIXTURE, root, { recursive: true });
+        change(audit, root);
+        check(assemble(root));
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    };
+    const link = (audit: string, root: string, name: string) => {
+      const shard = path.join(audit, name);
+      const copy = path.join(root, `moved-${name}`);
+      fs.renameSync(shard, copy);
+      fs.symlinkSync(copy, shard);
+    };
+    const OTHER = "other-clone-99887766aabb.md";
+    const OWN = "demo-host-aabbccdd1122.md";
+
+    test("one shard refused, one read: the rework claim is hedged, in both languages", () => {
+      withAudit(
+        (audit, root) => link(audit, root, OTHER),
+        (m) => {
+          expect(m.partialAudit).toEqual({ refused: 1 });
+          expect(m.rework.rejected).toBe(0);
+          const en = renderBody(m, "en");
+          const ko = renderBody(m, "ko");
+          expect(en).not.toContain(EN.timeline.reworkNone);
+          expect(ko).not.toContain(KO.timeline.reworkNone);
+          expect(en).toContain(EN.timeline.reworkNonePartial(1));
+          expect(ko).toContain(KO.timeline.reworkNonePartial(1));
+          expect(en).toContain(EN.timeline.partialAuditNote(1, 1));
+          // "Nothing in flight" and "no spans" are claims about the ledger too.
+          const settled = {
+            ...m,
+            timing: {
+              ...m.timing,
+              stages: m.timing.stages.map((sp) =>
+                sp.endKind === "in-flight" ? { ...sp, endKind: "completed" as const } : sp,
+              ),
+            },
+          };
+          expect(renderBody(settled, "en")).not.toContain(`>${EN.timeline.noneInFlight} · `);
+          expect(renderBody(settled, "en")).toContain(EN.timeline.noneInFlightPartial(1));
+          const spanless = { ...m, timing: { ...m.timing, stages: [] } };
+          expect(renderBody(spanless, "en")).not.toContain(EN.timeline.noStageSpans);
+          expect(renderBody(spanless, "en")).toContain(EN.timeline.noStageSpansPartial(1));
+        },
+      );
+    });
+
+    test("the same readable ledger with nothing refused keeps the categorical claim", () => {
+      withAudit(
+        (audit) => fs.rmSync(path.join(audit, OTHER)),
+        (m) => {
+          expect(m.partialAudit).toBeUndefined();
+          const en = renderBody(m, "en");
+          expect(en).toContain(EN.timeline.reworkNone);
+          expect(en).not.toContain(EN.timeline.reworkNonePartial(1));
+          expect(en).not.toContain(EN.timeline.partialAuditNote(1, 1));
+        },
+      );
+    });
+
+    test("every shard refused reads as before — the warning, and no spans", () => {
+      withAudit(
+        (audit, root) => {
+          link(audit, root, OTHER);
+          link(audit, root, OWN);
+        },
+        (m) => {
+          expect(m.partialAudit).toBeUndefined();
+          expect(codes(m)).toContain("audit-shard-refused");
+          const en = renderBody(m, "en");
+          expect(en).toContain(EN.timeline.noStageSpans);
+          expect(en).toContain(EN.status.checksNone);
+          expect(en).not.toContain(EN.timeline.partialAuditNote(2, 0));
+        },
+      );
+    });
+  });
+
   test("a declared State Version mismatch BLOCKS the contract, it does not just warn", () => {
     // Warning and then handing the matrix the same catalogue was the worst of both: the
     // page said the two sources disagree and then judged the cells against the newer

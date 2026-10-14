@@ -361,7 +361,13 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
   let count: { text: string; tone: CountTone };
   switch (r.state) {
     case "none":
-      rows.push({ label: esc(x.checksNone), value: "—", dashed: true });
+      // Sensor rows come from the audit, so with a shard refused "none" and "passed" are
+      // readings of the shards read (DashboardModel.partialAudit).
+      rows.push({
+        label: esc(m.partialAudit ? x.checksNonePartial(m.partialAudit.refused) : x.checksNone),
+        value: "—",
+        dashed: true,
+      });
       count = { text: "–", tone: "mute" };
       break;
     case "in-flight":
@@ -387,7 +393,15 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
       count = { text: "?", tone: "warn" };
       break;
     case "passed":
-      rows.push({ label: esc(x.checksPassed(r.passed)), value: "", tone: "ok" });
+      rows.push({
+        label: esc(
+          m.partialAudit
+            ? x.checksPassedPartial(r.passed, m.partialAudit.refused)
+            : x.checksPassed(r.passed),
+        ),
+        value: "",
+        tone: "ok",
+      });
       count = { text: "0", tone: "ok" };
       break;
   }

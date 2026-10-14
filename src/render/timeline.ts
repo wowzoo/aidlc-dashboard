@@ -256,7 +256,11 @@ function reworkBlock(m: DashboardModel, classifiedSec: number, s: Strings): stri
   const t = s.timeline;
   const r = m.rework;
   if (r.rejected === 0 && r.revisions === 0 && r.jumps === 0 && r.reopened === 0) {
-    return `<p class="note">${esc(t.reworkNone)}</p>`;
+    // "Every gate passed first time" is a claim about the whole run; with a shard
+    // refused the rejection may be in it (DashboardModel.partialAudit).
+    return `<p class="note">${esc(
+      m.partialAudit ? t.reworkNonePartial(m.partialAudit.refused) : t.reworkNone,
+    )}</p>`;
   }
   const share = classifiedSec > 0 ? pct(r.reworkSec, classifiedSec) : "0.0";
   const rows = r.stages
@@ -539,7 +543,12 @@ function axis(runStart: number, runSpan: number, silenceSec: number, s: Strings)
 function body(m: DashboardModel, s: Strings): string {
   const x = s.timeline;
   const t = m.timing;
-  if (t.stages.length === 0 || !t.firstTs) return `<p class="note">${esc(x.noStageSpans)}</p>`;
+  const partial = m.partialAudit;
+  if (t.stages.length === 0 || !t.firstTs) {
+    return `<p class="note">${esc(
+      partial ? x.noStageSpansPartial(partial.refused) : x.noStageSpans,
+    )}</p>`;
+  }
 
   const runStart = Date.parse(t.firstTs);
   const runSpan = t.elapsedSec;
@@ -555,7 +564,7 @@ function body(m: DashboardModel, s: Strings): string {
       ? x.inFlight(
           inFlight.map((sp) => `<b>${esc(sp.stage)}</b> ${esc(hours(sp.elapsedSec))}`).join(" · "),
         )
-      : esc(x.noneInFlight)
+      : esc(partial ? x.noneInFlightPartial(partial.refused) : x.noneInFlight)
   } · ${m.gates.awaitingStage ? x.awaiting(esc(m.gates.awaitingStage)) : x.awaitingNone}${
     m.rework.provisional ? esc(x.reworkPending) : ""
   }</p>`;
@@ -563,6 +572,11 @@ function body(m: DashboardModel, s: Strings): string {
   // On a multi-clone run the merged split is not a per-person figure.
   const mergedNote = t.parallel
     ? `<p class="note warn">${x.mergedNote(t.workers.length, t.clones)}</p>`
+    : "";
+  // Said once rather than beside every figure: the window, the split, "no overlap" in
+  // the worker table and the rework counts all stand on the clones that were read.
+  const partialNote = partial
+    ? `<p class="note warn">${esc(x.partialAuditNote(partial.refused, t.clones))}</p>`
     : "";
 
   // The window total is the DENOMINATOR of everything below it, not a sixth bucket, so
@@ -596,6 +610,7 @@ ${
     x.delegated(hours(t.total.delegatedSec)),
   )}</p>
 ${nowLine}
+${partialNote}
 ${mergedNote}
 <details${m.rework.rejected > 0 ? " open" : ""}><summary>${esc(
     x.reworkSummary(m.rework.rejected, hours(m.rework.reworkSec)),

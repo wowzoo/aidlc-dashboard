@@ -264,9 +264,13 @@ export interface StatusStrings {
   readonly humanNone: string;
   readonly humanSource: string;
   readonly checksNone: string;
+  /** `checksNone` when some audit paths were refused (`DashboardModel.partialAudit`). */
+  checksNonePartial(refused: number): string;
   checksInFlight(pending: number): string;
   checksFailed(failed: number): string;
   checksPassed(passed: number): string;
+  /** `checksPassed` when some audit paths were refused — a failure may be among them. */
+  checksPassedPartial(passed: number, refused: number): string;
   checksUnverified(n: number): string;
   readonly checksUnverifiedTip: string;
   /** Names the stage the checks are for — Current Stage, which can differ from the run line. */
@@ -487,6 +491,9 @@ export interface TimelineStrings {
   loadDelegations(n: number): string;
   loadHumanTurns(n: number): string;
   readonly noStageSpans: string;
+  noStageSpansPartial(refused: number): string;
+  /** Said once at the head of the panel while `DashboardModel.partialAudit` is set. */
+  partialAuditNote(refused: number, clones: number): string;
 
   // buckets
   readonly bucketWait: string;
@@ -513,6 +520,7 @@ export interface TimelineStrings {
   /** Raw markup. */
   inFlight(list: string): string;
   readonly noneInFlight: string;
+  noneInFlightPartial(refused: number): string;
   /** Raw markup. */
   awaiting(stage: string): string;
   /** Raw markup. */
@@ -525,6 +533,8 @@ export interface TimelineStrings {
   // rework
   reworkSummary(rejected: number, hours: string): string;
   readonly reworkNone: string;
+  /** Never "every gate passed first time": a refused shard can hold the rejection. */
+  reworkNonePartial(refused: number): string;
   readonly reworkProvisionalTip: string;
   feedbackCount(n: number): string;
   reasonsSummary(n: number): string;

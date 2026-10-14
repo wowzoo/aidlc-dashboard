@@ -207,9 +207,13 @@ const status: StatusStrings = {
   humanNone: "✓ Nothing awaiting you",
   humanSource: "questions files",
   checksNone: "No checks recorded this stage",
+  checksNonePartial: (refused) =>
+    `No checks recorded this stage in the audit shards read — ${plural(refused, "audit path")} refused, and a check recorded there is not seen`,
   checksInFlight: (pending) => `⋯ ${plural(pending, "check")} running`,
   checksFailed: (failed) => `✗ ${plural(failed, "check failure")} recorded`,
   checksPassed: (passed) => `✓ ${plural(passed, "check")} passed`,
+  checksPassedPartial: (passed, refused) =>
+    `✓ ${plural(passed, "check")} passed in the audit shards read — ${plural(refused, "refused audit path")} may hold a failure`,
   checksSource: (stage) => `sensors · ${stage} (Current Stage) · audit log`,
   checksUnverified: (n) => `? ${plural(n, "check")} without a verified result`,
   checksUnverifiedTip:
@@ -469,6 +473,10 @@ const timeline: TimelineStrings = {
   loadDelegations: (n) => `reviews ${n}`,
   loadHumanTurns: (n) => `human ${n}`,
   noStageSpans: "The audit ledger holds no stage spans.",
+  noStageSpansPartial: (refused) =>
+    `The audit shards read hold no stage spans — ${plural(refused, "audit path")} refused.`,
+  partialAuditNote: (refused, clones) =>
+    `${plural(refused, "audit path")} refused, so this panel covers the ${plural(clones, "clone")} read: a clone recorded only in a refused path is missing from the times, the rework and the worker table, and an absence below is an absence in what was read.`,
 
   bucketWait: "user wait",
   bucketWaitTip: "From a gate or question opening until a human answered",
@@ -495,6 +503,8 @@ const timeline: TimelineStrings = {
   delegated: (h) => ` · delegated ${h}`,
   inFlight: (list) => `In flight: ${list}`,
   noneInFlight: "No stage in flight",
+  noneInFlightPartial: (refused) =>
+    `No stage in flight in the audit shards read (${plural(refused, "audit path")} refused)`,
   awaiting: (stage) => `awaiting approval: <b>${stage}</b>`,
   awaitingNone:
     'no stage awaiting approval<span class="mute"> (nothing is waiting at a gate right now — past submissions are in the rework table below)</span>',
@@ -508,6 +518,8 @@ const timeline: TimelineStrings = {
   reworkSummary: (rejected, h) =>
     `Rework — ${rejected} rejection${rejected === 1 ? "" : "s"} · ${h}`,
   reworkNone: "No rejections or revisions — every gate passed first time.",
+  reworkNonePartial: (refused) =>
+    `No rejections or revisions in the audit shards read — ${plural(refused, "audit path")} refused, and a rejection recorded there is not seen.`,
   reworkProvisionalTip: "Not approved yet — this time is still growing",
   feedbackCount: (n) => `${n}`,
   reasonsSummary: (n) => `${n} rejection reason${n === 1 ? "" : "s"} written by a human — in full`,

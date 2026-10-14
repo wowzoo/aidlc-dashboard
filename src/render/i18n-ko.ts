@@ -195,9 +195,13 @@ const status: StatusStrings = {
   humanNone: "✓ 답변 대기 없음",
   humanSource: "questions 파일",
   checksNone: "현재 stage 검사 기록 없음",
+  checksNonePartial: (refused) =>
+    `읽은 감사 기록에는 현재 stage 검사 기록 없음 — 감사 기록 경로 ${refused}곳을 읽지 않아 그쪽 기록은 보이지 않습니다`,
   checksInFlight: (pending) => `⋯ 검사 진행 중 ${pending}건`,
   checksFailed: (failed) => `✗ 검사 실패 ${failed}건 기록`,
   checksPassed: (passed) => `✓ 검사 통과 ${passed}건`,
+  checksPassedPartial: (passed, refused) =>
+    `✓ 읽은 감사 기록에서 검사 통과 ${passed}건 — 읽지 않은 경로 ${refused}곳에 실패가 있을 수 있습니다`,
   checksSource: (stage) => `sensor · ${stage} (Current Stage) · 감사 로그`,
   checksUnverified: (n) => `? 검증된 결과가 없는 검사 ${n}건`,
   checksUnverifiedTip:
@@ -446,6 +450,10 @@ const timeline: TimelineStrings = {
   loadDelegations: (n) => `리뷰 ${n}`,
   loadHumanTurns: (n) => `사람 ${n}`,
   noStageSpans: "감사 기록에 stage 구간 없음.",
+  noStageSpansPartial: (refused) =>
+    `읽은 감사 기록에 stage 구간 없음 — 감사 기록 경로 ${refused}곳은 읽지 않았습니다.`,
+  partialAuditNote: (refused, clones) =>
+    `감사 기록 경로 ${refused}곳을 읽지 않아 이 패널은 읽은 clone ${clones}개만 다룹니다. 그쪽에만 기록된 clone 은 시간·재작업·작업자 표에서 빠지고, 아래의 '없음'은 읽은 기록 안에서의 없음입니다.`,
 
   bucketWait: "사용자 대기",
   bucketWaitTip: "관문·질문이 열린 뒤 사람이 답하기까지",
@@ -471,6 +479,8 @@ const timeline: TimelineStrings = {
   delegated: (h) => ` · 위임 ${h}`,
   inFlight: (list) => `진행 중 ${list}`,
   noneInFlight: "진행 중인 stage 없음",
+  noneInFlightPartial: (refused) =>
+    `읽은 감사 기록에는 진행 중인 stage 없음 (읽지 않은 경로 ${refused}곳)`,
   awaiting: (stage) => `승인 대기 <b>${stage}</b>`,
   awaitingNone:
     '승인 대기 없음<span class="mute"> (지금 관문에서 승인을 기다리는 stage 가 없다는 뜻 — 과거 제출 이력은 아래 재작업 표)</span>',
@@ -482,6 +492,8 @@ const timeline: TimelineStrings = {
 
   reworkSummary: (rejected, h) => `재작업 — 반려 ${rejected}건 · ${h}`,
   reworkNone: "반려·수정 기록 없음 — 모든 관문을 한 번에 통과.",
+  reworkNonePartial: (refused) =>
+    `읽은 감사 기록에는 반려·수정 기록 없음 — 감사 기록 경로 ${refused}곳을 읽지 않아 그쪽의 반려는 보이지 않습니다.`,
   reworkProvisionalTip: "아직 승인되지 않음 — 시간은 계속 늘어남",
   feedbackCount: (n) => `${n}건`,
   reasonsSummary: (n) => `사람이 적은 반려 사유 ${n}건 — 전문`,

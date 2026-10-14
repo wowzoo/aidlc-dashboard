@@ -272,6 +272,21 @@ export interface DashboardModel {
   }[];
   /** Total events in the ledger, so a truncated stream can say so. */
   totalEvents: number;
+  /**
+   * Set when some audit paths were refused (`audit-shard-refused`) while at least one
+   * shard was still read. The readable rest is a ledger, just not the run's, so a
+   * sentence that claims something of the whole run — "every gate passed first time",
+   * "no stage in flight", "N checks passed" — would rest on an absence the refusal
+   * can explain, and is hedged instead. Absent when nothing was refused, and when
+   * nothing was read: an empty ledger makes no such claim, and its panels already say
+   * so beside the warning.
+   *
+   * Engine-parity verdicts are NOT hedged by it — the waits and the receipt matrix.
+   * The engine's lenient readers (2.11.0 `readAuditShardEvents` / `readAllAuditShards`,
+   * which the decision pairing and the unit lifecycle read) skip a refused shard the
+   * same way, so those already say what the engine itself concludes on this checkout.
+   */
+  partialAudit?: { refused: number };
   /** Freshness per source, keyed by source kind. */
   provenance: Record<SourceKind, Provenance>;
   /** Non-fatal problems hit while reading (missing catalogue, unreadable file). */

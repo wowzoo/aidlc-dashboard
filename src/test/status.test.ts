@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import { buildStatus } from "../model/status";
 import type { DashboardModel } from "../model/types";
+import { esc } from "../render/common";
 import { strings } from "../render/i18n";
 import { renderBody } from "../render/page";
 import { renderRunHealth, renderRunLine } from "../render/status";
@@ -330,5 +331,40 @@ describe("Run Health card — markup", () => {
     expect(/[가-힣]/.test(html)).toBe(false);
     expect(html).toContain("Nudged once");
     expect(html).toContain("Your answers");
+  });
+});
+
+describe("Run Health card — a partly refused audit ledger", () => {
+  // Sensor passes and failures come from the audit, so with a shard refused a clean
+  // reading covers only the shards read. The tab count is still what was read; the
+  // sentence is what must not claim more.
+  const en = strings("en");
+  const passedRow = {
+    fired: 2,
+    passed: 2,
+    failed: 0,
+    superseded: 0,
+    unevaluated: 0,
+    unverifiedStanding: 0,
+    pending: 0,
+  };
+  const noFailures = (m: DashboardModel): DashboardModel => ({
+    ...m,
+    sensors: { ...m.sensors, failures: [] },
+  });
+
+  test("passed and none are hedged when a shard was refused", () => {
+    const passed = noFailures({ ...withSensorRow(passedRow), partialAudit: { refused: 2 } });
+    const html = renderRunHealth(passed, en);
+    expect(html).toContain(esc(en.status.checksPassedPartial(2, 2)));
+    expect(html).not.toContain(`>${esc(en.status.checksPassed(2))}<`);
+    const none = noFailures({ ...withSensorRow({ fired: 0 }), partialAudit: { refused: 1 } });
+    expect(renderRunHealth(none, en)).toContain(esc(en.status.checksNonePartial(1)));
+    expect(renderRunHealth(none, en)).not.toContain(`>${esc(en.status.checksNone)}<`);
+  });
+
+  test("and read as before when nothing was refused", () => {
+    const html = renderRunHealth(noFailures(withSensorRow(passedRow)), en);
+    expect(html).toContain(`>${esc(en.status.checksPassed(2))}<`);
   });
 });
