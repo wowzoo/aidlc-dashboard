@@ -816,6 +816,8 @@ export interface CliStrings {
   badLang(raw: string): string;
   unknownArg(arg: string): string;
   readonly noRootPicker: string;
+  /** The running Bun is below package.json's `engines.bun` floor. */
+  bunTooOld(have: string, floor: string): string;
   // Startup and isolated-failure lines the operator reads to judge whether the run is
   // healthy. They follow `--lang`: there is one operator per process and that flag is
   // exactly their choice.

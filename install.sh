@@ -134,8 +134,10 @@ find_bun() {
 
 # MIN_BUN is package.json's `engines.bun` floor, and bun_version_ok is start.sh's
 # byte-for-byte — src/test/bun-floor.test.ts pins both. Exit 0 = at least MIN_BUN,
-# 1 = older, 2 = not a version; only the leading X.Y.Z counts, so a canary suffix
-# (`1.4.3-canary.1+abc`) reads as its release number.
+# 1 = older, 2 = not a version; only the leading X.Y.Z counts, except that a
+# prerelease of exactly MIN_BUN (`1.4.0-canary.1`) is below it. This is the floor of
+# the release this script was cut with — an AIDLC_VERSION pin of another release is
+# still judged by it, and the launcher that release ships has the final say.
 MIN_BUN=1.4.0
 bun_version_ok() {
   printf '%s\n' "$1" | awk -v min="$MIN_BUN" '
@@ -147,6 +149,7 @@ bun_version_ok() {
         if (have[i] + 0 > need[i] + 0) exit 0
         if (have[i] + 0 < need[i] + 0) exit 1
       }
+      if (substr($0, RSTART + RLENGTH, 1) == "-") exit 1
       exit 0
     }
     END { if (NR == 0) exit 2 }'
@@ -157,13 +160,14 @@ bun_version_ok() {
 # Not upgraded here — that is the user's bun, possibly shared with other projects.
 BUN_OLD=""
 report_bun() {
-  BUN_VERSION=$("$BUN" --version 2>/dev/null || true)
+  # A --version that fails is "unknown", whatever it printed.
+  BUN_VERSION=$("$BUN" --version 2>/dev/null) || BUN_VERSION=""
   say "▸ bun ${BUN_VERSION:-?} ($BUN)"
   BUN_STATUS=0
   bun_version_ok "$BUN_VERSION" || BUN_STATUS=$?
   if [ "$BUN_STATUS" -eq 1 ]; then
     BUN_OLD="$BUN_VERSION"
-    say "  ⚠ bun $BUN_VERSION 은 너무 오래됐다 — $MIN_BUN 이상이 필요하다. 업그레이드: \"$BUN\" upgrade"
+    say "  ⚠ bun $BUN_VERSION 은 너무 오래됐다 — $MIN_BUN 이상이 필요하다. 업그레이드: \"$BUN\" upgrade (Homebrew 는 brew upgrade bun)"
   elif [ "$BUN_STATUS" -ne 0 ]; then
     say "  ⚠ bun 버전을 읽지 못했다 — $MIN_BUN 이상인지 확인하지 못했다."
   fi
@@ -216,7 +220,7 @@ if [ -n "$BUN_OLD" ]; then
   # Repeated at the end because it is the one thing standing between this install
   # and a working launch: start.sh stops on this bun.
   say ""
-  say "  ⚠ 먼저 bun 을 $MIN_BUN 이상으로 올릴 것 (지금 $BUN_OLD): \"$BUN\" upgrade"
+  say "  ⚠ 먼저 bun 을 $MIN_BUN 이상으로 올릴 것 (지금 $BUN_OLD): \"$BUN\" upgrade (Homebrew 는 brew upgrade bun)"
 fi
 say ""
 say "  $RUN"

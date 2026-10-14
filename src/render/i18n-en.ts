@@ -802,6 +802,8 @@ const cli: CliStrings = {
   badLang: (raw) => `--lang must be either ko or en: ${raw}`,
   unknownArg: (arg) => `Unknown argument: ${arg}`,
   noRootPicker: "No --root — choose a folder in the browser",
+  bunTooOld: (have, floor) =>
+    `bun ${have} is too old — ${floor} or later is required. Upgrade with bun upgrade, then run again.`,
   manualRefreshFailed: (detail) => `Manual refresh failed (isolated): ${detail}`,
   routeFailed: (route) => `${route} failed:`,
   creditBootFailed: (detail) =>

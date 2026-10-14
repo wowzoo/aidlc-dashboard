@@ -49,7 +49,7 @@ import {
   type WorkspaceDiscovery,
   discoverWorkspaces,
 } from "./scan/workspaces";
-import { VERSION } from "./version";
+import { BUN_FLOOR, VERSION, belowFloor } from "./version";
 
 /** Path the u3 credit view's no-JS refresh form POSTs to (must match verbatim). */
 const REFRESH_PATH = "/api/credit/refresh";
@@ -741,6 +741,13 @@ if (import.meta.main) {
   }
 
   const cliStrings = strings(opts.locale).cli;
+  // The launchers check this too, but `bun run src/server.ts` and `bun run start` pass
+  // none of them. Refused before anything is read or spawned; an unreadable version or
+  // floor is not "too old".
+  if (BUN_FLOOR && belowFloor(Bun.version, BUN_FLOOR)) {
+    console.error(`[aidlc-dashboard] ${cliStrings.bunTooOld(Bun.version, BUN_FLOOR)}`);
+    process.exit(1);
+  }
   activeRoot = opts.root;
 
   // With a --root, fail loudly at startup rather than on first request. Without

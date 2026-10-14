@@ -769,6 +769,8 @@ const cli: CliStrings = {
   badLang: (raw) => `--lang 는 ko|en 중 하나여야 함: ${raw}`,
   unknownArg: (arg) => `알 수 없는 인자: ${arg}`,
   noRootPicker: "--root 없음 — 브라우저에서 폴더 선택",
+  bunTooOld: (have, floor) =>
+    `bun ${have} 은 너무 오래됐습니다 — ${floor} 이상이 필요합니다. bun upgrade 로 올린 뒤 다시 실행하세요.`,
   manualRefreshFailed: (detail) => `수동 새로고침 실패(격리됨): ${detail}`,
   routeFailed: (route) => `${route} 실패:`,
   creditBootFailed: (detail) => `크레딧 서브시스템 부팅 실패(대시보드는 계속 기동): ${detail}`,

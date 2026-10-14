@@ -193,12 +193,16 @@ function Find-Bun {
 $minBun = [version]'1.4.0'
 
 # $true = at least $minBun, $false = older, $null = not a version. Only the leading
-# X.Y.Z counts, so a canary or build suffix (`1.4.3-canary.1+abc`) reads as its
-# release number — the same rule as start.sh / install.sh.
+# X.Y.Z counts, so a canary of a later release (`1.4.3-canary.1+abc`) reads as that
+# release — but a prerelease of exactly $minBun (`1.4.0-canary.1`) is below it, as
+# semver orders it. The same rule as start.sh / install.sh / src/version.ts.
 function Test-BunVersion([string]$v) {
-  if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)')) { return $null }
-  $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
-  return ($have -ge $minBun)
+  if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)(-)?')) { return $null }
+  $pre = [bool]$Matches[4]
+  # [version] throws on a component past Int32 — that is "not a version", not a crash.
+  try { $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" } catch { return $null }
+  if ($have -ne $minBun) { return ($have -gt $minBun) }
+  return (-not $pre)
 }
 
 # Prints the version line and returns the version when it is too old (else $null):
@@ -207,12 +211,16 @@ function Test-BunVersion([string]$v) {
 # scope of our own to assign into. Not upgraded here — that is the user's bun,
 # possibly shared with other projects.
 function Report-Bun {
+  # A --version that fails is "unknown", whatever it printed.
   $v = ''
-  try { $v = ([string](& $bun --version | Select-Object -First 1)).Trim() } catch { }
+  try {
+    $out = @(& $bun --version)
+    if ($LASTEXITCODE -eq 0 -and $out.Count -gt 0) { $v = ([string]$out[0]).Trim() }
+  } catch { }
   Say "▸ bun $(if ($v) { $v } else { '?' }) ($bun)"
   $ok = Test-BunVersion $v
   if ($ok -eq $false) {
-    Say "  ⚠ bun $v 은 너무 오래됐다 — $minBun 이상이 필요하다. 업그레이드: & '$bun' upgrade"
+    Say "  ⚠ bun $v 은 너무 오래됐다 — $minBun 이상이 필요하다. 업그레이드: & '$bun' upgrade (scoop: scoop update bun, winget: winget upgrade Oven-sh.Bun)"
     return $v
   }
   if ($null -eq $ok) {
@@ -278,7 +286,7 @@ if ($bunOld) {
   # Repeated at the end because it is the one thing standing between this install and
   # a working launch: start.ps1 stops on this bun.
   Say ''
-  Say "  ⚠ 먼저 bun 을 $minBun 이상으로 올릴 것 (지금 $bunOld): & '$bun' upgrade"
+  Say "  ⚠ 먼저 bun 을 $minBun 이상으로 올릴 것 (지금 $bunOld): & '$bun' upgrade (scoop: scoop update bun, winget: winget upgrade Oven-sh.Bun)"
 }
 Say ''
 Say "  $run"

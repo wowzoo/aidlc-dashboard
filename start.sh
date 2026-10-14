@@ -61,8 +61,9 @@ fi
 # byte-for-byte with install.sh (the test checks that too) and is POSIX sh there.
 MIN_BUN=1.4.0
 # Exit 0 = at least MIN_BUN, 1 = older, 2 = not a version. Only the leading
-# X.Y.Z counts, so a canary or build suffix (`1.4.3-canary.1+abc`) reads as its
-# release number.
+# X.Y.Z counts, so a canary of a later release (`1.4.3-canary.1+abc`) reads as that
+# release — but a prerelease of exactly MIN_BUN (`1.4.0-canary.1`) is below it, as
+# semver orders it. src/version.ts::belowFloor is the same rule for the server.
 bun_version_ok() {
   printf '%s\n' "$1" | awk -v min="$MIN_BUN" '
     NR == 1 {
@@ -73,12 +74,14 @@ bun_version_ok() {
         if (have[i] + 0 > need[i] + 0) exit 0
         if (have[i] + 0 < need[i] + 0) exit 1
       }
+      if (substr($0, RSTART + RLENGTH, 1) == "-") exit 1
       exit 0
     }
     END { if (NR == 0) exit 2 }'
 }
 
-BUN_VERSION="$("$BUN" --version 2>/dev/null || true)"
+# A --version that fails is "unknown", whatever it printed.
+BUN_VERSION="$("$BUN" --version 2>/dev/null)" || BUN_VERSION=""
 echo "▸ bun ${BUN_VERSION:-?} ($BUN)"
 BUN_STATUS=0
 bun_version_ok "$BUN_VERSION" || BUN_STATUS=$?

@@ -76,18 +76,26 @@ if (-not $bun) {
 $minBun = [version]'1.4.0'
 
 # $true = at least $minBun, $false = older, $null = not a version. Only the leading
-# X.Y.Z counts, so a canary or build suffix (`1.4.3-canary.1+abc`) reads as its
-# release number — the same rule as start.sh / install.sh.
+# X.Y.Z counts, so a canary of a later release (`1.4.3-canary.1+abc`) reads as that
+# release — but a prerelease of exactly $minBun (`1.4.0-canary.1`) is below it, as
+# semver orders it. The same rule as start.sh / install.sh / src/version.ts.
 function Test-BunVersion([string]$v) {
-  if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)')) { return $null }
-  $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
-  return ($have -ge $minBun)
+  if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)(-)?')) { return $null }
+  $pre = [bool]$Matches[4]
+  # [version] throws on a component past Int32 — that is "not a version", not a crash.
+  try { $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" } catch { return $null }
+  if ($have -ne $minBun) { return ($have -gt $minBun) }
+  return (-not $pre)
 }
 
 # A too-old bun fails later and obscurely, so stop here and say how to fix it.
 # First line only, and never fatal to read: an odd bun is "unknown", not a crash.
+# A --version that fails is "unknown", whatever it printed.
 $bunVersion = ''
-try { $bunVersion = ([string](& $bun --version | Select-Object -First 1)).Trim() } catch { }
+try {
+  $out = @(& $bun --version)
+  if ($LASTEXITCODE -eq 0 -and $out.Count -gt 0) { $bunVersion = ([string]$out[0]).Trim() }
+} catch { }
 Write-Host "> bun $(if ($bunVersion) { $bunVersion } else { '?' }) ($bun)"
 $bunOk = Test-BunVersion $bunVersion
 if ($bunOk -eq $false) {
@@ -95,6 +103,7 @@ if ($bunOk -eq $false) {
   Write-Host "✗ bun $bunVersion 은 너무 오래됐다 — $minBun 이상이 필요하다." -ForegroundColor Red
   Write-Host ''
   Write-Host "    & '$bun' upgrade" -ForegroundColor Cyan
+  Write-Host '    (scoop 으로 설치했다면 scoop update bun, winget 이면 winget upgrade Oven-sh.Bun)'
   Write-Host ''
   Write-Host '업그레이드 후 다시 실행한다.'
   Write-Host ''
