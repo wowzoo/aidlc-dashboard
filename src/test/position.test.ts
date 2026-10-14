@@ -761,6 +761,86 @@ describe("second-review regressions", () => {
     expect(solo.teamGateUnread).toBe(false);
   });
 
+  test("the team gate is scoped as the hook's activeUnit is: marker, never a leftover cache", () => {
+    // `activeUnit = directive.unit ?? (marker on the same stage ? marker.unit : undefined)`
+    // (aidlc-continue-workflow.ts), and `isHumanWaitStop` asks `unitGateStatus` only with
+    // one. At stage level the router returns before team unit routing
+    // (`usesStageLevelPerUnitArtifacts` ahead of `emitTeamUnitMajorRunStage`, aidlc-
+    // orchestrate.ts), so the directive names no unit and only a current marker can.
+    const team = "- **Unit Ownership**: team\n- **Construction Iteration**: unit-major";
+    const cache = "- **Unit Stage**: code-generation\n- **Active Unit**: unit-b";
+    const claim = claimFilter({
+      team: true,
+      stamp: null,
+      generations: {},
+      space: "default",
+      uuid: () => ({ ok: true, value: "u-1" }),
+    });
+    const teamGate = { claim, scope: "per-stage" as const };
+    const open = (unit: string): AuditEvent[] => [
+      {
+        event: "STAGE_AWAITING_APPROVAL",
+        ts: "2026-10-09T10:00:00Z",
+        shard: "a.md",
+        shardIndex: 0,
+        pos: 0,
+        fields: { Stage: "code-generation", Unit: unit },
+      },
+    ];
+    const at = (o: Parameters<typeof resolvePosition>[0]) => resolvePosition(o);
+    const input = {
+      currentStage: "code-generation",
+      unitStage: "code-generation",
+      activeUnit: "unit-b",
+      constructionIteration: "unit-major",
+    };
+    const none = { miss: "absent" as const };
+    const markerA = { marker: { kind: "ask", stage: "code-generation", unit: "unit-a" } };
+
+    // Stage level, no marker: the leftover cache is no unit, so no gate is asked.
+    const level = at({ ...input, stageLevel: true, marker: none });
+    const noMarker = w(STATE(ROW, `${team}\n${cache}`), none, {
+      events: open("unit-b"),
+      teamGate,
+      position: level,
+      stageLevel: true,
+    });
+    expect(noMarker.teamGate).toBeUndefined();
+    expect(noMarker.teamGateUnread).toBe(false);
+    // Stage level, a current marker naming a unit: the hook takes the marker's unit.
+    const marked = w(STATE(ROW, `${team}\n${cache}`), markerA as never, {
+      events: open("unit-a"),
+      teamGate,
+      position: at({ ...input, stageLevel: true, marker: markerA as never }),
+      stageLevel: true,
+    });
+    expect(marked.teamGate).toEqual({
+      stage: "code-generation",
+      unit: "unit-a",
+      status: "awaiting-approval",
+      scopeVerified: true,
+    });
+
+    // Per unit, a cache unit off the resolved roster (#26) is not where the engine is,
+    // and the hook never reads the cache — no gate is read for it.
+    const off = at({ ...input, rosterUnits: ["unit-a"], marker: none });
+    expect(off.offRoster).toBe("absent");
+    const offRoster = w(STATE(ROW, `${team}\n${cache}`), none, {
+      events: open("unit-b"),
+      teamGate,
+      position: off,
+    });
+    expect(offRoster.teamGate).toBeUndefined();
+    expect(offRoster.teamGateUnread).toBe(false);
+    // On the roster, the cache scopes it, unconfirmed — as it scopes a decision.
+    const on = w(STATE(ROW, `${team}\n${cache}`), none, {
+      events: open("unit-b"),
+      teamGate,
+      position: at({ ...input, rosterUnits: ["unit-a", "unit-b"], marker: none }),
+    });
+    expect(on.teamGate?.scopeVerified).toBe(false);
+  });
+
   test("a team unit-major directive reads engine-only blanks without the [-] row", () => {
     const team = "- **Unit Ownership**: team\n- **Construction Iteration**: unit-major";
     const file = {

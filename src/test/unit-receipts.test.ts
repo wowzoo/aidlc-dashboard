@@ -508,4 +508,70 @@ describe("team ownership, end to end", () => {
     expect(stamped?.cells.find((c) => c.unit === "PU-B-ui")?.state).toBe("absent");
     expect(stamped?.skipped).toBe(0);
   });
+
+  test("an unresolvable claim and an unreadable roster each say so, and do not mix", () => {
+    // `claim-unresolved` is a cell's reason, so it needs a roster to draw on: with the
+    // authored DAG unreadable (#26's `malformed`) there is no matrix and the roster warning
+    // stands alone. The team unit gate reads only the audit, so it is unaffected.
+    const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+    const REC = "aidlc/spaces/default/intents/260101-demo-migration";
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-team-mix-"));
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const statePath = path.join(root, REC, "aidlc-state.md");
+      fs.writeFileSync(
+        statePath,
+        fs
+          .readFileSync(statePath, "utf-8")
+          .replace(
+            "- **Revision Count**: 2",
+            "- **Revision Count**: 2\n- **Unit Ownership**: team",
+          ),
+      );
+      fs.appendFileSync(
+        path.join(root, REC, "audit/demo-host-aabbccdd1122.md"),
+        [
+          "",
+          "## Unit Completed",
+          "**Timestamp**: 2026-01-01T02:30:00Z",
+          "**Event**: UNIT_COMPLETED",
+          "**Stage**: functional-design",
+          "**Unit**: PU-A-core",
+          "**Attempt Generation**: 1",
+          "**Run floor**: STAGE_STARTED:2026-01-01T02:00:00Z#1",
+          "",
+          "---",
+          "",
+        ].join("\n"),
+      );
+      // A registry row the engine's `activeIntentUuid` dereferences and throws on.
+      const intents = path.join(root, "aidlc/spaces/default/intents");
+      const registry = JSON.parse(fs.readFileSync(path.join(intents, "intents.json"), "utf-8"));
+      fs.writeFileSync(path.join(intents, "intents.json"), JSON.stringify([...registry, null]));
+      const cellOf = (r: string) =>
+        assemble(r)
+          .matrix?.stages.find((s) => s.slug === "functional-design")
+          ?.cells.find((c) => c.unit === "PU-A-core");
+      const unresolved = cellOf(root);
+      expect(unresolved?.state).toBe("unverified");
+      expect(unresolved?.receiptReason).toBe("claim-unresolved");
+      // The cell's tip names the cause on the page.
+      const cause = "an intent registry (intents.json) in a shape the engine itself cannot read";
+      expect(renderBody(assemble(root), "en")).toContain(cause);
+
+      const dagPath = path.join(root, REC, "inception/units-generation/unit-of-work-dependency.md");
+      fs.writeFileSync(
+        dagPath,
+        fs
+          .readFileSync(dagPath, "utf-8")
+          .replace(/```yaml\n[\s\S]*?```/, "```yaml\nunits: [unclosed\n```"),
+      );
+      const m = assemble(root);
+      expect(m.matrix).toBeUndefined();
+      expect(m.warnings.map((w) => w.code)).toContain("unit-dag-malformed");
+      expect(renderBody(m, "en")).not.toContain(cause);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

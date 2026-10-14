@@ -350,11 +350,16 @@ export function buildWaits(w: WaitsInput): Waits {
   if (decision) decision = { ...decision, scopeVerified };
 
   // Team unit gate, as `isHumanWaitStop` reads it first: the active stage and unit, at the
-  // effective gate scope. Its `activeStage`/`activeUnit` are the hook's own probe, so the
-  // scope follows the decision's — a current marker, else the unit cache, unconfirmed.
+  // effective gate scope. Its `activeStage`/`activeUnit` are the hook's own probe
+  // (`directive.unit ?? marker.unit`), so the scope follows the decision's — a current
+  // marker, else the unit cache, unconfirmed. At stage level `position` already holds no
+  // cached unit (the router returns before team unit routing, so only a marker names one);
+  // and a cache unit off the resolved roster is not where the engine is, so no gate is
+  // read for it.
+  const cacheOffRoster = !marker && !!position.offRoster;
   let teamGate: Waits["teamGate"];
   let teamGateUnread = false;
-  if (w.teamGate && scope.stage && scope.unit) {
+  if (w.teamGate && scope.stage && scope.unit && !cacheOffRoster) {
     const status =
       w.teamGate.scope === "unknown"
         ? "unknown"
