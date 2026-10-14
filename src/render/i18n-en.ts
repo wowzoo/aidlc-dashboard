@@ -186,6 +186,10 @@ const status: StatusStrings = {
   humanStateSource: "state.md · Runtime State",
   humanUnitPaused: (unit, reason) => `⏸ Unit ${unit} paused${reason ? ` — ${reason}` : ""}`,
   humanUnitNext: (next) => `next: ${next}`,
+  humanUnitCacheLeftover: (unit, stage, paused) =>
+    `Unit ${unit}${stage ? ` on ${stage}` : ""}${paused ? " (paused)" : ""} is a leftover in the state — this plan has no units`,
+  humanUnitCacheLeftoverTip:
+    "This plan skips Units Generation, so the engine runs each per-unit stage once at stage level and refuses unit start, pause and complete. The state's Active Unit / Unit Stage fields are left from an earlier plan: the engine routes and asks by Current Stage, not by them.",
   humanEngineAsk: (askType, where) =>
     `Engine question pending — ${askType ? (EN_ASK[askType] ?? askType) : "question"} · ${where}`,
   humanEngineAskSource: "active-directive.json",
@@ -274,6 +278,9 @@ const overview: OverviewStrings = {
       )}). It is the last projection written; the engine rewrites it on the next \`next\`.`,
   unitProgressStaleDag:
     "The unit roster (unit-of-work-dependency.md) cannot be read, and the engine refuses to rebuild this table without it — what is shown is the last projection written, not the current authority.",
+  sectionUnitProgressStageLevel: "Unit progress (state.md — not routing this plan)",
+  unitProgressStageLevelNote:
+    "state.md's <code>## Unit Progress</code> is left from a per-unit plan. This plan skips Units Generation, so the engine runs each per-unit stage once at stage level and does not route by this table.",
   noUnits: "No unit information — units-generation has not been reached.",
   noUnitsPill: "n/a",
   stageLevelUnits:

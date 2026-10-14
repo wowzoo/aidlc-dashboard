@@ -753,3 +753,135 @@ describe("second-review regressions", () => {
     ).toBe(false);
   });
 });
+
+describe("stage level (usesStageLevelPerUnitArtifacts)", () => {
+  // A plan that skips Units Generation runs each per-unit stage once at stage level: the
+  // orchestrator issues it with `unit: null` (aidlc-orchestrate.ts `emitPerUnitRunStage`),
+  // both unit-major walks return null, and `unit start/pause/complete` is refused
+  // (aidlc-state.ts). So the unit cache can only be a leftover of an earlier plan, and
+  // `Current Stage` is where routing is — it has no later unit step to lag behind.
+  const none = { miss: "absent" as const };
+  const base = {
+    currentStage: "code-generation",
+    unitStage: "",
+    activeUnit: "",
+    constructionIteration: "unit-major",
+  };
+
+  test("a leftover unit cache does not place the run on a unit", () => {
+    expect(
+      resolvePosition({
+        ...base,
+        unitStage: "functional-design",
+        activeUnit: "unit-b",
+        stageLevel: true,
+        marker: none,
+      }),
+    ).toEqual({
+      stage: "code-generation",
+      basis: "current-stage",
+      verified: true,
+      markerMiss: "absent",
+      leftoverUnit: { unit: "unit-b", stage: "functional-design" },
+    });
+  });
+
+  test("Current Stage does not lag, catalogue or not", () => {
+    // Per unit, unit-major with no catalogue lowers the claim; at stage level it cannot lag.
+    expect(resolvePosition({ ...base, marker: none }).verified).toBe(false);
+    expect(resolvePosition({ ...base, stageLevel: true, marker: none }).verified).toBe(true);
+    expect(
+      resolvePosition({ ...base, stageLevel: true, isPerUnit: () => true, marker: none }).verified,
+    ).toBe(true);
+  });
+
+  test("a current directive names the stage, never a unit", () => {
+    const marker = { marker: { kind: "run-stage", stage: "code-generation", unit: "unit-a" } };
+    expect(resolvePosition({ ...base, stageLevel: true, marker })).toEqual({
+      stage: "code-generation",
+      basis: "directive",
+      verified: true,
+    });
+  });
+
+  const STATE = (runtime: string) =>
+    `## Runtime State\n- **Construction Iteration**: unit-major\n${runtime}\n## Current Status\n- **Current Stage**: code-generation\n\n## Stage Progress\n### CONSTRUCTION PHASE\n- [-] code-generation — EXECUTE\n`;
+  const empty: QuestionsReport = {
+    files: [],
+    blocked: [],
+    totalQuestions: 0,
+    totalUnanswered: 0,
+    unclosed: [],
+    unreadable: [],
+  };
+  const pos = { stage: "code-generation", basis: "current-stage" as const, verified: true };
+  const w = (runtime: string, stageLevel: boolean) =>
+    buildWaits({
+      state: parseState(STATE(runtime)),
+      position: pos,
+      marker: { miss: "absent" },
+      events: [],
+      questions: empty,
+      checkoutParkFile: false,
+      hookHeartbeats: { present: false, stamps: [] },
+      blockers: [],
+      marks: {},
+      now: "2026-10-09T12:00:00Z",
+      stageLevel,
+    });
+  const PAUSED =
+    "- **Active Unit**: unit-a\n- **Unit Stage**: code-generation\n- **Unit State**: paused\n- **Unit Pause Reason**: 외부 API 키 대기\n- **Unit Next Action**: 키를 받으면 resume";
+
+  test("a leftover paused unit is not a wait, and is said as a leftover", () => {
+    // The engine's only hold on a paused unit is its `unit-paused` ask, issued from the
+    // per-unit routers after their stage-level return — so at stage level nothing asks.
+    expect(w(PAUSED, false).unitPaused?.unit).toBe("unit-a");
+    const at = w(PAUSED, true);
+    expect(at.unitPaused).toBeUndefined();
+    expect(at.unitCacheLeftover).toEqual({
+      unit: "unit-a",
+      stage: "code-generation",
+      paused: true,
+    });
+    expect(w("", true).unitCacheLeftover).toBeUndefined();
+  });
+
+  test("a current marker's unit does not scope a decision at stage level", () => {
+    // The hook scopes a decision by its own `next` probe; at stage level that directive
+    // carries no unit, so the decision is the stage's (`openDecisionBlock` on a `[-]`
+    // row), never a unit's claim attempt.
+    const stateText = `## Project Information\n- **Unit Ownership**: team\n${STATE("")}`;
+    const row = (event: string, fields: Record<string, string>): AuditEvent => ({
+      ts: event === "STAGE_STARTED" ? "2026-10-09T00:00:00Z" : "2026-10-09T01:00:00Z",
+      event,
+      fields: { Stage: "code-generation", ...fields },
+      shard: "a",
+    });
+    const events = [
+      row("STAGE_STARTED", {}),
+      row("DECISION_RECORDED", { Checkpoint: "Anything to add?", Decision: "pending" }),
+    ];
+    const run = (stageLevel: boolean) =>
+      buildWaits({
+        state: parseState(stateText),
+        position: pos,
+        marker: { marker: { kind: "ask", stage: "code-generation", unit: "unit-a" } },
+        events,
+        questions: empty,
+        checkoutParkFile: false,
+        hookHeartbeats: { present: false, stamps: [] },
+        blockers: [],
+        marks: {},
+        now: "2026-10-09T12:00:00Z",
+        stageLevel,
+      });
+    // Per unit, the marker's unit makes it a team-scoped read, which a stage's row is not.
+    expect(run(false).decision).toBeUndefined();
+    expect(run(true).decision).toMatchObject({
+      stage: "code-generation",
+      checkpoint: "Anything to add?",
+      scopeVerified: true,
+    });
+    expect(run(true).decision?.unit).toBeUndefined();
+  });
+});

@@ -29,6 +29,10 @@
 //     state does not record. That file alone is shown but not counted: whether it
 //     applies to this intent is decided by a scope stamp this reader does not check.
 //   - UNIT PAUSED: `Unit State: paused`, with the engine's own reason and next action.
+//     The engine's hold on it is its `unit-paused` ask, which only the per-unit routers
+//     issue — each after its stage-level return (aidlc-orchestrate.ts) — so at stage
+//     level a paused unit holds nothing: it is a leftover of an earlier plan, said as
+//     one (`unitCacheLeftover`) and not counted.
 //   - ENGINE ASK: a current `active-directive.json` of kind `ask` — 2.11 holds ten
 //     kinds of question there and writes a questions file for only one of them
 //     (plan approval), so without the marker nine of them are invisible. A current
@@ -79,6 +83,11 @@ export interface Waits {
   revising?: string;
   parked?: { stage: string; since: string; byPerson: boolean };
   unitPaused?: { unit: string; stage?: string; reason: string; nextAction: string };
+  /**
+   * At stage level, the unit cache the state still carries. The engine writes none in
+   * this mode and asks about none, so it is shown as a leftover and never counted.
+   */
+  unitCacheLeftover?: { unit: string; stage?: string; paused: boolean };
   /** `askType` absent = a marker that carried none (2.11 always writes one). */
   engineAsk?: { askType?: string; stage: string; unit?: string };
   /** `aidlc/.aidlc-unit-parked` exists in this checkout — applicability unchecked. */
@@ -126,6 +135,11 @@ export interface WaitsInput {
   now: string;
   /** Catalogue stage order, for `stageJumpReaches`. */
   stageIndex?: (slug: string) => number;
+  /**
+   * The plan runs per-unit stages at stage level (scan/unit-artifact-mode.ts): there is
+   * no unit to pause, gate or scope a decision by.
+   */
+  stageLevel?: boolean;
 }
 
 /** The engine's `PLAN_APPROVAL_CHECKPOINT` (aidlc-testing-posture.ts), matched exactly. */
@@ -201,8 +215,9 @@ export function buildWaits(w: WaitsInput): Waits {
       ? { stage: marker.stage, since: "", byPerson: false }
       : undefined;
 
+  const stageLevel = w.stageLevel === true;
   const unitPaused =
-    rt.unitState === "paused" && rt.activeUnit
+    !stageLevel && rt.unitState === "paused" && rt.activeUnit
       ? {
           unit: rt.activeUnit,
           stage: rt.unitStage || undefined,
@@ -221,6 +236,15 @@ export function buildWaits(w: WaitsInput): Waits {
         f.unit === unit &&
         f.questions.some((q) => q.kind === "confirmation" && /plan approval/i.test(q.heading)),
     );
+  const unitCacheLeftover =
+    stageLevel && rt.activeUnit
+      ? {
+          unit: rt.activeUnit,
+          ...(rt.unitStage ? { stage: rt.unitStage } : {}),
+          paused: rt.unitState === "paused",
+        }
+      : undefined;
+
   const answered =
     (marker?.askType === "plan-approval" && planInFile(marker.stage, marker.unit)) ||
     (marker?.askType === "guard-recovery" && marker.guardRecovery === "ready") ||
@@ -262,8 +286,10 @@ export function buildWaits(w: WaitsInput): Waits {
   // record of that is a current directive marker; the unit cache is a mirror the
   // engine keeps for cheap status reads, so a decision scoped by it alone is said to be
   // unconfirmed rather than claimed as the hook's.
+  // At stage level the probe's directive carries no unit (`emitPerUnitRunStage`), so a
+  // marker's unit does not scope the decision either.
   const scope = marker
-    ? { stage: marker.stage, unit: marker.unit }
+    ? { stage: marker.stage, unit: stageLevel ? undefined : marker.unit }
     : { stage: position.stage, unit: position.unit };
   const scopeVerified = !!marker || (position.basis === "current-stage" && position.verified);
   const teamScope = team && state.constructionIteration === "unit-major" && !!scope.unit;
@@ -321,6 +347,7 @@ export function buildWaits(w: WaitsInput): Waits {
     revising,
     parked,
     unitPaused,
+    ...(unitCacheLeftover ? { unitCacheLeftover } : {}),
     engineAsk,
     engineOnly,
     autonomous,

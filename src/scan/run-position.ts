@@ -22,6 +22,15 @@
 //   3. `Current Stage`, and when that can lag (unit-major, a per-unit stage) the
 //      reading says it is unverified rather than claiming the engine is there.
 //
+// AT STAGE LEVEL (a plan that skips Units Generation — scan/unit-artifact-mode.ts) the
+// run has no unit, and the order collapses. The orchestrator issues each per-unit stage
+// once with `unit: null` (2.11 aidlc-orchestrate.ts `emitPerUnitRunStage`), both
+// unit-major walks return null before reading a unit, and `unit start/pause/complete` is
+// refused (aidlc-state.ts) — so nothing writes `Unit Stage`/`Active Unit` there, and a
+// pair in the state is a leftover of an earlier plan: reported, never a position. A
+// current directive gives the stage but not a unit (the engine issues none with one), and
+// `Current Stage` cannot lag, because there is no later unit step for it to trail.
+//
 // THE DIGEST is a transcription of the engine's `stateDigest` /
 // `projectStateForDigest` (aidlc-lib.ts): drop empty lines, the `## Unit Progress`
 // table rows and a fixed list of cache/breadcrumb fields; read `Change Control` as
@@ -354,6 +363,11 @@ export interface RunPosition {
    * so neither case is a position this reader can claim.
    */
   offRoster?: "absent" | "unknown";
+  /**
+   * At stage level, the unit cache the state still carries: a leftover of an earlier
+   * plan, since the engine writes none in this mode. Said, never used as the position.
+   */
+  leftoverUnit?: { unit: string; stage?: string };
 }
 
 export interface PositionInput {
@@ -369,6 +383,11 @@ export interface PositionInput {
    */
   rosterUnits?: string[] | null;
   marker: { marker: DirectiveMarker } | { miss: MarkerMiss };
+  /**
+   * The plan runs per-unit stages at stage level (`unitArtifactMode` is `stage-level`).
+   * `unknown` is not this: an unread placement keeps the per-unit order.
+   */
+  stageLevel?: boolean;
 }
 
 /**
@@ -381,6 +400,14 @@ export interface PositionInput {
 export function resolvePosition(p: PositionInput): RunPosition {
   const marker = "marker" in p.marker ? p.marker.marker : undefined;
   const markerMiss = "miss" in p.marker ? p.marker.miss : undefined;
+  if (p.stageLevel) {
+    const leftover = p.activeUnit
+      ? { leftoverUnit: { unit: p.activeUnit, ...(p.unitStage ? { stage: p.unitStage } : {}) } }
+      : {};
+    if (marker) return { stage: marker.stage, basis: "directive", verified: true, ...leftover };
+    const stage = p.currentStage && p.currentStage !== "none" ? p.currentStage : undefined;
+    return { stage, basis: "current-stage", verified: true, markerMiss, ...leftover };
+  }
   if (p.unitStage && p.activeUnit) {
     const agrees = !marker || (marker.stage === p.unitStage && marker.unit === p.activeUnit);
     const offRoster =

@@ -439,6 +439,14 @@ describe("render", () => {
         dropDag?: boolean;
         grid?: Record<string, Record<string, string>>;
         scope?: string;
+        /** Extra `## Runtime State` field lines. */
+        runtime?: string;
+        /** Extra `## Project Information` field lines. */
+        info?: string;
+        /** A section appended to the state, e.g. `## Unit Progress`. */
+        tail?: string;
+        /** Record-relative files to write. */
+        files?: Record<string, string>;
       } = {},
     ) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-stagelevel-"));
@@ -448,7 +456,19 @@ describe("render", () => {
         let text = fs.readFileSync(sp, "utf-8").replace("- [x] units-generation — EXECUTE", row);
         if (opts.scope)
           text = text.replace("- **Scope**: demo-migration", `- **Scope**: ${opts.scope}`);
+        if (opts.runtime)
+          text = text.replace(
+            "- **Revision Count**: 2",
+            `- **Revision Count**: 2\n${opts.runtime}`,
+          );
+        if (opts.info)
+          text = text.replace("- **State Version**: 8", `- **State Version**: 8\n${opts.info}`);
+        if (opts.tail) text = `${text.trimEnd()}\n\n${opts.tail}\n`;
         fs.writeFileSync(sp, text);
+        for (const [rel, body] of Object.entries(opts.files ?? {})) {
+          fs.mkdirSync(path.dirname(path.join(root, REC, rel)), { recursive: true });
+          fs.writeFileSync(path.join(root, REC, rel), body);
+        }
         if (opts.dropDag) {
           const gp = path.join(root, REC, "runtime-graph.json");
           const { bolt_dag: _dropped, ...g } = JSON.parse(fs.readFileSync(gp, "utf-8"));
@@ -504,6 +524,133 @@ describe("render", () => {
         expect(stale?.stage).toBe("code-generation");
         expect(stale?.isCurrentStage).toBe(false);
       });
+    });
+
+    // The run's position, its waits and the Unit Progress card at stage level. The
+    // orchestrator issues a per-unit stage once with `unit: null` there, both unit-major
+    // walks return null, and `unit start/pause/complete` is refused — so a unit cache in
+    // the state is a leftover of an earlier plan, and Current Stage is where routing is.
+    const LEFTOVER = [
+      "- **Construction Iteration**: unit-major",
+      "- **Active Unit**: PU-B-ui",
+      "- **Unit Stage**: code-generation",
+      "- **Unit State**: paused",
+      "- **Unit Pause Reason**: waiting on a key",
+      "- **Unit Next Action**: resume with the key",
+    ].join("\n");
+    // A blank only the stop hook's raw test sees (fenced), in the STAGE-level dir.
+    const STAGE_Q = "construction/code-generation/code-generation-questions.md";
+    const FENCED = "# Questions\n\n```\n## Q1\n[Answer]:\n```\n";
+
+    test("a leftover unit cache places the run on no unit, and Current Stage does not lag", () => {
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.waits.position.unit).toBeUndefined();
+          expect(m.waits.position.stage).toBe("code-generation");
+          expect(m.waits.position.verified).toBe(true);
+          expect(m.waits.position.leftoverUnit).toEqual({
+            unit: "PU-B-ui",
+            stage: "code-generation",
+          });
+          for (const [loc, x] of [
+            ["en", EN],
+            ["ko", KO],
+          ] as const) {
+            const line = /<div class="runline"[\s\S]*?<\/div>/.exec(renderBody(m, loc))?.[0] ?? "";
+            expect(line).toContain("Code Generation");
+            expect(line).not.toContain(x.status.runningUnit("PU-B-ui"));
+            expect(line).not.toContain(x.status.runUnverified);
+          }
+        },
+        { dropDag: true, runtime: LEFTOVER },
+      );
+    });
+
+    test("the stage-level questions path is the active one, whatever the unit cache says", () => {
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => expect(m.waits.engineOnly).toEqual([STAGE_Q]),
+        { dropDag: true, runtime: LEFTOVER, files: { [STAGE_Q]: FENCED } },
+      );
+    });
+
+    test("a leftover paused unit is said as a leftover, not counted as a wait", () => {
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.waits.unitPaused).toBeUndefined();
+          expect(m.waits.unitCacheLeftover).toEqual({
+            unit: "PU-B-ui",
+            stage: "code-generation",
+            paused: true,
+          });
+          for (const [loc, x] of [
+            ["en", EN],
+            ["ko", KO],
+          ] as const) {
+            const body = renderBody(m, loc);
+            expect(body).not.toContain(
+              esc(x.status.humanUnitPaused("PU-B-ui", "waiting on a key")),
+            );
+            expect(body).toContain(
+              esc(x.status.humanUnitCacheLeftover("PU-B-ui", "code-generation", true)),
+            );
+          }
+        },
+        { dropDag: true, runtime: LEFTOVER },
+      );
+    });
+
+    test("team ownership: no unit gate to leave unread, and Unit Progress does not route", () => {
+      const UP = [
+        "## Unit Progress",
+        "<!-- Derived, engine-owned projection; routing ignores hand edits. -->",
+        "| unit | owner | functional-design | code-generation | gate |",
+        "| --- | --- | --- | --- | --- |",
+        "| PU-A-core | main | [x] | [-] | [ ] |",
+      ].join("\n");
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.waits.teamGateUnread).toBe(false);
+          for (const [loc, x] of [
+            ["en", EN],
+            ["ko", KO],
+          ] as const) {
+            const body = renderBody(m, loc);
+            expect(body).toContain(esc(x.overview.sectionUnitProgressStageLevel));
+            expect(body).not.toContain(esc(x.overview.sectionUnitProgress));
+            expect(body).toContain(x.overview.unitProgressStageLevelNote);
+          }
+        },
+        {
+          dropDag: true,
+          runtime: LEFTOVER,
+          info: "- **Unit Ownership**: team",
+          tail: UP,
+        },
+      );
+      // With no table at all there is nothing missing: the engine derives one only from a
+      // valid Unit DAG, which a plan that skips Units Generation does not have.
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => expect(m.warnings.map((w) => w.code)).not.toContain("unit-progress-missing"),
+        { dropDag: true, runtime: LEFTOVER, info: "- **Unit Ownership**: team" },
+      );
+    });
+
+    test("per unit, the same unit cache still places the run", () => {
+      withState(
+        "- [x] units-generation — EXECUTE",
+        (m) => {
+          expect(m.unitArtifactMode).toBe("per-unit");
+          expect(m.waits.position.unit).toBe("PU-B-ui");
+          expect(m.waits.unitPaused?.unit).toBe("PU-B-ui");
+          expect(m.waits.unitCacheLeftover).toBeUndefined();
+        },
+        { runtime: LEFTOVER },
+      );
     });
 
     test("Units Generation that already completed keeps its units (#1401)", () => {

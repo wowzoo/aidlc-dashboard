@@ -251,6 +251,12 @@ export interface StatusStrings {
   readonly humanStateSource: string;
   humanUnitPaused(unit: string, reason: string): string;
   humanUnitNext(next: string): string;
+  /**
+   * At stage level, the unit cache the state still carries (`Waits.unitCacheLeftover`):
+   * a leftover of an earlier plan, shown and never counted.
+   */
+  humanUnitCacheLeftover(unit: string, stage: string | undefined, paused: boolean): string;
+  readonly humanUnitCacheLeftoverTip: string;
   /** `askType` absent = a marker that carried none. */
   humanEngineAsk(askType: string | undefined, where: string): string;
   readonly humanEngineAskSource: string;
@@ -321,6 +327,10 @@ export interface OverviewStrings {
   unitProgressStaleRoster(missing: string[], extra: string[]): string;
   /** The roster cannot be read, so the engine cannot rebuild the table. */
   readonly unitProgressStaleDag: string;
+  /** The Unit Progress section title when the plan runs per-unit stages at stage level. */
+  readonly sectionUnitProgressStageLevel: string;
+  /** Carries `<code>` markup, so it is interpolated raw — never through esc(). */
+  readonly unitProgressStageLevelNote: string;
   readonly noUnits: string;
   readonly noUnitsPill: string;
   /** The plan skips Units Generation (scan/unit-artifact-mode.ts) — there are no units. */

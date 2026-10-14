@@ -159,6 +159,16 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
       tone: "warn",
     });
   }
+  if (w?.unitCacheLeftover) {
+    const l = w.unitCacheLeftover;
+    rows.push({
+      label: `${esc(x.humanUnitCacheLeftover(l.unit, l.stage, l.paused))}${sub(x.humanStateSource)}`,
+      value: "",
+      tone: "none",
+      dim: true,
+      tip: x.humanUnitCacheLeftoverTip,
+    });
+  }
   if (w?.engineAsk) {
     const where = w.engineAsk.unit
       ? `${w.engineAsk.unit} · ${w.engineAsk.stage}`

@@ -322,8 +322,15 @@ ${definite}${indefinite}${undetermined}`;
  * The state's own `## Unit Progress` table, when there is one. This is the AUTHORITY in
  * team/unit-major — an engine-owned projection of receipts, reviews and gates — so it is
  * shown before the disk matrix and labelled as such, rather than being reconstructed.
+ * At stage level it is not: the engine routes that plan before any team unit router and
+ * derives the table only from a Unit DAG the plan does not have, so the same rows are a
+ * leftover and the note says so (`note`).
  */
-function unitProgressTable(up: NonNullable<AidlcState["unitProgress"]>, s: Strings): string {
+function unitProgressTable(
+  up: NonNullable<AidlcState["unitProgress"]>,
+  s: Strings,
+  note: string,
+): string {
   const head = up.stageColumns.map((c) => `<th>${esc(c)}</th>`).join("");
   const rows = up.rows
     .map((r) => {
@@ -349,7 +356,7 @@ function unitProgressTable(up: NonNullable<AidlcState["unitProgress"]>, s: Strin
   }</tr></thead>
   <tbody>${rows}</tbody>
 </table></div>
-<p class="note">${s.overview.unitProgressNote}</p>`;
+<p class="note">${note}</p>`;
 }
 
 export function renderOverview(m: DashboardModel, s: Strings): string {
@@ -369,10 +376,15 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
             : s.overview.unitProgressStaleDag,
         )}</p>`
       : "";
+    const stageLevel = m.unitArtifactMode === "stage-level";
     parts.push(
       section(
-        s.overview.sectionUnitProgress,
-        unitProgressTable(up, s) + staleNote,
+        stageLevel ? s.overview.sectionUnitProgressStageLevel : s.overview.sectionUnitProgress,
+        unitProgressTable(
+          up,
+          s,
+          stageLevel ? s.overview.unitProgressStageLevelNote : s.overview.unitProgressNote,
+        ) + staleNote,
         "unit-progress",
       ),
     );

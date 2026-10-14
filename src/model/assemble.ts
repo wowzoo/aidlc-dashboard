@@ -528,6 +528,7 @@ export function assemble(
           : unitDag.state === "malformed"
             ? null
             : undefined,
+    stageLevel: artifactMode === "stage-level",
   });
   const diaries = readDiaries(recordDir);
   const health = readHealth(recordDir);
@@ -551,6 +552,7 @@ export function assemble(
     },
     now,
     stageIndex: catalog ? (s) => catalog?.stages.findIndex((x) => x.slug === s) ?? -1 : undefined,
+    stageLevel: artifactMode === "stage-level",
   });
   const timing = buildTiming(ledger, now);
 
@@ -673,9 +675,12 @@ export function assemble(
       constructionIteration: state.constructionIteration,
     });
   }
+  // The engine derives the table only from a valid Unit DAG (`deriveTeamUnitProgressModel`),
+  // which a plan that skips Units Generation does not have — so its absence there is not
+  // a missing projection.
   if (state.unitProgress?.malformed) {
     warnings.push({ code: "unit-progress-malformed" });
-  } else if (teamMode && !state.unitProgress) {
+  } else if (teamMode && !state.unitProgress && artifactMode !== "stage-level") {
     warnings.push({ code: "unit-progress-missing" });
   }
 
