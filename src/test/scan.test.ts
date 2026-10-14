@@ -3540,6 +3540,23 @@ describe("construction matrix — the engine's exact artifact filename", () => {
     expect(cell(rec, "functional-design").state).toBe("complete");
   });
 
+  test("coverage asks for the contract's path, not for a name in the listing", () => {
+    // The engine stats `<segment>/<filename>`: a listing it never takes (an unlistable
+    // dir, a case-folding filesystem) does not decide coverage. Listing empty here, the
+    // stat answering yes for exactly the contract's files.
+    const want = new Set(["business-rules.md", "traceability.json"]);
+    const mx = buildConstructionMatrix(
+      { units: [{ name: "PU-A", display: "A", kind: "service", dependsOn: [] }], batches: [] },
+      [stages[0]!],
+      () => [],
+      catalog,
+      undefined,
+      undefined,
+      (_unit, _slug, file) => want.has(file),
+    )!;
+    expect(mx.stages[0]!.cells[0]!.state).toBe("complete");
+  });
+
   test("a link to a regular file counts, as isRegularFile follows it", () => {
     const rec = tree(
       {

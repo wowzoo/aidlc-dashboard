@@ -200,7 +200,7 @@ describe("Unit card", () => {
     const required = ["plan", "code-summary"];
     const complete = withCell({
       state: "complete",
-      present: ["plan", "code-summary"],
+      present: ["plan.md", "code-summary.md"],
       expected,
       required,
       missing: [],
@@ -208,7 +208,7 @@ describe("Unit card", () => {
     expect(complete).toContain('<span class="mr-v">2/2</span>');
     const partial = withCell({
       state: "partial",
-      present: ["plan"],
+      present: ["plan.md"],
       expected,
       required,
       missing: ["code-summary"],
@@ -219,7 +219,7 @@ describe("Unit card", () => {
   test("with no required set the figure is a file count, and no bar is drawn for it", () => {
     const row = withCell({
       state: "complete",
-      present: ["plan", "code-summary"],
+      present: ["plan.md", "code-summary.md"],
       expected: [],
       required: [],
       missing: [],

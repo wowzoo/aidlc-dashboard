@@ -351,6 +351,15 @@ export function parseBoltDag(graphText: string): BoltDag | undefined {
   return { units, batches };
 }
 
+/** The engine's `isRegularFile`: `statSync(...).isFile()`, so a link to a file counts. */
+function isRegularFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The files a segment dir holds, by name, minus the `-questions` file. Questions are a
  * conversation artifact, never listed in a stage's produces[], so counting them would
@@ -363,7 +372,9 @@ export function parseBoltDag(graphText: string): BoltDag | undefined {
  * on disk, which fixed the `.json` case run B had measured (an `.md`-only filter left
  * 8 cells permanently partial) but also let `code-summary.json` cover `code-summary` and
  * `traceability.md` cover `traceability` — files the engine never reads as the artifact.
- * A link counts when it reaches a regular file, because `isRegularFile` follows it.
+ * A link counts when it reaches a regular file, because `isRegularFile` follows it. This
+ * listing only DISPLAYS what is there and says a unit started; coverage is the stat of
+ * each contracted file's path (`hasFile`), which is what the engine does.
  */
 function readSegment(recordDir: string, unit: string, stageSlug: string): string[] {
   const dir = path.join(recordDir, "construction", unit, stageSlug);
@@ -377,9 +388,7 @@ function readSegment(recordDir: string, unit: string, stageSlug: string): string
   for (const name of names) {
     // Dotfiles are never artifacts; a dir inside a segment is not one either.
     if (name.startsWith(".") || name.replace(/\.[^.]+$/, "").endsWith("-questions")) continue;
-    try {
-      if (fs.statSync(path.join(dir, name)).isFile()) files.push(name);
-    } catch {}
+    if (isRegularFile(path.join(dir, name))) files.push(name);
   }
   return files.sort();
 }
@@ -399,6 +408,12 @@ export function buildConstructionMatrix(
   lifecycle?: UnitLifecycle,
   /** How the state/catalogue version pairing came out. Default `unknown`. */
   stateCompat?: StateCompat,
+  /**
+   * Is `<segment>/<file>` a regular file? The engine stats the contract's path rather than
+   * reading a listing, so an unlistable dir or a case-folding filesystem answers the same.
+   * Omitted → the listing decides (tests).
+   */
+  hasFile?: (unit: string, stageSlug: string, file: string) => boolean,
 ): ConstructionMatrix | undefined {
   if (dag.units.length === 0) return undefined;
 
@@ -439,14 +454,20 @@ export function buildConstructionMatrix(
       // what the stage may write here.
       const required = catStage ? requiredArtifacts(catStage, u.kind) : [];
       const expected = catStage ? expectedArtifacts(catStage, u.kind) : [];
-      const missing = required.filter((a) => !present.includes(artifactFilename(a)));
+      const has = hasFile
+        ? (a: string) => hasFile(u.name, st.slug, artifactFilename(a))
+        : (a: string) => present.includes(artifactFilename(a));
+      const missing = required.filter((a) => !has(a));
+      // Started is the listing OR a contracted file the stat found — a listing the
+      // engine never takes must not turn a covered cell into "not started".
+      const started = present.length > 0 || missing.length < required.length;
       // A known kind that the stage contracts nothing REQUIRED for is not "not started".
       // Requires both the catalogue row and the kind: with either absent, an empty
       // required set means "unknown", which stays on the binary rule below.
       // Artifacts met is COVERAGE, not completion. Where the stage uses the unit
       // lifecycle, the `UNIT_COMPLETED` receipt is the authority and a unit with every
       // file but no receipt is unsettled — paused, stale or reopened.
-      const artifactsMet = present.length > 0 && missing.length === 0;
+      const artifactsMet = started && missing.length === 0;
       const needsReceipt = lifecycle?.inUse(st.slug) === true;
       if (needsReceipt) receiptsInForce = true;
       // A skip is read whether or not receipts are in force: UNIT_SKIPPED does not count
@@ -461,7 +482,7 @@ export function buildConstructionMatrix(
           ? "n/a"
           : receipt?.state === "skipped"
             ? "skipped"
-            : present.length === 0
+            : !started
               ? "absent"
               : !artifactsMet
                 ? "partial"
@@ -545,5 +566,6 @@ export function scanConstructionMatrix(
     catalog,
     lifecycle,
     stateCompat,
+    (unit, slug, file) => isRegularFile(path.join(recordDir, "construction", unit, slug, file)),
   );
 }
