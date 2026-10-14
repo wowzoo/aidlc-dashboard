@@ -397,6 +397,8 @@ export interface UnitSegment extends StageSegment {
   receiptStartedAt?: string;
   /** A completion with no start receipt and no record write: the duration is unknown. */
   durationUnknown?: boolean;
+  /** A pause with nothing open: neither its start nor a completion was observed. */
+  pauseOnly?: boolean;
 }
 
 export interface UnitSpan extends GapSplit {
@@ -937,8 +939,11 @@ const UNIT_LIFECYCLE = new Set([
  * segment); the state they leave is the winner's either way. The key carries the `Run
  * floor` because the engine reduces only the current attempt's rows. `events` is in the
  * ledger's order — time, then shard index, then position — so iteration order breaks the
- * rank ties. The engine runs this in every ownership mode; team ownership only filters the
- * rows by claim attempt first, which a timing view has no use for.
+ * rank ties. The engine runs this in every ownership mode; under team ownership it first
+ * filters the rows by claim attempt (`eventMatchesClaimAttempt`), which needs checkout-local
+ * state this reader does not have — so there the view reads every claim attempt's rows, and
+ * a tie between two claim attempts under one floor can still end differently from the
+ * engine's verdict. The receipt matrix says `team-claim` for exactly that reason.
  */
 function crossShardTieLosers(events: readonly AuditEvent[]): Set<AuditEvent> {
   const groups = new Map<string, AuditEvent[]>();
@@ -970,6 +975,39 @@ function crossShardTieLosers(events: readonly AuditEvent[]): Set<AuditEvent> {
   return losers;
 }
 
+/**
+ * `events` with each pair's lifecycle rows inside one second put in attempt order — older
+ * `Run floor` first, stable otherwise — in the slots those rows already held. Two clones'
+ * rows in one second are unordered by the merge, and an earlier attempt's row there (a clone
+ * that had not seen the reopen) was written for the attempt it names, so it goes before the
+ * later attempt's rows rather than after them, where the stale-floor guard would drop it.
+ */
+function attemptOrdered(events: readonly AuditEvent[]): AuditEvent[] {
+  const out = [...events];
+  for (let a = 0; a < out.length; ) {
+    let b = a + 1;
+    while (b < out.length && out[b]!.ts === out[a]!.ts) b++;
+    const slots = new Map<string, number[]>();
+    for (let i = a; i < b; i++) {
+      const e = out[i]!;
+      if (!UNIT_LIFECYCLE.has(e.event) || !e.fields.Stage || !e.fields.Unit) continue;
+      const key = `${e.fields.Stage}\0${e.fields.Unit}`;
+      slots.set(key, [...(slots.get(key) ?? []), i]);
+    }
+    for (const idx of slots.values()) {
+      if (idx.length < 2) continue;
+      const at = (e: AuditEvent) => floorTs(e.fields["Run floor"]) ?? "";
+      const rows = idx.map((i) => out[i]!);
+      const sorted = [...rows].sort((x, y) => (at(x) < at(y) ? -1 : at(x) > at(y) ? 1 : 0));
+      idx.forEach((i, k) => {
+        out[i] = sorted[k]!;
+      });
+    }
+    a = b;
+  }
+  return out;
+}
+
 export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): UnitSpan[] {
   interface Open {
     startedAt: string;
@@ -982,6 +1020,7 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
     endedAt: string;
     endKind: StageEndKind;
     durationUnknown?: boolean;
+    pauseOnly?: boolean;
   }
   const open = new Map<string, Open>();
   const raw = new Map<string, Raw[]>();
@@ -1003,7 +1042,9 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
   };
 
   const tied = crossShardTieLosers(events);
-  for (const e of events) {
+  // pair → the newest `Run floor` time seen on its lifecycle rows.
+  const newestFloor = new Map<string, string>();
+  for (const e of attemptOrdered(events)) {
     if (tied.has(e)) continue;
     if (!e.event.startsWith("UNIT_")) {
       if (e.event !== "ARTIFACT_CREATED" && e.event !== "ARTIFACT_UPDATED") continue;
@@ -1026,6 +1067,17 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
       order.push({ key, stage, unit });
     }
     const floor = e.fields["Run floor"];
+    // A row stamped with an earlier attempt's floor than one already seen is that attempt's
+    // — a clone that had not seen the reopen yet. The engine reads only the current floor's
+    // rows, so it must not close, supersede or reopen the later attempt. A floor names its
+    // boundary's time, so "earlier" is a time comparison; `unstarted#0` is the earliest. A
+    // row with no floor at all predates the field and is read as before.
+    if (floor !== undefined && UNIT_LIFECYCLE.has(e.event)) {
+      const at = floorTs(floor) ?? "";
+      const newest = newestFloor.get(key);
+      if (newest !== undefined && at < newest) continue;
+      newestFloor.set(key, at);
+    }
     const current = open.get(key);
     if (e.event === "UNIT_STARTED") {
       if (current && current.floor === floor) continue; // a repeated start in one attempt
@@ -1050,7 +1102,13 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
       else if (raw.get(key)!.at(-1)?.endKind !== "paused") {
         // Nothing open — its start was another clone's row in this second and lost the tie,
         // or never written. The engine reads the unit as paused, so it stays visible: a tick.
-        raw.get(key)!.push({ startedAt: e.ts, endedAt: e.ts, endKind: "paused", shard: e.shard });
+        raw.get(key)!.push({
+          startedAt: e.ts,
+          endedAt: e.ts,
+          endKind: "paused",
+          shard: e.shard,
+          pauseOnly: true,
+        });
       }
     } else if (e.event === "UNIT_COMPLETED") {
       if (current) close(key, e.ts, "completed");
@@ -1111,6 +1169,7 @@ export function buildUnitSpans(events: readonly AuditEvent[], lastTs: string): U
         ...(g.startInferred ? { startInferred: true } : {}),
         ...(g.receiptStartedAt ? { receiptStartedAt: g.receiptStartedAt } : {}),
         ...(g.durationUnknown ? { durationUnknown: true } : {}),
+        ...(g.pauseOnly ? { pauseOnly: true } : {}),
         elapsedSec,
         ...split,
       };

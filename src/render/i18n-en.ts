@@ -568,6 +568,8 @@ const timeline: TimelineStrings = {
     "At least one segment's start is inferred from the unit's first record write — see the bar's tooltip.",
   durationUnknownTip:
     "A completion with no start receipt and no record write of the unit in this stage: the duration is unknown.",
+  pauseOnlyTip:
+    "A pause recorded with nothing open: its start was another clone's row in the same second, which the engine's rule ranks below a pause, or was never written, and no completion was observed. The engine reads this unit as paused.",
   unitSummary: (units, stages) =>
     `Unit view — ${units} unit segment row${units === 1 ? "" : "s"} across ${stages} stage${stages === 1 ? "" : "s"}`,
   unitVsStage: (stage, unitHours, stageHours) =>

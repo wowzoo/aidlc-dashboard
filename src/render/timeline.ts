@@ -116,7 +116,9 @@ function trackBars(
           `${segmentTip(name, segment, s)}\n${
             "durationUnknown" in segment && segment.durationUnknown
               ? s.timeline.durationUnknownTip
-              : s.timeline.zeroSecondTip
+              : "pauseOnly" in segment && segment.pauseOnly
+                ? s.timeline.pauseOnlyTip
+                : s.timeline.zeroSecondTip
           }`,
         )}"></span>`;
       }

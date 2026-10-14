@@ -573,6 +573,7 @@ export interface TimelineStrings {
   inferredStartTip(firstWrite: string, receipt?: string): string;
   readonly inferredRowTip: string;
   readonly durationUnknownTip: string;
+  readonly pauseOnlyTip: string;
   readonly colUnitTrack: string;
   unitStageSkipped(stage: string): string;
   /** Raw markup. */

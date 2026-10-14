@@ -540,6 +540,8 @@ const timeline: TimelineStrings = {
     "구간 시작 중 하나 이상이 유닛의 첫 기록 쓰기에서 추정한 값입니다 — 막대 툴팁을 보세요.",
   durationUnknownTip:
     "시작 receipt 도, 이 stage 에서 유닛의 기록 쓰기도 없는 완료입니다. 길이를 알 수 없습니다.",
+  pauseOnlyTip:
+    "열린 구간 없이 기록된 일시정지입니다. 시작은 같은 초에 다른 clone 이 쓴 행이라 엔진 규칙에 따라 일시정지에 밀렸거나 기록되지 않았고, 완료도 관측되지 않았습니다. 엔진은 이 유닛을 일시정지로 읽습니다.",
   unitSummary: (units, stages) => `유닛 보기 — stage ${stages}개, 유닛 구간 ${units}행`,
   unitVsStage: (stage, unitHours, stageHours) =>
     stageHours === undefined

@@ -3301,6 +3301,40 @@ describe("unit view", () => {
     expect(lost.map((x) => x.segments.map((g) => [g.endKind, g.elapsedSec]))).toEqual([
       [["paused", 0]],
     ]);
+    // Neither a start nor a completion was observed for it, so it must not read as either.
+    expect(lost[0]?.segments[0]?.pauseOnly).toBe(true);
+  });
+
+  // The engine reads only the current attempt's rows. A clone that has not seen a reopen
+  // still writes under the old floor, and that row must not act on the new attempt —
+  // here it closed the new segment and turned its completion into a start-less tick,
+  // dropping the new attempt's ten minutes (Codex review, reproduced). Inside the tied
+  // second it is read first, as the earlier attempt's: b's pause is b's, in either order.
+  test("a row of an earlier attempt never acts on a later one", () => {
+    const F0 = "STAGE_STARTED:2026-01-01T00:00:00Z#1";
+    const F1 = "GATE_REJECTED:2026-01-01T00:10:00Z#1";
+    // Both shard orders inside the tied second.
+    for (const first of ["a.md", "b.md"]) {
+      const at = "2026-01-01T00:20:00Z";
+      const rows = [
+        u(at, "UNIT_STARTED", "A", "cg", "a.md", F1),
+        u(at, "UNIT_PAUSED", "A", "cg", "b.md", F0),
+      ].sort((x, y) => (x.shard === first ? -1 : y.shard === first ? 1 : 0));
+      const spans = buildUnitSpans(
+        [
+          u("2026-01-01T00:00:00Z", "UNIT_STARTED", "A", "cg", "b.md", F0),
+          ...rows,
+          u("2026-01-01T00:30:00Z", "UNIT_COMPLETED", "A", "cg", "a.md", F1),
+          // A stale start, after the new attempt finished, reopens nothing.
+          u("2026-01-01T00:35:00Z", "UNIT_STARTED", "A", "cg", "b.md", F0),
+        ],
+        "2026-01-01T00:35:00Z",
+      );
+      expect(spans[0]?.segments.map((g) => [g.endKind, g.elapsedSec])).toEqual([
+        ["paused", 1200],
+        ["completed", 600],
+      ]);
+    }
   });
 
   // One shard's rows are in append order, which IS causal — the reduction is for ties the
