@@ -709,6 +709,165 @@ describe("render", () => {
     }
   });
 
+  describe("a record file that exists and cannot be read is named on the page", () => {
+    // A failed read used to be skipped like an absent file, so the panels built on
+    // what was left said "none". Each case below is the same tree with the file
+    // DELETED as its negative control: absence stays silent, a failure does not.
+    const EN = strings("en");
+    const RECORD = "aidlc/spaces/default/intents/260101-demo-migration";
+    const AOQ = "inception/units-generation/unit-of-work-dependency.md";
+    const QFILE = "construction/PU-B-ui/code-generation/code-generation-questions.md";
+    const DIARY = "ideation/intent-capture/memory.md";
+    const noLinks = process.platform === "win32";
+    const noModes = noLinks || process.getuid?.() === 0;
+    const withTree = (
+      change: (record: string) => void,
+      check: (m: ReturnType<typeof assemble>) => void,
+    ) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-unread-"));
+      const record = path.join(root, RECORD);
+      try {
+        fs.cpSync(FIXTURE, root, { recursive: true });
+        change(record);
+        check(assemble(root));
+      } finally {
+        for (const rel of [QFILE, DIARY, AOQ]) {
+          try {
+            if (!fs.lstatSync(path.join(record, rel)).isSymbolicLink()) {
+              fs.chmodSync(path.join(record, rel), 0o644);
+            }
+          } catch {}
+        }
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    };
+    const toDir = (record: string, rel: string) => {
+      fs.rmSync(path.join(record, rel));
+      fs.mkdirSync(path.join(record, rel));
+    };
+    // Every A&OQ section `None.` and both declared ledgers `None.`, so the deferrals
+    // panel reaches the branch that prints its "no open items" pill.
+    const allNone = (record: string) => {
+      for (const rel of [
+        AOQ,
+        "construction/PU-A-core/functional-design/business-rules.md",
+        "construction/PU-B-ui/functional-design/frontend-components.md",
+        "ideation/intent-capture/intent-capture-questions.md",
+      ]) {
+        fs.writeFileSync(path.join(record, rel), "## Assumptions & Open Questions\n\nNone.\n");
+      }
+      for (const rel of [
+        "inception/requirements-analysis/requirements.md",
+        "inception/contract-design/contract-summary.md",
+      ]) {
+        fs.writeFileSync(path.join(record, rel), "## Open Questions\n\nNone.\n");
+      }
+    };
+    const pill = `>${EN.deferrals.noOpenPill}<`;
+    const noDiary = (m: ReturnType<typeof assemble>) => ({
+      ...m,
+      diaries: { ...m.diaries, records: [] },
+    });
+
+    test("an A&OQ artifact that is a directory withholds the pill and is named", () => {
+      withTree(
+        (record) => {
+          allNone(record);
+          toDir(record, AOQ);
+        },
+        (m) => {
+          expect(m.warnings).toContainEqual({
+            code: "record-file-unreadable",
+            files: [AOQ],
+            questions: false,
+          });
+          const body = renderBody(noDiary(m), "en");
+          expect(body).not.toContain(pill);
+          expect(body).toContain(EN.deferrals.aoqUnreadable(`<code>${AOQ}</code>`));
+        },
+      );
+    });
+
+    test("the same artifact deleted keeps the pill and warns nothing (negative control)", () => {
+      withTree(
+        (record) => {
+          allNone(record);
+          fs.rmSync(path.join(record, AOQ));
+        },
+        (m) => {
+          expect(m.warnings.map((w) => w.code)).not.toContain("record-file-unreadable");
+          expect(renderBody(noDiary(m), "en")).toContain(pill);
+        },
+      );
+    });
+
+    test("a stage diary that is a directory withholds the pill", () => {
+      withTree(
+        (record) => {
+          allNone(record);
+          toDir(record, DIARY);
+        },
+        (m) => {
+          expect(m.warnings).toContainEqual({
+            code: "record-file-unreadable",
+            files: [DIARY],
+            questions: false,
+          });
+          // The rest of the diaries are read, but one that could not be may hold an
+          // open question, so the panel cannot say "no open items".
+          expect(renderBody(noDiary(m), "en")).not.toContain(pill);
+        },
+      );
+    });
+
+    test.skipIf(noModes)("a questions file with no read permission is a floor, not a zero", () => {
+      withTree(
+        (record) => fs.chmodSync(path.join(record, QFILE), 0o000),
+        (m) => {
+          expect(m.warnings).toContainEqual({
+            code: "record-file-unreadable",
+            files: [QFILE],
+            questions: true,
+          });
+          const body = renderBody(m, "en");
+          expect(body).toContain(EN.status.humanUnreadable(1));
+          expect(body).toContain(EN.warn.recordFileUnreadable([QFILE], true));
+        },
+      );
+    });
+
+    test.skipIf(noLinks)(
+      "a dangling questions-file link keeps 'nothing awaiting you' off the page",
+      () => {
+        withTree(
+          (record) => {
+            fs.rmSync(path.join(record, QFILE));
+            fs.symlinkSync(path.join(record, "nowhere.md"), path.join(record, QFILE));
+          },
+          (m) => {
+            expect(m.questions.unreadable).toEqual([QFILE]);
+            // The picker card reads the same walk, and carries the floor with it.
+            const summary = readWorkspaceSummary(m.identity.root);
+            expect(summary.kind === "ok" ? summary.blockers.unreadable : -1).toBe(1);
+            // Strip every other hold — the fixture's one blocker lives in this very file,
+            // and its hooks read stale — so the unread file is the only thing left.
+            const bare = {
+              ...m,
+              blockers: [],
+              waits: { ...m.waits, hooks: { state: "live" as const } },
+            };
+            const body = renderBody(bare, "en");
+            expect(body).toContain(EN.status.humanUnreadable(1));
+            expect(body).not.toContain(EN.status.humanNone);
+            // Positive control: with nothing unread, the same bare model is "nothing".
+            const read = { ...bare, questions: { ...bare.questions, unreadable: [] } };
+            expect(renderBody(read, "en")).toContain(EN.status.humanNone);
+          },
+        );
+      },
+    );
+  });
+
   test("the ok pill is withheld while any other ledger is open or unread", () => {
     // All A&OQ sections `None.` — but the pill says "no open items" for the panel, so a
     // declared ledger that could not be read, or an open diary entry, must withhold it.

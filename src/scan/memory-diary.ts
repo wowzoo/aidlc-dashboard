@@ -22,6 +22,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { listRecordDir, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /** The four canonical diary axes, in document order. */
@@ -78,6 +79,12 @@ export interface DiaryReport {
   /** Counts over `records`, not the raw per-file entries. */
   totals: Record<DiaryAxis, number>;
   totalEntries: number;
+  /**
+   * Record-relative paths that exist and could not be read — a `memory.md`, or a dir
+   * that could not be listed. Their entries are missing from every count above, so an
+   * open question may be among them (scan/record-read.ts).
+   */
+  unreadable: string[];
 }
 
 const PHASE_DIRS = ["initialization", "ideation", "inception", "construction", "operation"];
@@ -194,21 +201,22 @@ function isDir(p: string): boolean {
   }
 }
 
-/** Read one memory.md into a StageDiary, or undefined when absent/empty. */
+/** Read one memory.md into a StageDiary; absent is undefined, a failure is named. */
 function readOne(
   recordDir: string,
   relParts: string[],
   phase: string,
   stage: string,
   unit: string | undefined,
+  unreadable: string[],
 ): StageDiary | undefined {
   const abs = path.join(recordDir, ...relParts, "memory.md");
-  let text: string;
-  try {
-    text = fs.readFileSync(abs, "utf-8");
-  } catch {
+  const read = readRecordText(abs);
+  if (read.kind !== "text") {
+    if (read.kind === "unreadable") unreadable.push([...relParts, "memory.md"].join("/"));
     return undefined;
   }
+  const text = read.text;
   const entries = parseDiary(text);
   const counts = emptyCounts();
   for (const e of entries) counts[e.axis]++;
@@ -229,39 +237,34 @@ function readOne(
  */
 export function readDiaries(recordDir: string): DiaryReport {
   const stages: StageDiary[] = [];
+  const unreadable: string[] = [];
+  // A dir that exists and cannot be listed hides every diary below it.
+  const names = (relParts: string[]): string[] => {
+    const listed = listRecordDir(path.join(recordDir, ...relParts));
+    if (listed.kind === "listed") return listed.entries.map((e) => e.name);
+    if (listed.kind === "unreadable") unreadable.push(relParts.join("/"));
+    return [];
+  };
 
   for (const phase of PHASE_DIRS) {
     const phaseAbs = path.join(recordDir, phase);
     if (!isDir(phaseAbs)) continue;
-    let children: string[];
-    try {
-      children = fs.readdirSync(phaseAbs);
-    } catch {
-      continue;
-    }
-    for (const child of children.sort()) {
+    for (const child of names([phase])) {
       const childAbs = path.join(phaseAbs, child);
       if (!isDir(childAbs)) continue;
 
       // Same unit-vs-stage disambiguation as questions.ts: a unit dir contains
-      // stage dirs, a stage dir contains files.
-      let grandchildren: string[] = [];
-      try {
-        grandchildren = fs.readdirSync(childAbs);
-      } catch {
-        // fall through
-      }
-      const stageSubdirs = grandchildren.filter((g) => isDir(path.join(childAbs, g)));
+      // stage dirs, a stage dir contains files. A child that cannot be listed still
+      // gets its own memory.md tried below, which names it if that fails too.
+      const stageSubdirs = names([phase, child]).filter((g) => isDir(path.join(childAbs, g)));
 
-      if (stageSubdirs.length > 0) {
-        for (const stage of stageSubdirs.sort()) {
-          const d = readOne(recordDir, [phase, child, stage], phase, stage, child);
-          if (d) stages.push(d);
-        }
+      for (const stage of stageSubdirs) {
+        const d = readOne(recordDir, [phase, child, stage], phase, stage, child, unreadable);
+        if (d) stages.push(d);
       }
       // A dir can hold BOTH stage subdirs and its own memory.md (the stage-major
       // layout writes construction/<stage>/memory.md), so always check it too.
-      const own = readOne(recordDir, [phase, child], phase, child, undefined);
+      const own = readOne(recordDir, [phase, child], phase, child, undefined, unreadable);
       if (own) stages.push(own);
     }
   }
@@ -275,5 +278,6 @@ export function readDiaries(recordDir: string): DiaryReport {
     records,
     totals,
     totalEntries: records.length,
+    unreadable: [...new Set(unreadable)],
   };
 }

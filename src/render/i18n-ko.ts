@@ -87,6 +87,9 @@ const warn: WarnStrings = {
   questionsUnclosedBlock: (files) =>
     `닫히지 않은 코드 블록·주석이 있는 질문 파일 ${files.length}개 — 숨기지 않고 본문으로 읽었습니다(블로커를 감추지 않으려고). 엔진은 다르게 읽을 수 있으니 파일을 확인하세요: ${files.join(", ")}`,
 
+  recordFileUnreadable: (files, questions) =>
+    `있지만 읽을 수 없는 기록 파일·폴더 ${files.length}곳 — 권한이 없거나, 파일 자리에 폴더가 있거나, 끊긴 링크이거나, 따라가지 않는 폴더 링크입니다. 없는 것으로 치지 않습니다${questions ? ": 질문 파일이 포함돼 있어 블로커 수는 최소값입니다" : ""}. ${files.join(", ")}`,
+
   tokenUsageFailed: (detail) => `토큰 사용량 조립 실패 — 사용량 패널만 하락: ${detail}`,
 
   creditAssemblyFailed: (detail) => `크레딧 조립 실패 — 크레딧 패널만 하락: ${detail}`,
@@ -163,6 +166,9 @@ const status: StatusStrings = {
   humanEngineAskSource: "active-directive.json",
   humanEngineAskTip:
     "엔진이 마지막으로 내준 지시가 사람에게 묻는 질문입니다. 지금 state 와 digest 가 맞는 지시만 읽으며, 대부분 질문 파일 없이 대화로만 묻습니다",
+  humanUnreadable: (n) => `읽지 못한 질문 파일·폴더 ${n}곳 — 그 안의 블로커는 세지 않았습니다`,
+  humanUnreadableTip:
+    "있지만 읽을 수 없습니다(권한, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크). 그 안에 빈 답이 있을 수 있으니 위 수는 최소값입니다. 경로는 페이지 위 경고에 있습니다",
   humanTeamGateUnread: "팀 유닛 게이트 — 판독하지 않음",
   humanTeamGateUnreadTip:
     "팀 소유에서는 유닛 게이트를 state 행이 아니라 감사 로그의 유닛·게이트 범위·claim 시도로 판정합니다. claim 상태는 이 대시보드가 볼 수 없어, 승인 대기 여부를 판정하지 않았습니다 — '대기 없음'이라는 뜻이 아닙니다",
@@ -470,6 +476,10 @@ const deferrals: DeferralStrings = {
     쓰라고 정하지만 제목 모양은 정하지 않으므로, 이 리더가 모르는 모양으로 적혀 있을 수 있습니다.`,
   declaredUnreadable: (files) =>
     `${files}는 있지만 파일로 읽을 수 없습니다 — <b>그 안의 미결 질문은 읽지 못했습니다</b>.`,
+  aoqUnreadable: (files) =>
+    `${files}는 있지만 읽을 수 없습니다 — <b>그 안의 <code>## Assumptions &amp; Open Questions</code> 절은 위 숫자에 들어 있지 않습니다</b>.`,
+  diaryUnreadable: (files) =>
+    `stage 일지 ${files}는 있지만 읽을 수 없습니다 — <b>그 안의 미결 질문은 읽지 못했습니다</b>.`,
   unreadAlongside: (unread, files) =>
     `<b><code>## Assumptions &amp; Open Questions</code> 절 ${unread}곳은 이 리더가 아는 모양이 아닙니다</b>
     (${files}) — 그 안의 미결은 위 숫자에 들어 있지 않습니다.`,
@@ -748,6 +758,7 @@ const picker: PickerStrings = {
   summaryProgressTip: (done, total, asOf) =>
     `state.md 기준 ${done}/${total} · 갱신 ${asOf} (전환 시점에 기록되므로 stage 진행 중에는 뒤처집니다)`,
   summaryBlockersTip: (asked) => `질문 ${asked}건 중 미답변 · 디스크에서 방금 읽음`,
+  summaryBlockersUnreadableTip: (n) => `읽지 못한 질문 파일·폴더 ${n}곳이 있어 최소값입니다`,
   footer: (path) => `현재 워크스페이스 · <code>${path}</code> ·
          <a href="/">대시보드로 돌아가기</a>`,
 };

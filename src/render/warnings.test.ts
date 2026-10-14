@@ -159,6 +159,11 @@ describe("every code has copy", () => {
     "roster-mismatch": { code: "roster-mismatch", unknownToCatalog: [], missingFromState: [] },
     "harness-coexist": { code: "harness-coexist", harnesses: [".kiro"], chosen: "kiro" },
     "questions-unclosed-block": { code: "questions-unclosed-block", files: ["a-questions.md"] },
+    "record-file-unreadable": {
+      code: "record-file-unreadable",
+      files: ["construction/u/code-generation/code-generation-questions.md"],
+      questions: true,
+    },
     "engine-version-unsupported": {
       code: "engine-version-unsupported",
       harnessDir: ".kiro",

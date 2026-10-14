@@ -139,6 +139,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { listRecordDir, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /**
@@ -196,6 +197,13 @@ export interface QuestionsReport {
   totalUnanswered: number;
   /** `rel` of every file read with an unclosed block, so the page can say so. */
   unclosed: string[];
+  /**
+   * Record-relative paths that exist and could not be read — a questions file, or a
+   * directory the walk could not list or (a link) does not follow. Any blank answer in
+   * them is missing from the counts above, so those are a floor while this is non-empty
+   * (scan/record-read.ts).
+   */
+  unreadable: string[];
 }
 
 /** The phase dirs a record can hold (mirrors PHASES in the engine's lib). */
@@ -559,21 +567,22 @@ function statMtime(p: string): string {
 /** The stop hook's pending-question regex, verbatim. */
 const STOP_HOOK_BLANK_RE = /\[Answer\]:[ \t]*_*[ \t]*$/m;
 
-/** Read one questions artifact into a QuestionsFile, or undefined if unreadable. */
+/** Read one questions artifact into a QuestionsFile; a failure is named in `unreadable`. */
 function readFileEntry(
   recordDir: string,
   relParts: string[],
   phase: string,
   stage: string,
   unit: string | undefined,
+  unreadable: string[],
 ): QuestionsFile | undefined {
   const abs = path.join(recordDir, ...relParts);
-  let text: string;
-  try {
-    text = fs.readFileSync(abs, "utf-8");
-  } catch {
+  const read = readRecordText(abs);
+  if (read.kind !== "text") {
+    if (read.kind === "unreadable") unreadable.push(relParts.join("/"));
     return undefined;
   }
+  const text = read.text;
   const parsed = parseQuestionsFile(text);
   return {
     rel: relParts.join("/"),
@@ -588,22 +597,42 @@ function readFileEntry(
   };
 }
 
-function entries(abs: string): fs.Dirent[] {
+function isDirThroughLink(abs: string): boolean {
   try {
-    return fs.readdirSync(abs, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
+    return fs.statSync(abs).isDirectory();
   } catch {
-    return [];
+    return false;
   }
 }
 
-/** Every `*-questions.md` below `dirs`, as the dir segments under the phase dir. */
-function walk(recordDir: string, phase: string, dirs: string[], out: string[][]): void {
+/**
+ * Every `*-questions.md` below `dirs`, as the dir segments under the phase dir. A dir
+ * that cannot be listed, and a link to a dir, are named in `unreadable` — the first
+ * holds files this walk never saw, the second is not followed (a link could loop), and
+ * either way a blank answer inside would be missing without a word.
+ */
+function walk(
+  recordDir: string,
+  phase: string,
+  dirs: string[],
+  out: string[][],
+  unreadable: string[],
+): void {
   if (dirs.length > MAX_DEPTH) return;
-  for (const e of entries(path.join(recordDir, phase, ...dirs))) {
+  const listed = listRecordDir(path.join(recordDir, phase, ...dirs));
+  if (listed.kind !== "listed") {
+    // The phase dir itself may simply not exist; only a failure below it is a gap.
+    if (listed.kind === "unreadable") unreadable.push([phase, ...dirs].join("/"));
+    return;
+  }
+  for (const e of listed.entries) {
     if (e.name.startsWith(".")) continue;
     // `isDirectory()` on a Dirent does not follow a symlink, so a link cannot loop.
-    if (e.isDirectory()) walk(recordDir, phase, [...dirs, e.name], out);
+    if (e.isDirectory()) walk(recordDir, phase, [...dirs, e.name], out, unreadable);
     else if (dirs.length > 0 && e.name.endsWith("-questions.md")) out.push([...dirs, e.name]);
+    else if (e.isSymbolicLink() && isDirThroughLink(path.join(recordDir, phase, ...dirs, e.name))) {
+      unreadable.push([phase, ...dirs, e.name].join("/"));
+    }
   }
 }
 
@@ -642,13 +671,14 @@ export interface QuestionsOptions {
  */
 export function readQuestions(recordDir: string, opts: QuestionsOptions = {}): QuestionsReport {
   const files: QuestionsFile[] = [];
+  const unreadable: string[] = [];
 
   for (const phase of PHASE_DIRS) {
     const found: string[][] = [];
-    walk(recordDir, phase, [], found);
+    walk(recordDir, phase, [], found, unreadable);
     for (const parts of found) {
       const { stage, unit } = attribute(phase, parts.slice(0, -1), opts.isStage);
-      const e = readFileEntry(recordDir, [phase, ...parts], phase, stage, unit);
+      const e = readFileEntry(recordDir, [phase, ...parts], phase, stage, unit, unreadable);
       if (e) files.push(e);
     }
   }
@@ -663,5 +693,6 @@ export function readQuestions(recordDir: string, opts: QuestionsOptions = {}): Q
     totalQuestions: files.reduce((n, f) => n + f.questions.length, 0),
     totalUnanswered: files.reduce((n, f) => n + f.unanswered.length, 0),
     unclosed: files.filter((f) => f.unclosed).map((f) => f.rel),
+    unreadable,
   };
 }

@@ -158,6 +158,7 @@ describe("waits — decisions, compose, turn shape, hooks", () => {
     totalQuestions: 0,
     totalUnanswered: 0,
     unclosed: [],
+    unreadable: [],
   };
   const NOW = "2026-10-09T12:00:00Z";
   const w = (stateText: string, extra: Partial<Parameters<typeof buildWaits>[0]> = {}) =>
@@ -366,7 +367,14 @@ describe("second-review regressions — decisions", () => {
       position: { stage: "functional-design", basis: "current-stage", verified: true },
       marker: { miss: "absent" },
       events: [],
-      questions: { files: [], blocked: [], totalQuestions: 0, totalUnanswered: 0, unclosed: [] },
+      questions: {
+        files: [],
+        blocked: [],
+        totalQuestions: 0,
+        totalUnanswered: 0,
+        unclosed: [],
+        unreadable: [],
+      },
       blockers: [],
       checkoutParkFile: false,
       hookHeartbeats: { present: false, stamps: [] },

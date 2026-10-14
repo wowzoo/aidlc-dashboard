@@ -94,6 +94,9 @@ const warn: WarnStrings = {
   questionsUnclosedBlock: (files) =>
     `${plural(files.length, "questions file")} with a code block or comment that is never closed — read as text rather than hidden, so no blocker is hidden by it. The engine may read it differently; check the file: ${files.join(", ")}`,
 
+  recordFileUnreadable: (files, questions) =>
+    `${plural(files.length, "record path")} present but unreadable — no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow. Not counted as absent${questions ? ": questions files are among them, so the blocker count is a floor" : ""}. ${files.join(", ")}`,
+
   tokenUsageFailed: (detail) =>
     `Token usage assembly failed — only the usage panel is degraded: ${detail}`,
 
@@ -175,6 +178,10 @@ const status: StatusStrings = {
   humanEngineAskSource: "active-directive.json",
   humanEngineAskTip:
     "The directive the engine last handed out asks you something. Only a directive whose digest matches the current state is read; most of these are asked in the conversation with no questions file",
+  humanUnreadable: (n) =>
+    `${plural(n, "questions path")} could not be read — blockers in ${n === 1 ? "it" : "them"} are not counted`,
+  humanUnreadableTip:
+    "Present but unreadable (permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow). A blank answer may be in it, so the count above is a floor. The paths are in the warnings at the top of the page",
   humanTeamGateUnread: "Team unit gate — not read",
   humanTeamGateUnreadTip:
     "Under team ownership a unit's gate is decided from the audit by unit, gate scope and claim attempt, not by the state row. The claim state is not visible to this dashboard, so whether an approval is pending was not determined — this does not mean nothing is waiting",
@@ -491,6 +498,10 @@ const deferrals: DeferralStrings = {
     one, though not under a fixed heading, so it may be written in a shape this reader does not know.`,
   declaredUnreadable: (files) =>
     `${files} is present but could not be read as a file — <b>its open questions were not read</b>.`,
+  aoqUnreadable: (files) =>
+    `${files} is present but could not be read — <b>any <code>## Assumptions &amp; Open Questions</code> section in it is not in the counts above</b>.`,
+  diaryUnreadable: (files) =>
+    `The stage diary ${files} is present but could not be read — <b>its open questions were not read</b>.`,
   unreadAlongside: (unread, files) =>
     `<b>${unread} <code>## Assumptions &amp; Open Questions</code> section${unread === 1 ? " is" : "s are"} in a shape
     this reader does not know</b> (${files}) — whatever ${unread === 1 ? "it holds is" : "they hold is"} not in the counts above.`,
@@ -784,6 +795,7 @@ const picker: PickerStrings = {
   summaryProgressTip: (done, total, asOf) =>
     `${done}/${total} per state.md · updated ${asOf} (stamped at transitions, so it trails mid-stage)`,
   summaryBlockersTip: (asked) => `unanswered out of ${asked} asks · read from disk just now`,
+  summaryBlockersUnreadableTip: (n) => `a floor: ${n} questions path(s) could not be read`,
   footer: (path) => `Current workspace · <code>${path}</code> ·
          <a href="/">Back to the dashboard</a>`,
 };

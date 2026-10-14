@@ -273,7 +273,12 @@ function declaredBlock(m: DashboardModel, s: Strings): string {
  * What could not be read, said beside whatever could. Each gap is stated on its own:
  * a ledger that yielded items elsewhere does not vouch for a section it could not parse.
  */
-function gapNotes(d: DashboardModel["deferrals"], s: Strings, withItems: boolean): string {
+function gapNotes(
+  d: DashboardModel["deferrals"],
+  diaryUnreadable: string[],
+  s: Strings,
+  withItems: boolean,
+): string {
   const t = s.deferrals;
   const out: string[] = [];
   // Paths arrive as raw markup, so they are escaped here, once.
@@ -297,6 +302,13 @@ function gapNotes(d: DashboardModel["deferrals"], s: Strings, withItems: boolean
   }
   const missing = of("missing");
   if (missing.length > 0) out.push(`<p class="note">${t.declaredMissing(files(missing))}</p>`);
+  // Present and unreadable is not absent: whatever these hold is in no count above.
+  if (d.unreadable.length > 0) {
+    out.push(`<p class="note warn">${t.aoqUnreadable(files(d.unreadable))}</p>`);
+  }
+  if (diaryUnreadable.length > 0) {
+    out.push(`<p class="note warn">${t.diaryUnreadable(files(diaryUnreadable))}</p>`);
+  }
   return out.join("");
 }
 
@@ -412,7 +424,7 @@ function body(m: DashboardModel, s: Strings): string {
   const d = m.deferrals;
   // The declared ledgers and the diary are separate reads, so they follow every
   // branch below — an empty artifact section says nothing about either.
-  const tail = `${gapNotes(d, s, false)}${declaredBlock(m, s)}${diaryOpenBlock(m, s)}`;
+  const tail = `${gapNotes(d, m.diaries.unreadable, s, false)}${declaredBlock(m, s)}${diaryOpenBlock(m, s)}`;
   if (d.sections === 0) {
     return `<p class="note">${t.noSections(d.artifacts)}</p>${tail}`;
   }
@@ -431,8 +443,11 @@ function body(m: DashboardModel, s: Strings): string {
     }
     // The pill claims "no open items" for the whole panel, so every other ledger has to
     // agree: nothing declared, every declared ledger read (an unread or unrecognised one
-    // is not "none"), and no open diary entry.
+    // is not "none"), no open diary entry, and no A&OQ artifact or diary that exists
+    // and could not be read — its entries are in no count here.
     const clear =
+      d.unreadable.length === 0 &&
+      m.diaries.unreadable.length === 0 &&
       d.declared.questions.length === 0 &&
       d.declared.ledgers.every((l) => l.status === "none") &&
       !m.diaries.records.some((r) => r.axis === "openQuestions" && r.questionStatus !== "resolved");
@@ -460,7 +475,7 @@ function body(m: DashboardModel, s: Strings): string {
 
   const warn = d.catalogMissing ? `<p class="note warn">${t.catalogMissingNote}</p>` : "";
 
-  return `${kpis}${lead}${warn}${gapNotes(d, s, true)}
+  return `${kpis}${lead}${warn}${gapNotes(d, m.diaries.unreadable, s, true)}
 <div class="dfr-focus">
   <h3>${esc(t.headingPassed(passed.length))}</h3>
   ${itemList(passed, 6, t.faces.passed.label, s)}

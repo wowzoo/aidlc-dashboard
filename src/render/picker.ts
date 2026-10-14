@@ -433,6 +433,7 @@ export function renderPicker(
     failed: t.summaryFailed,
     progressTip: t.summaryProgressTip("{done}", "{total}", "{asOf}"),
     blockersTip: t.summaryBlockersTip("{asked}"),
+    blockersUnreadableTip: t.summaryBlockersUnreadableTip("{n}"),
   });
   const workspaces =
     discovery.workspaces.length > 0
@@ -575,9 +576,14 @@ function fillSummary(slot, data) {
     .replace("{total}", p.total)
     .replace("{asOf}", p.asOf || "—");
   pct.hidden = false;
-  blockers.querySelector("b").textContent = String(b.count);
-  blockers.title = SUMMARY_TEXT.blockersTip.replace("{asked}", b.asked);
-  blockers.classList.toggle("has-blockers", b.count > 0);
+  // A questions file that could not be read may hold a blank answer: the count is a
+  // floor then, and never reads as a clean zero.
+  const floor = b.unreadable > 0;
+  blockers.querySelector("b").textContent = String(b.count) + (floor ? "+" : "");
+  blockers.title =
+    SUMMARY_TEXT.blockersTip.replace("{asked}", b.asked) +
+    (floor ? " · " + SUMMARY_TEXT.blockersUnreadableTip.replace("{n}", b.unreadable) : "");
+  blockers.classList.toggle("has-blockers", b.count > 0 || floor);
   blockers.hidden = false;
   stage.textContent = p.currentStageDisplay || p.currentStage;
 }

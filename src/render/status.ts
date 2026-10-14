@@ -213,6 +213,18 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
   }
   // buildBlockers already sorts current-stage asks first; parked ones follow, dimmed.
   for (const b of m.blockers) rows.push(askRow(b, s, maxWait));
+  // A questions file that exists and could not be read may hold a blank answer, so
+  // its absence from the list above is not "nothing awaiting you" (scan/record-read.ts).
+  const unread = m.questions.unreadable.length;
+  if (unread > 0) {
+    rows.push({
+      label: esc(x.humanUnreadable(unread)),
+      value: "—",
+      dashed: true,
+      tone: "warn",
+      tip: x.humanUnreadableTip,
+    });
+  }
   for (const rel of w?.engineOnly ?? []) {
     rows.push({
       label: `${esc(x.humanEngineOnly(rel.split("/").pop() ?? rel))}<span class="mr-sub"> · ${viewLink(
@@ -263,9 +275,14 @@ function answersTab(h: HumanReading | undefined, m: DashboardModel, s: Strings):
     (w?.decision ? 1 : 0) +
     (w?.compose ? 1 : 0);
   const open = (current > 0 ? current : h?.awaitingGate ? 1 : 0) + holds;
+  // An unread questions file makes the count a floor — never a green zero.
+  const floor = unread > 0;
   return {
     label: s.cards.answersTab,
-    count: { text: String(open), tone: open > 0 ? "warn" : "ok" },
+    count: {
+      text: floor ? `${open}+` : String(open),
+      tone: open > 0 || floor ? "warn" : "ok",
+    },
     // Not capped. This card is the only place the asks are listed — the "see all" link
     // goes to the timeline, which does not list them — so a "+N more" here would make
     // the rest unreachable. The list the old blockers card showed was never capped.

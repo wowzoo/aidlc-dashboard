@@ -83,6 +83,8 @@ export interface SummaryBlockers {
   count: number;
   /** Total asks seen, so `count` has a denominator on screen. */
   asked: number;
+  /** Questions paths that exist and could not be read — `count` is a floor while > 0. */
+  unreadable: number;
   readonly source: SourceKind;
 }
 
@@ -156,6 +158,7 @@ export function readWorkspaceSummary(root: string): WorkspaceSummary {
     blockers: {
       count: questions.totalUnanswered,
       asked: questions.totalQuestions,
+      unreadable: questions.unreadable.length,
       source: "disk",
     },
   };

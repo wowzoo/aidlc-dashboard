@@ -45,6 +45,8 @@ export function warningTextIn(w: Warning, s: Strings): string {
       return t.engineVersionUnsupported(w.harnessDir, w.found, w.supported);
     case "questions-unclosed-block":
       return t.questionsUnclosedBlock(w.files);
+    case "record-file-unreadable":
+      return t.recordFileUnreadable(w.files, w.questions);
     case "token-usage-failed":
       return t.tokenUsageFailed(w.detail);
     case "credit-assembly-failed":

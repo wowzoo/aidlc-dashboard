@@ -208,6 +208,11 @@ export type Warning =
   | { code: "engine-version-unsupported"; harnessDir: string; found?: string; supported: string }
   /** Questions files with a fence/comment/raw block never closed, read as text. */
   | { code: "questions-unclosed-block"; files: string[] }
+  /** Record files (or dirs) that exist and could not be read — questions, A&OQ
+   *  artifacts, stage diaries; record-relative, sorted. `questions` is true when a
+   *  questions file or a dir the questions walk needed is among them, so the blocker
+   *  count is a floor (scan/record-read.ts). */
+  | { code: "record-file-unreadable"; files: string[]; questions: boolean }
   | { code: "token-usage-failed"; detail: string }
   | { code: "credit-assembly-failed"; detail: string };
 

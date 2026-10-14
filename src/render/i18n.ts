@@ -177,6 +177,8 @@ export interface WarnStrings {
     supported: string,
   ): string;
   questionsUnclosedBlock(files: string[]): string;
+  /** `questions`: a questions file or dir is among them, so the blocker count is a floor. */
+  recordFileUnreadable(files: string[], questions: boolean): string;
   tokenUsageFailed(detail: string): string;
   creditAssemblyFailed(detail: string): string;
 }
@@ -250,6 +252,9 @@ export interface StatusStrings {
   readonly humanEngineOnlyTip: string;
   readonly humanTeamGateUnread: string;
   readonly humanTeamGateUnreadTip: string;
+  /** A row in the answers tab: `n` questions paths exist and could not be read. */
+  humanUnreadable(n: number): string;
+  readonly humanUnreadableTip: string;
   readonly humanCheckoutPark: string;
   readonly humanCheckoutParkTip: string;
   /** `checkpoint` / `decision` are the audit's own fields, either may be absent. */
@@ -485,6 +490,10 @@ export interface DeferralStrings {
   declaredMissing(files: string): string;
   /** Raw markup; `files` is already-escaped markup. */
   declaredUnreadable(files: string): string;
+  /** A&OQ artifacts or dirs that exist and could not be read; `files` is markup. */
+  aoqUnreadable(files: string): string;
+  /** Stage diaries that exist and could not be read; `files` is markup. */
+  diaryUnreadable(files: string): string;
   /** Raw markup; `files` is already-escaped markup. */
   unreadAlongside(unread: number, files: string): string;
   readonly chipUnassignedTip: string;
@@ -726,6 +735,8 @@ export interface PickerStrings {
   /** Names the source and its date — the card mixes two freshnesses, so neither is silent. */
   summaryProgressTip(done: string, total: string, asOf: string): string;
   summaryBlockersTip(asked: string): string;
+  /** Appended to the tip when `n` questions paths could not be read. */
+  summaryBlockersUnreadableTip(n: string): string;
   /** Raw markup — carries the workspace path in <code>. */
   footer(path: string): string;
 }

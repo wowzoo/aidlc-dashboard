@@ -435,6 +435,7 @@ describe("waits", () => {
     totalQuestions: 0,
     totalUnanswered: 0,
     unclosed: [],
+    unreadable: [],
   };
   const open: AuditEvent = {
     ts: "2026-10-09T01:00:00Z",
@@ -611,6 +612,7 @@ describe("second-review regressions", () => {
     totalQuestions: 0,
     totalUnanswered: 0,
     unclosed: [],
+    unreadable: [],
   };
   const w = (
     stateText: string,

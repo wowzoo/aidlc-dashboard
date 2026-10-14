@@ -500,6 +500,20 @@ export function assemble(
     isStage,
     now,
   });
+  // A record file that exists and could not be read is not absent: its blank answers,
+  // deferrals or diary entries are missing from every count built on it, so it is
+  // named once here (scan/record-read.ts). The declared ledgers say their own
+  // `unreadable` in the deferrals panel and are not repeated.
+  const unreadable = [
+    ...new Set([...questions.unreadable, ...deferrals.unreadable, ...diaries.unreadable]),
+  ].sort();
+  if (unreadable.length > 0) {
+    warnings.push({
+      code: "record-file-unreadable",
+      files: unreadable,
+      questions: questions.unreadable.length > 0,
+    });
+  }
 
   // STATE / CATALOGUE COMPATIBILITY, measured rather than versioned.
   //

@@ -110,6 +110,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { type DeclaredOpenQuestions, readDeclaredOpenQuestions } from "./declared-open-questions";
 import type { StageStatus } from "./parser";
+import { listRecordDir, readRecordText } from "./record-read";
 import { visibleLines } from "./visible-lines";
 
 /** Where the decision an item was deferred to actually sits. */
@@ -193,6 +194,12 @@ export interface DeferralReport {
    * Reported whatever the other sections yielded: a gap is a gap beside a full table too.
    */
   unreadSections: string[];
+  /**
+   * Record-relative paths that exist and could not be read — an artifact, or a dir that
+   * could not be listed. Whatever section they hold is missing from every count above,
+   * so none of them can be "none" while this is non-empty (scan/record-read.ts).
+   */
+  unreadable: string[];
   /** The two stage-declared ledgers outside this section (scan/declared-open-questions.ts). */
   declared: DeclaredOpenQuestions;
   /** Table rows read before fan-in dedup. */
@@ -485,12 +492,13 @@ function isDir(p: string): boolean {
   }
 }
 
-function readDir(p: string): string[] {
-  try {
-    return fs.readdirSync(p).sort();
-  } catch {
-    return [];
-  }
+/** List `p`'s names; a dir that exists and cannot be listed is named in `unreadable`. */
+function readDir(recordDir: string, p: string, unreadable: string[]): string[] {
+  const listed = listRecordDir(p);
+  if (listed.kind === "listed") return listed.entries.map((e) => e.name);
+  if (listed.kind === "unreadable")
+    unreadable.push(path.relative(recordDir, p).split(path.sep).join("/"));
+  return [];
 }
 
 /** One artifact location in the record tree. */
@@ -511,7 +519,12 @@ interface Located {
  * available its `isStage` oracle decides, and only without one does the reader
  * fall back to "a dir with subdirs is a unit".
  */
-function locateArtifacts(recordDir: string, isStage?: (slug: string) => boolean): Located[] {
+function locateArtifacts(
+  recordDir: string,
+  unreadable: string[],
+  isStage?: (slug: string) => boolean,
+): Located[] {
+  const list = (p: string) => readDir(recordDir, p, unreadable);
   const out: Located[] = [];
   const scanFiles = (
     relParts: string[],
@@ -520,7 +533,7 @@ function locateArtifacts(recordDir: string, isStage?: (slug: string) => boolean)
     unit: string | undefined,
     descend: boolean,
   ) => {
-    for (const f of readDir(path.join(recordDir, ...relParts))) {
+    for (const f of list(path.join(recordDir, ...relParts))) {
       const abs = path.join(recordDir, ...relParts, f);
       if (f.endsWith(".md")) {
         out.push({ relParts: [...relParts, f], phase, stage, unit });
@@ -530,7 +543,7 @@ function locateArtifacts(recordDir: string, isStage?: (slug: string) => boolean)
       // from a stage dir: descending from a UNIT dir would collect every stage's
       // files a second time, which double-counts the whole ledger.
       if (descend && isDir(abs)) {
-        for (const g of readDir(abs)) {
+        for (const g of list(abs)) {
           if (g.endsWith(".md")) out.push({ relParts: [...relParts, f, g], phase, stage, unit });
         }
       }
@@ -540,10 +553,10 @@ function locateArtifacts(recordDir: string, isStage?: (slug: string) => boolean)
   for (const phase of PHASE_DIRS) {
     const phaseAbs = path.join(recordDir, phase);
     if (!isDir(phaseAbs)) continue;
-    for (const child of readDir(phaseAbs)) {
+    for (const child of list(phaseAbs)) {
       const childAbs = path.join(phaseAbs, child);
       if (!isDir(childAbs)) continue;
-      const subdirs = readDir(childAbs).filter((g) => isDir(path.join(childAbs, g)));
+      const subdirs = list(childAbs).filter((g) => isDir(path.join(childAbs, g)));
       const childIsStage = isStage ? isStage(child) : subdirs.length === 0;
       if (!childIsStage && subdirs.length > 0) {
         // Unit dir: its stage children are stages.
@@ -579,15 +592,16 @@ export interface DeferralOptions {
 }
 
 /**
- * Read the record's deferral ledger. Never throws: an unreadable artifact is
- * skipped, and a record with no such sections yields an empty report rather than
- * an error.
+ * Read the record's deferral ledger. Never throws: an artifact or dir that exists and
+ * cannot be read is named in `unreadable`, and a record with no such sections yields
+ * an empty report rather than an error.
  */
 export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): DeferralReport {
   const stageStatuses = opts.stageStatuses ?? new Map<string, StageStatus[]>();
   const nowMs = Date.parse(opts.now ?? new Date().toISOString());
 
-  const located = locateArtifacts(recordDir, opts.isStage);
+  const unreadable: string[] = [];
+  const located = locateArtifacts(recordDir, unreadable, opts.isStage);
   let sections = 0;
   let emptySections = 0;
   const unreadSections: string[] = [];
@@ -601,12 +615,12 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
 
   for (const loc of located) {
     const abs = path.join(recordDir, ...loc.relParts);
-    let text: string;
-    try {
-      text = fs.readFileSync(abs, "utf-8");
-    } catch {
+    const read = readRecordText(abs);
+    if (read.kind !== "text") {
+      if (read.kind === "unreadable") unreadable.push(loc.relParts.join("/"));
       continue;
     }
+    const text = read.text;
     // Cheap reject before the line walk: most artifacts do not carry the section.
     if (!/Assumptions\s*&\s*Open\s*Questions/i.test(text)) continue;
     const parsed = parseDeferralSections(text);
@@ -711,6 +725,7 @@ export function readDeferrals(recordDir: string, opts: DeferralOptions = {}): De
     sections,
     emptySections,
     unreadSections,
+    unreadable: [...new Set(unreadable)],
     rows,
     declared: readDeclaredOpenQuestions(recordDir),
     catalogMissing: opts.catalogSlugs === undefined,

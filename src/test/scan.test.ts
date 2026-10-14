@@ -3821,3 +3821,119 @@ describe("construction matrix — the engine's exact artifact filename", () => {
     expect(cell(rec, "code-generation").state).toBe("complete");
   });
 });
+
+describe("a record file that cannot be read is named, never read as absent", () => {
+  // Every reader below used to swallow a failed read and carry on, so a questions file
+  // with a blank answer, an A&OQ section or a stage diary left the page without a trace
+  // — and a panel built on what was left could then say "none". Only ENOENT is absence.
+  const REF = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
+  const RECORD = "aidlc/spaces/default/intents/260101-demo-migration";
+  // chmod does not stop root, and win32 has no POSIX modes to take away.
+  const noModes = process.platform === "win32" || process.getuid?.() === 0;
+
+  const withRecord = (fn: (record: string) => void) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-unread-"));
+    const record = path.join(root, RECORD);
+    try {
+      fs.cpSync(REF, root, { recursive: true });
+      fn(record);
+    } finally {
+      // Undo any mode a test took away so the tree can be removed.
+      const restore = (p: string) => {
+        let st: fs.Stats;
+        try {
+          st = fs.lstatSync(p);
+        } catch {
+          return;
+        }
+        if (st.isSymbolicLink()) return;
+        fs.chmodSync(p, st.isDirectory() ? 0o755 : 0o644);
+        if (st.isDirectory()) for (const c of fs.readdirSync(p)) restore(path.join(p, c));
+      };
+      restore(root);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const AOQ = "inception/units-generation/unit-of-work-dependency.md";
+  const QFILE = "construction/PU-B-ui/code-generation/code-generation-questions.md";
+  const DIARY = "ideation/intent-capture/memory.md";
+
+  test.skipIf(noModes)("an A&OQ artifact with no read permission is named", () => {
+    withRecord((record) => {
+      fs.chmodSync(path.join(record, AOQ), 0o000);
+      expect(readDeferrals(record).unreadable).toEqual([AOQ]);
+    });
+  });
+
+  test("an A&OQ artifact that is a directory, or a dangling link, is named", () => {
+    withRecord((record) => {
+      const abs = path.join(record, AOQ);
+      fs.rmSync(abs);
+      fs.mkdirSync(abs);
+      expect(readDeferrals(record).unreadable).toEqual([AOQ]);
+      fs.rmdirSync(abs);
+      fs.symlinkSync(path.join(record, "nowhere.md"), abs);
+      expect(readDeferrals(record).unreadable).toEqual([AOQ]);
+    });
+  });
+
+  test("a deleted A&OQ artifact is absence, not a gap (negative control)", () => {
+    withRecord((record) => {
+      fs.rmSync(path.join(record, AOQ));
+      const d = readDeferrals(record);
+      expect(d.unreadable).toEqual([]);
+    });
+  });
+
+  test.skipIf(noModes)("a questions file with no read permission is named", () => {
+    withRecord((record) => {
+      const before = readQuestions(record);
+      expect(before.unreadable).toEqual([]);
+      fs.chmodSync(path.join(record, QFILE), 0o000);
+      const after = readQuestions(record);
+      expect(after.unreadable).toEqual([QFILE]);
+      expect(after.totalUnanswered).toBeLessThan(before.totalUnanswered);
+    });
+  });
+
+  test("a deleted questions file is absence, not a gap (negative control)", () => {
+    withRecord((record) => {
+      fs.rmSync(path.join(record, QFILE));
+      expect(readQuestions(record).unreadable).toEqual([]);
+    });
+  });
+
+  test("a dangling questions-file link is named", () => {
+    withRecord((record) => {
+      const abs = path.join(record, QFILE);
+      fs.rmSync(abs);
+      fs.symlinkSync(path.join(record, "nowhere.md"), abs);
+      expect(readQuestions(record).unreadable).toEqual([QFILE]);
+    });
+  });
+
+  test.skipIf(noModes)("a stage diary with no read permission is named", () => {
+    withRecord((record) => {
+      fs.chmodSync(path.join(record, DIARY), 0o000);
+      expect(readDiaries(record).unreadable).toEqual([DIARY]);
+    });
+  });
+
+  test("a stage with no diary is absence, not a gap (negative control)", () => {
+    withRecord((record) => {
+      fs.rmSync(path.join(record, DIARY));
+      expect(readDiaries(record).unreadable).toEqual([]);
+    });
+  });
+
+  test.skipIf(noModes)("a stage dir that cannot be listed is named by every reader", () => {
+    withRecord((record) => {
+      const dir = "construction/PU-B-ui/code-generation";
+      fs.chmodSync(path.join(record, dir), 0o000);
+      expect(readQuestions(record).unreadable).toContain(dir);
+      expect(readDeferrals(record).unreadable).toContain(dir);
+      expect(readDiaries(record).unreadable).toContain(`${dir}/memory.md`);
+    });
+  });
+});
