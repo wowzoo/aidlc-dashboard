@@ -586,6 +586,8 @@ export interface TimelineStrings {
    * alone, so the line names it rather than saying no gate is waiting.
    */
   awaitingDecision(name: string | undefined): string;
+  /** Raw markup, appended when the decision's stage came from the unit cache alone. */
+  readonly awaitingDecisionUnscoped: string;
   /** Raw markup. Team ownership: the unit gate is decided by claim state not read here. */
   readonly awaitingTeamUnread: string;
   /** Raw markup. Claims the stage gate only — other asks live in the waits tab. */

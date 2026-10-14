@@ -613,6 +613,8 @@ const timeline: TimelineStrings = {
     `No stage in flight in the audit shards read (${plural(refused, "audit path")} refused)`,
   awaiting: (stage) => `awaiting approval: <b>${stage}</b>`,
   awaitingDecision: (name) => `awaiting decision: <b>${name ?? "unnamed decision"}</b>`,
+  awaitingDecisionUnscoped:
+    '<span class="mute"> (scope unconfirmed — taken from the state\'s unit cache alone)</span>',
   awaitingTeamUnread:
     'unit gate not read<span class="mute"> (team ownership — whether a unit approval is pending is not determined here)</span>',
   awaitingNone:

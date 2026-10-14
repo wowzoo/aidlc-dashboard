@@ -255,7 +255,11 @@ function awaitingLine(m: DashboardModel, x: Strings["timeline"]): string {
   const d = m.waits.decision;
   if (d) {
     const name = d.checkpoint ?? d.decision;
-    return x.awaitingDecision(name ? esc(name) : undefined);
+    // Same caveat the waits tab carries: scoped by the unit cache alone, the decision
+    // may belong to a unit the engine is not on (model/waits.ts).
+    return `${x.awaitingDecision(name ? esc(name) : undefined)}${
+      d.scopeVerified === false ? x.awaitingDecisionUnscoped : ""
+    }`;
   }
   if (m.waits.teamGateUnread) return x.awaitingTeamUnread;
   return x.awaitingNone;

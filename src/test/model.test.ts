@@ -1205,6 +1205,28 @@ describe("absence sentences claim only what their source read", () => {
     expect(renderBody(unnamed, "en")).toContain(EN.timeline.awaitingDecision(undefined));
   });
 
+  test("a decision scoped by the unit cache alone is named unconfirmed on the timeline too", () => {
+    const decision = {
+      stage: "code-generation",
+      unit: "PU-A-core",
+      checkpoint: "Construction Unit Approval",
+      since: "2026-01-01T03:00:00Z",
+    };
+    for (const lang of ["en", "ko"] as const) {
+      const t = strings(lang).timeline;
+      const loose = {
+        ...base,
+        waits: { ...base.waits, decision: { ...decision, scopeVerified: false } },
+      };
+      expect(renderBody(loose, lang)).toContain(t.awaitingDecisionUnscoped);
+      const firm = {
+        ...base,
+        waits: { ...base.waits, decision: { ...decision, scopeVerified: true } },
+      };
+      expect(renderBody(firm, lang)).not.toContain(t.awaitingDecisionUnscoped);
+    }
+  });
+
   test("an unread team unit gate says so instead of 'nothing waiting'", () => {
     const m = { ...base, waits: { ...base.waits, teamGateUnread: true } };
     const en = renderBody(m, "en");

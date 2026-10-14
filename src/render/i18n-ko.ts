@@ -585,6 +585,8 @@ const timeline: TimelineStrings = {
     `읽은 감사 기록에는 진행 중인 stage 없음 (읽지 않은 경로 ${refused}곳)`,
   awaiting: (stage) => `승인 대기 <b>${stage}</b>`,
   awaitingDecision: (name) => `결정 대기 <b>${name ?? "이름 없는 결정"}</b>`,
+  awaitingDecisionUnscoped:
+    '<span class="mute"> (범위 미확인 — state 의 유닛 위치로만 정함)</span>',
   awaitingTeamUnread:
     '유닛 관문은 판독하지 않음<span class="mute"> (팀 소유 — 유닛 승인 대기 여부는 여기서 판단하지 않습니다)</span>',
   awaitingNone:
