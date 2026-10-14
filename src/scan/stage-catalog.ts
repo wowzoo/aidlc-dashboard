@@ -329,6 +329,22 @@ export function supportedEngine(frameworkVersion: string | undefined): boolean {
   return frameworkVersion === SUPPORTED_ENGINE;
 }
 
+/**
+ * The engine's wire-name → filename exceptions (`aidlc-artifact-vocabulary.ts`, 2.11.0):
+ * every other artifact is `<name>.md`. Transcribed, not derived — the stage graph names
+ * artifacts, never files, so this table is the only place the format is declared.
+ */
+const ARTIFACT_FILENAMES: Readonly<Record<string, string>> = {
+  "build-test-results": "test-results.md",
+  "load-test-results": "test-results.md",
+  traceability: "traceability.json",
+};
+
+/** The one file an artifact name occupies — the engine's `artifactFilename`. */
+export function artifactFilename(name: string): string {
+  return ARTIFACT_FILENAMES[name] ?? `${name}.md`;
+}
+
 /** Keep an artifact when it is kind-agnostic, or when it lists this unit's kind. */
 function applies(stage: CatalogStage, artifact: string, kind: string | undefined): boolean {
   const kinds = stage.producesKinds[artifact];

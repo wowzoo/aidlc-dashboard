@@ -104,9 +104,9 @@ describe("assemble on the fixture workspace", () => {
     expect(fd.complete).toBe(2);
     expect(fd.partial).toBe(0);
     // Both cells also contract `traceability`, which the engine writes as
-    // `traceability.json` — so this only passes while the segment scan strips
-    // whatever extension is there. An `.md`-only filter puts both at "partial".
-    expect(fd.cells.every((c) => c.present.includes("traceability"))).toBe(true);
+    // `traceability.json` (`artifactFilename`) — an `.md`-only filter puts both at
+    // "partial".
+    expect(fd.cells.every((c) => c.present.includes("traceability.json"))).toBe(true);
   });
 
   test("skipped stage keeps a row with no cells", () => {

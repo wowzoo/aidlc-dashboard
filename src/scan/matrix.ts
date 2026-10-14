@@ -32,6 +32,7 @@ import * as path from "node:path";
 import { type StageInfo, type StageStatus, displayFromSlug } from "./parser";
 import {
   type StageCatalog,
+  artifactFilename,
   expectedArtifacts,
   requiredArtifacts,
   vacuouslyCovered,
@@ -209,7 +210,7 @@ export type CellState =
 export interface MatrixCell {
   unit: string;
   state: CellState;
-  /** Artifact basenames found on disk, minus the questions file. */
+  /** Files found in the segment dir, by name with extension, minus the questions file. */
   present: string[];
   /** Contracted artifacts for this unit's kind ([] when no catalogue). */
   expected: string[];
@@ -351,37 +352,36 @@ export function parseBoltDag(graphText: string): BoltDag | undefined {
 }
 
 /**
- * Artifact basenames a segment dir holds, minus the `-questions` file. Questions
- * are a conversation artifact, never listed in a stage's produces[], so counting
- * them would make every started segment look contract-complete.
+ * The files a segment dir holds, by name, minus the `-questions` file. Questions are a
+ * conversation artifact, never listed in a stage's produces[], so counting them would
+ * make every started segment look started for nothing.
  *
- * THE EXTENSION IS NOT ALWAYS `.md`. A stage's `produces` names artifacts
- * logically (`traceability`), and the engine picks the format — measured on one
- * real run: 41 `.md` and 7 `.json` across the Construction segments, with
- * `traceability` always written as `traceability.json`. An `.md`-only filter
- * therefore reported `traceability` missing in every cell that contracts it, so 8
- * cells that met their contract sat at "partial" permanently and no cell in the
- * run could ever reach "complete". Strip whatever extension is there instead, and
- * dedupe so `x.md` + `x.json` counts once.
+ * A NAME, NOT A STEM. `produces` names artifacts logically and the engine maps each to
+ * exactly one file (`artifactFilename`: `<name>.md`, or the vocabulary's exception —
+ * `traceability` is `traceability.json`), then asks `isRegularFile` of that path
+ * (`unitCovered`, `missingUnitArtifacts`). This scan used to strip whatever extension was
+ * on disk, which fixed the `.json` case run B had measured (an `.md`-only filter left
+ * 8 cells permanently partial) but also let `code-summary.json` cover `code-summary` and
+ * `traceability.md` cover `traceability` — files the engine never reads as the artifact.
+ * A link counts when it reaches a regular file, because `isRegularFile` follows it.
  */
 function readSegment(recordDir: string, unit: string, stageSlug: string): string[] {
-  let entries: fs.Dirent[];
+  const dir = path.join(recordDir, "construction", unit, stageSlug);
+  let names: string[];
   try {
-    entries = fs.readdirSync(path.join(recordDir, "construction", unit, stageSlug), {
-      withFileTypes: true,
-    });
+    names = fs.readdirSync(dir);
   } catch {
     return [];
   }
-  const bases = new Set<string>();
-  for (const e of entries) {
+  const files: string[] = [];
+  for (const name of names) {
     // Dotfiles are never artifacts; a dir inside a segment is not one either.
-    if (!e.isFile() || e.name.startsWith(".")) continue;
-    const base = e.name.replace(/\.[^.]+$/, "");
-    if (base.endsWith("-questions")) continue;
-    bases.add(base);
+    if (name.startsWith(".") || name.replace(/\.[^.]+$/, "").endsWith("-questions")) continue;
+    try {
+      if (fs.statSync(path.join(dir, name)).isFile()) files.push(name);
+    } catch {}
   }
-  return [...bases].sort();
+  return files.sort();
 }
 
 /**
@@ -439,7 +439,7 @@ export function buildConstructionMatrix(
       // what the stage may write here.
       const required = catStage ? requiredArtifacts(catStage, u.kind) : [];
       const expected = catStage ? expectedArtifacts(catStage, u.kind) : [];
-      const missing = required.filter((a) => !present.includes(a));
+      const missing = required.filter((a) => !present.includes(artifactFilename(a)));
       // A known kind that the stage contracts nothing REQUIRED for is not "not started".
       // Requires both the catalogue row and the kind: with either absent, an empty
       // required set means "unknown", which stays on the binary rule below.

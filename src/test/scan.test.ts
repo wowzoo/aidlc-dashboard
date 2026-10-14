@@ -17,6 +17,7 @@ import {
   buildConstructionMatrix,
   parseBoltDag,
   readUnitLifecycle,
+  scanConstructionMatrix,
 } from "../scan/matrix";
 import { parseDiary, readDiaries } from "../scan/memory-diary";
 import { type StageInfo, parseState, parseUnitProgress } from "../scan/parser";
@@ -479,7 +480,9 @@ describe("construction matrix", () => {
       dag,
       stages,
       (unit) =>
-        unit === "PU-A" ? ["code-generation-plan", "code-summary"] : ["code-generation-plan"],
+        unit === "PU-A"
+          ? ["code-generation-plan.md", "code-summary.md"]
+          : ["code-generation-plan.md"],
       catalog,
     )!;
     const cells = mx.stages[0]!.cells;
@@ -504,7 +507,7 @@ describe("construction matrix", () => {
     const mx = buildConstructionMatrix(
       dag,
       stages,
-      () => ["code-generation-plan", "code-summary"],
+      () => ["code-generation-plan.md", "code-summary.md"],
       withOptional,
     )!;
     const ui = mx.stages[0]!.cells[1]!;
@@ -519,7 +522,7 @@ describe("construction matrix", () => {
     // and artifact existence degrades to evidence — a paused or partially-written unit
     // has artifacts but no receipt and stays uncovered (issue: artifact presence was
     // mistaken for completion)."
-    const all = () => ["code-generation-plan", "code-summary"];
+    const all = () => ["code-generation-plan.md", "code-summary.md"];
     // Rows must carry the current `Run floor`, or the engine (and this reader) cannot place
     // them in the current attempt — a ledger without the field reads `unverified`, not ▩.
     const f = { "Run floor": "unstarted#0" };
@@ -542,7 +545,7 @@ describe("construction matrix", () => {
     //   if (row.event !== "UNIT_COMPLETED") { receipts.delete(row.unit);
     // A set that only ever grew read `UNIT_COMPLETED → UNIT_PAUSED` as settled, which is
     // exactly the state the engine calls uncovered.
-    const all = () => ["code-generation-plan", "code-summary"];
+    const all = () => ["code-generation-plan.md", "code-summary.md"];
     const f = { "Run floor": "unstarted#0" };
     for (const later of ["UNIT_PAUSED", "UNIT_STARTED", "UNIT_RESUMED"]) {
       const lc = readUnitLifecycle([
@@ -570,7 +573,7 @@ describe("construction matrix", () => {
 
   test("a unit the engine skipped is its own cell, out of the denominator", () => {
     // UNIT_SKIPPED with a reason: before, the unit read as absent — work nobody did.
-    const all = () => ["code-generation-plan", "code-summary"];
+    const all = () => ["code-generation-plan.md", "code-summary.md"];
     const f = { "Run floor": "unstarted#0" };
     const lc = readUnitLifecycle([
       { event: "UNIT_COMPLETED", stage: "code-generation", unit: "PU-A", fields: f },
@@ -859,7 +862,7 @@ describe("construction matrix", () => {
     const mx = buildConstructionMatrix(
       dag,
       stages,
-      () => ["code-generation-plan", "code-summary"],
+      () => ["code-generation-plan.md", "code-summary.md"],
       catalog,
       lifecycle,
     )!;
@@ -886,7 +889,7 @@ describe("construction matrix", () => {
   });
 
   test("no catalogue degrades to binary (never 'partial')", () => {
-    const mx = buildConstructionMatrix(dag, stages, () => ["code-generation-plan"], undefined)!;
+    const mx = buildConstructionMatrix(dag, stages, () => ["code-generation-plan.md"], undefined)!;
     expect(mx.stages[0]?.cells.map((c) => c.state)).toEqual(["complete", "complete"]);
     expect(mx.contractAware).toBe(false);
   });
@@ -3463,5 +3466,88 @@ describe("time bins", () => {
 
   test("an empty ledger has no bins", () => {
     expect(buildTiming({ events: [], counts: new Map(), shards: [] }).bins).toEqual([]);
+  });
+});
+
+describe("construction matrix — the engine's exact artifact filename", () => {
+  // `missingUnitArtifacts` (aidlc-state.ts) checks `construction/<unit>/<stage>/` for
+  // `artifactFilename(name)` — `<name>.md` except the vocabulary's own exceptions
+  // (`traceability` → `traceability.json`) — and `isRegularFile`, which follows a link.
+  const stage = (slug: string, produces: string[]): CatalogStage => ({
+    forEach: "unit-of-work",
+    slug,
+    number: "3.1",
+    name: slug,
+    phase: "construction",
+    produces,
+    optionalProduces: [],
+    producesKinds: {},
+    sensors: [],
+  });
+  const catalog = {
+    stages: [],
+    bySlug: new Map<string, CatalogStage>([
+      ["functional-design", stage("functional-design", ["business-rules", "traceability"])],
+      ["code-generation", stage("code-generation", ["code-generation-plan", "code-summary"])],
+    ]),
+    sourcePath: "/demo/.kiro/tools/data/stage-graph.json",
+    harnessDir: ".kiro",
+  };
+  const stages: StageInfo[] = [
+    { slug: "functional-design", display: "FD", status: "done", execute: true },
+    { slug: "code-generation", display: "CG", status: "active", execute: true },
+  ];
+
+  function tree(files: Record<string, string>, links: Record<string, string> = {}): string {
+    const rec = fs.mkdtempSync(path.join(os.tmpdir(), "mx-files-"));
+    fs.writeFileSync(
+      path.join(rec, "runtime-graph.json"),
+      JSON.stringify({ bolt_dag: { units: [{ name: "PU-A", kind: "service" }], batches: [] } }),
+    );
+    for (const [rel, body] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(rec, rel)), { recursive: true });
+      fs.writeFileSync(path.join(rec, rel), body);
+    }
+    for (const [rel, target] of Object.entries(links)) {
+      fs.mkdirSync(path.dirname(path.join(rec, rel)), { recursive: true });
+      fs.symlinkSync(target, path.join(rec, rel));
+    }
+    return rec;
+  }
+  const cell = (rec: string, slug: string) =>
+    scanConstructionMatrix(rec, stages, catalog)!.stages.find((s) => s.slug === slug)!.cells[0]!;
+
+  test("an artifact in the wrong format is missing, as the engine reads it", () => {
+    const rec = tree({
+      "construction/PU-A/functional-design/business-rules.md": "x",
+      // The vocabulary names `traceability.json`; a Markdown copy does not cover it.
+      "construction/PU-A/functional-design/traceability.md": "x",
+      "construction/PU-A/code-generation/code-generation-plan.md": "x",
+      // `code-summary` is `code-summary.md`; a JSON file of that stem is not it.
+      "construction/PU-A/code-generation/code-summary.json": "{}",
+    });
+    const fd = cell(rec, "functional-design");
+    expect([fd.state, fd.missing]).toEqual(["partial", ["traceability"]]);
+    const cg = cell(rec, "code-generation");
+    expect([cg.state, cg.missing]).toEqual(["partial", ["code-summary"]]);
+  });
+
+  test("the vocabulary's own filename covers the artifact", () => {
+    const rec = tree({
+      "construction/PU-A/functional-design/business-rules.md": "x",
+      "construction/PU-A/functional-design/traceability.json": "{}",
+    });
+    expect(cell(rec, "functional-design").state).toBe("complete");
+  });
+
+  test("a link to a regular file counts, as isRegularFile follows it", () => {
+    const rec = tree(
+      {
+        "construction/PU-A/code-generation/code-generation-plan.md": "x",
+        "elsewhere/summary.md": "x",
+      },
+      { "construction/PU-A/code-generation/code-summary.md": "../../../elsewhere/summary.md" },
+    );
+    expect(cell(rec, "code-generation").state).toBe("complete");
   });
 });
