@@ -1958,6 +1958,32 @@ describe("gap classification", () => {
     expect(lone.humanWaitSec).toBe(3600);
   });
 
+  test("a matched delegation on other shards stays delegated through a clone's wait", () => {
+    // A request on one shard and its completion on a copy are both absent at every gap,
+    // so only the asking clone is present — but the review window is measured work.
+    const on = (ts: string, event: string, shard: string, fields: Record<string, string> = {}) => ({
+      ...evf(ts, event, fields),
+      shard,
+    });
+    const review = { Stage: "cg", Reviewer: "code-reviewer", Iteration: "1", "Request Id": "r1" };
+    const g = classifyGaps([
+      on("2026-01-01T00:00:00Z", "DECISION_RECORDED", "a", { Stage: "rv" }),
+      on("2026-01-01T00:10:00Z", "REVIEW_REQUESTED", "b", {
+        ...review,
+        "Artifact Fingerprint": "fp",
+      }),
+      on("2026-01-01T00:50:00Z", "REVIEW_COMPLETED", "c", {
+        ...review,
+        Verdict: "READY",
+        "Request Fingerprint": "fp",
+        "Artifact Fingerprint": "fp",
+      }),
+      on("2026-01-01T01:00:00Z", "HUMAN_TURN", "a"),
+    ]);
+    expect(g.delegatedSec).toBe(2400);
+    expect(g.humanWaitSec).toBe(1200);
+  });
+
   test("a clone that is working while another waits keeps the gap out of the wait", () => {
     const on = (ts: string, event: string, shard: string, fields: Record<string, string> = {}) => ({
       ...evf(ts, event, fields),

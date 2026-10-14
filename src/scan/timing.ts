@@ -736,7 +736,11 @@ export function classifyGaps(
       bucket = "parked";
     } else if (
       waiting[i] !== undefined &&
-      present.every((shard) => waiting[i]?.has(shard) || parkedShards.has(shard))
+      present.every((shard) => waiting[i]?.has(shard) || parkedShards.has(shard)) &&
+      // The ask and its answer side by side read as before, ahead of delegation. A wait
+      // spanning other clones' rows does not overwrite a matched delegation window
+      // among them — that window is measured work (Codex review, reproduced).
+      ((a.shard === b.shard && waiting[i]?.has(a.shard)) || !delegatedGaps.has(i))
     ) {
       humanWaitSec += gap;
       bucket = "humanWait";
