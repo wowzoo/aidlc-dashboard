@@ -531,19 +531,23 @@ describe("render", () => {
       );
     });
 
-    test("every shard refused reads as before — the warning, and no spans", () => {
+    test("every shard refused hedges too — nothing read is not nothing recorded", () => {
       withAudit(
         (audit, root) => {
           link(audit, root, OTHER);
           link(audit, root, OWN);
         },
         (m) => {
-          expect(m.partialAudit).toBeUndefined();
+          expect(m.partialAudit).toEqual({ refused: 2 });
           expect(codes(m)).toContain("audit-shard-refused");
           const en = renderBody(m, "en");
-          expect(en).toContain(EN.timeline.noStageSpans);
-          expect(en).toContain(EN.status.checksNone);
-          expect(en).not.toContain(EN.timeline.partialAuditNote(2));
+          expect(en).toContain(EN.timeline.partialAuditNote(2));
+          expect(en).toContain(EN.timeline.noStageSpansPartial(2));
+          expect(en).not.toContain(EN.timeline.noStageSpans);
+          expect(en).toContain(EN.status.checksNonePartial(2));
+          expect(en).not.toContain(`>${EN.status.checksNone}<`);
+          expect(en).toContain(EN.kpi.noEventsPartial(2));
+          expect(en).not.toContain(`>${EN.kpi.noEvents}<`);
         },
       );
     });

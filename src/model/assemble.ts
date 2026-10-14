@@ -792,9 +792,7 @@ export function assemble(
     recentEvents: recent,
     totalEvents: ledger.events.length,
     partialAudit:
-      ledger.refused && ledger.refused.length > 0 && ledger.shards.length > 0
-        ? { refused: ledger.refused.length }
-        : undefined,
+      ledger.refused && ledger.refused.length > 0 ? { refused: ledger.refused.length } : undefined,
     provenance,
     warnings,
     artifacts,

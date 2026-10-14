@@ -273,13 +273,12 @@ export interface DashboardModel {
   /** Total events in the ledger, so a truncated stream can say so. */
   totalEvents: number;
   /**
-   * Set when some audit paths were refused (`audit-shard-refused`) while at least one
-   * shard was still read. The readable rest is a ledger, just not the run's, so a
-   * sentence that claims something of the whole run — "every gate passed first time",
-   * "no stage in flight", "N checks passed" — would rest on an absence the refusal
-   * can explain, and is hedged instead. Absent when nothing was refused, and when
-   * nothing was read: that page reads as it did before this field — its panels say
-   * the ledger holds nothing, beside the warning naming every refused path.
+   * Set when any audit path was refused (`audit-shard-refused`). The readable rest is
+   * a ledger, just not the run's, so a sentence that claims something of the whole
+   * run — "every gate passed first time", "no stage in flight", "N checks passed",
+   * "no audit events" — would rest on an absence the refusal can explain, and is
+   * hedged instead. That holds when every shard was refused too: nothing read is not
+   * nothing recorded. Absent only when nothing was refused.
    *
    * The waits and the receipt matrix are NOT hedged by it. They transcribe engine
    * readers that read through the lenient 2.11.0 `readAuditShardEvents` /
