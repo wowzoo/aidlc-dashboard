@@ -2,6 +2,16 @@
 
 PU-A-core → PU-B-ui
 
+```yaml
+units:
+  - name: PU-A-core
+    depends_on: []
+    kind: library
+  - name: PU-B-ui
+    depends_on: [PU-A-core]
+    kind: ui
+```
+
 ## Assumptions & Open Questions
 
 ### Assumptions
