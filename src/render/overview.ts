@@ -296,18 +296,26 @@ function checkpointList(notes: CheckpointProofNote[], s: Strings): string {
             ? o.checkpointMalformed(n.unit, kind)
             : o.checkpointUnreadable(n.unit, kind, n.cause);
       const tail = n.state === "failed" ? (n.error ?? (n.stderrTail || n.stdoutTail)) : "";
-      return `<li>${esc(line)} · <code>${file}</code>${
+      return `<li>${n.definite ? "" : "? "}${esc(line)} · <code>${file}</code>${
         tail
           ? `<details><summary>${esc(o.checkpointOutputTail)}</summary><pre>${esc(tail)}</pre></details>`
           : ""
       }</li>`;
     })
     .join("");
+  // The engine-verdict sentence is said only when a note carries it; the `?` notes get
+  // their own, which claims nothing.
+  const definite = notes.some((n) => n.definite)
+    ? `<p class="note">${esc(o.checkpointNote)}</p>`
+    : "";
+  const indefinite = notes.some((n) => !n.definite)
+    ? `<p class="note">${esc(o.checkpointIndefiniteNote)}</p>`
+    : "";
   const undetermined = notes.some((n) => n.kindUndetermined)
     ? `<p class="note">${esc(o.checkpointKindUndetermined)}</p>`
     : "";
   return `<h4>${esc(o.checkpointHeading)}</h4><ul class="note warn">${items}</ul>
-<p class="note">${esc(o.checkpointNote)}</p>${undetermined}`;
+${definite}${indefinite}${undetermined}`;
 }
 
 /**

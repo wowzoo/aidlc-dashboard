@@ -259,7 +259,9 @@ const overview: OverviewStrings = {
 
   checkpointHeading: "체크포인트 검증",
   checkpointNote:
-    "유닛마다 남는 체크포인트 증명 파일을 읽은 결과입니다. 증명이 이 상태인 동안 엔진은 체크포인트를 검증되지 않은 것으로 보고, 그 유닛의 승인을 묻지도 받지도 않습니다. 다음 행동은 에이전트 몫(다시 검증)이라 대기로 세지 않습니다. 통과한 증명은 적지 않습니다 — 아직 유효한지는 이 페이지가 재현하지 않는 fingerprint 에 달려 있습니다.",
+    "유닛마다 남는 체크포인트 증명 파일을 읽은 결과입니다. 증명이 이 상태인 동안 엔진은 체크포인트를 검증된 것으로 셀 수 없어, 검증이 통과하기 전에는 그 유닛의 새 승인을 묻지도 기록하지도 않습니다. 이것으로 정해지지 않는 두 가지는 이 페이지도 말하지 않습니다 — 유닛이 이미 받은 승인이 유지되는지(범위를 바꾼 뒤에도 유지될 수 있습니다)와 다음에 무엇을 해야 하는지입니다. 엔진이 이 일로 사람에게 묻지 않으므로 대기로 세지 않습니다. 통과한 증명은 적지 않습니다 — 아직 유효한지는 이 페이지가 재현하지 않는 fingerprint 에 달려 있습니다.",
+  checkpointIndefiniteNote:
+    "? 표시는 이 리더가 판정하지 못한 항목입니다 — 엔진이 읽는 파일이 아닐 수 있거나 여기서 파일을 읽지 못했으므로, 엔진의 판정이라고 주장하지 않습니다.",
   checkpointKind: (kind) =>
     kind === "skeleton" ? "walking-skeleton 체크포인트" : "유닛 체크포인트",
   checkpointFailed: (unit, kind, detail, startedAt) =>
@@ -288,14 +290,18 @@ const overview: OverviewStrings = {
     `${unit} — ${kind}: 증명을 읽지 못했습니다 (${
       cause === "link"
         ? "경로에 심볼릭 링크가 있음 — 엔진은 이를 거부하고 오류로 멈춥니다"
-        : cause === "not-file"
-          ? "일반 파일이 아님 — 엔진은 이를 거부하고 오류로 멈춥니다"
-          : cause === "too-large"
-            ? "이 리더의 1MB 한도를 넘음"
-            : "읽기 오류"
+        : cause === "hardlink"
+          ? "하드링크임 — 엔진은 이를 거부하고 오류로 멈춥니다"
+          : cause === "not-file"
+            ? "일반 파일이 아님 — 엔진은 이를 거부하고 오류로 멈춥니다"
+            : cause === "too-large"
+              ? "이 리더의 1MB 한도를 넘음"
+              : cause === "changed"
+                ? "읽는 동안 파일이 바뀜 — 다음 새로고침에서 다시 읽습니다"
+                : "읽기 오류 — 엔진도 이 파일에서 오류로 멈춥니다"
     })`,
   checkpointKindUndetermined:
-    "Skeleton Stance 가 scope-dependent 이고 이 페이지는 scope 파일을 읽지 않아, 첫 유닛의 증명 두 개를 모두 확인합니다 — 엔진이 읽는 것은 그중 하나뿐입니다.",
+    "Skeleton Stance 가 scope-dependent 이고(또는 그래프에 배치가 없고) 이 페이지는 scope 파일을 읽지 않아, skeleton 유닛의 증명 두 개를 모두 확인합니다 — 엔진이 읽는 것은 그중 하나뿐입니다.",
   checkpointOutputTail: "출력 끝부분",
 };
 

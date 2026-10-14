@@ -25,7 +25,7 @@
 // See the `### Page language` section in CLAUDE.md for the rest of the reasoning.
 
 import type { Locale, SourceKind } from "../model/types";
-import type { CheckpointKind, CheckpointProofNote, ProofFault } from "../scan/checkpoint-proofs";
+import type { CheckpointKind, ProofFault, UnreadableCause } from "../scan/checkpoint-proofs";
 import type { OwnerStatus } from "../scan/deferrals";
 import type { CellState, ReceiptReason } from "../scan/matrix";
 import type { StageEndKind } from "../scan/timing";
@@ -328,18 +328,16 @@ export interface OverviewStrings {
 
   // Unit checkpoint proofs the engine cannot count verified (scan/checkpoint-proofs.ts).
   readonly checkpointHeading: string;
-  /** Why none of these is a wait: the engine sends it back to the agent. */
+  /** What a definite note does and does not settle, and why none of them is a wait. */
   readonly checkpointNote: string;
+  /** For the notes marked `?` — this reader cannot settle them. */
+  readonly checkpointIndefiniteNote: string;
   checkpointKind(kind: CheckpointKind): string;
   /** `detail` is the joined `checkpointFault` phrases. */
   checkpointFailed(unit: string, kind: string, detail: string, startedAt: string): string;
   checkpointFault(fault: ProofFault, exitCode: number | null, signal: string | null): string;
   checkpointMalformed(unit: string, kind: string): string;
-  checkpointUnreadable(
-    unit: string,
-    kind: string,
-    cause: Extract<CheckpointProofNote, { state: "unreadable" }>["cause"],
-  ): string;
+  checkpointUnreadable(unit: string, kind: string, cause: UnreadableCause): string;
   readonly checkpointKindUndetermined: string;
   readonly checkpointOutputTail: string;
 }

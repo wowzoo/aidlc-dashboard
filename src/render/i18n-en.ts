@@ -274,7 +274,9 @@ const overview: OverviewStrings = {
 
   checkpointHeading: "Checkpoint verification",
   checkpointNote:
-    "Read from each unit's checkpoint proof. While a proof reads like this, the engine counts the checkpoint not verified, and it neither asks for nor accepts the unit's approval — the next move is the agent's (verify again), so none of this is counted as a wait. A proof that passed is not listed: whether it is still current depends on a fingerprint this page does not reproduce.",
+    "Read from each unit's checkpoint proof. While a proof reads like this, the engine cannot count the checkpoint verified, so it will not ask for or record a new approval of the unit until a verification passes. Two things it does not settle, so this page does not say them: whether an approval the unit already holds is kept (it can be, over a scope change), and what has to happen next. None of this is counted as a wait — the engine opens no person's ask for it. A proof that passed is not listed: whether it is still current depends on a fingerprint this page does not reproduce.",
+  checkpointIndefiniteNote:
+    "Marked ?: this reader cannot settle these — they may not be the file the engine reads, or the file could not be read here — so no verdict of the engine's is claimed for them.",
   checkpointKind: (kind) =>
     kind === "skeleton" ? "walking-skeleton checkpoint" : "unit checkpoint",
   checkpointFailed: (unit, kind, detail, startedAt) =>
@@ -303,14 +305,18 @@ const overview: OverviewStrings = {
     `${unit} — ${kind}: the proof could not be read (${
       cause === "link"
         ? "a symbolic link on its path — the engine refuses it and stops with an error"
-        : cause === "not-file"
-          ? "not a regular file — the engine refuses it and stops with an error"
-          : cause === "too-large"
-            ? "larger than this reader's 1 MB bound"
-            : "a read error"
+        : cause === "hardlink"
+          ? "a hardlink — the engine refuses it and stops with an error"
+          : cause === "not-file"
+            ? "not a regular file — the engine refuses it and stops with an error"
+            : cause === "too-large"
+              ? "larger than this reader's 1 MB bound"
+              : cause === "changed"
+                ? "it changed while being read — the next refresh reads it again"
+                : "a read error — the engine stops with an error on it too"
     })`,
   checkpointKindUndetermined:
-    "Skeleton Stance is scope-dependent and the scope file is not read here, so both of the first unit's proofs are checked — only one of them is the one the engine reads.",
+    "Skeleton Stance is scope-dependent (or the graph names no batches) and the scope file is not read here, so both of the skeleton unit's proofs are checked — only one of them is the one the engine reads.",
   checkpointOutputTail: "output tail",
 };
 

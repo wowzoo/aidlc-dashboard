@@ -636,14 +636,24 @@ export function assemble(
         stateCompat,
       )
     : undefined;
-  // `receiptsRequired` is this reader's `constructionCheckpointsApply` — the one condition
-  // under which the engine resolves a unit checkpoint and so reads its proof.
+  // Where the engine's routing resolves a unit checkpoint and so reads its proof:
+  // `receiptsRequired` is this reader's `constructionCheckpointsApply`, here only with a
+  // scope grid that knows the scope (an unknown scope applies nothing, and with no grid
+  // the policy cannot tell); and the run has units of its own — not
+  // `usesStageLevelPerUnitArtifacts` (Units Generation neither EXECUTE nor completed).
+  const unitsGeneration = state.phases
+    .flatMap((p) => p.stages)
+    .find((st) => st.slug === "units-generation");
+  const ownUnits =
+    unitsGeneration !== undefined && (unitsGeneration.execute || unitsGeneration.status === "done");
+  const scopeKnown = catalog?.scopeGrid !== undefined && state.scope in catalog.scopeGrid;
   const checkpointProofs =
-    matrix && policy.receiptsRequired
+    matrix && policy.receiptsRequired && scopeKnown && ownUnits
       ? readCheckpointProofs(
           recordDir,
           matrix.units.map((u) => u.name),
           state.skeletonStance,
+          matrix.batches.flat()[0],
         )
       : [];
 
