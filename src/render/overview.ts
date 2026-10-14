@@ -368,15 +368,17 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
 
   const up = m.state.unitProgress;
   if (up && !up.malformed && up.rows.length > 0) {
+    // The stage-level label says what the table is for this plan; the stale note after it says
+    // whether its rows still match the roster — two separate claims, in that order.
+    const stageLevel = m.unitArtifactMode === "stage-level";
     const stale = m.unitProgressStale;
     const staleNote = stale
       ? `<p class="note warn">${esc(
           stale.kind === "roster"
-            ? s.overview.unitProgressStaleRoster(stale.missing, stale.extra)
+            ? s.overview.unitProgressStaleRoster(stale.missing, stale.extra, !stageLevel)
             : s.overview.unitProgressStaleDag,
         )}</p>`
       : "";
-    const stageLevel = m.unitArtifactMode === "stage-level";
     parts.push(
       section(
         stageLevel ? s.overview.sectionUnitProgressStageLevel : s.overview.sectionUnitProgress,

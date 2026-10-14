@@ -447,6 +447,8 @@ describe("render", () => {
         tail?: string;
         /** Record-relative files to write. */
         files?: Record<string, string>;
+        /** The authored unit DAG: removed, or its yaml units block stripped (malformed). */
+        authoredDag?: "drop" | "malformed";
       } = {},
     ) => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-stagelevel-"));
@@ -465,6 +467,10 @@ describe("render", () => {
           text = text.replace("- **State Version**: 8", `- **State Version**: 8\n${opts.info}`);
         if (opts.tail) text = `${text.trimEnd()}\n\n${opts.tail}\n`;
         fs.writeFileSync(sp, text);
+        const dep = path.join(root, REC, "inception/units-generation/unit-of-work-dependency.md");
+        if (opts.authoredDag === "drop") fs.rmSync(dep);
+        if (opts.authoredDag === "malformed")
+          fs.writeFileSync(dep, fs.readFileSync(dep, "utf-8").replace(/```yaml[\s\S]*?```\n/, ""));
         for (const [rel, body] of Object.entries(opts.files ?? {})) {
           fs.mkdirSync(path.dirname(path.join(root, REC, rel)), { recursive: true });
           fs.writeFileSync(path.join(root, REC, rel), body);
@@ -632,12 +638,26 @@ describe("render", () => {
         },
       );
       // With no table and no unit DAG there is nothing missing: the engine derives one
-      // only from a valid non-empty Unit DAG. Stage level alone does not prove there is
-      // none — derivation does not refuse it — so a DAG left in the graph keeps the warning.
+      // only from a valid non-empty Unit DAG (`resolveBoltDag`, authored file first). Stage
+      // level alone does not prove there is none — derivation does not refuse it — so a
+      // roster that still resolves keeps the warning, as does one only the graph caches.
       withState(
         "- [ ] units-generation — SKIP",
         (m) => expect(m.warnings.map((w) => w.code)).not.toContain("unit-progress-missing"),
-        { dropDag: true, runtime: LEFTOVER, info: "- **Unit Ownership**: team" },
+        {
+          dropDag: true,
+          authoredDag: "drop",
+          runtime: LEFTOVER,
+          info: "- **Unit Ownership**: team",
+        },
+      );
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.unitDag.state).toBe("malformed");
+          expect(m.warnings.map((w) => w.code)).not.toContain("unit-progress-missing");
+        },
+        { authoredDag: "malformed", runtime: LEFTOVER, info: "- **Unit Ownership**: team" },
       );
       withState(
         "- [?] units-generation — SKIP",
@@ -646,6 +666,94 @@ describe("render", () => {
           expect(m.warnings.map((w) => w.code)).toContain("unit-progress-missing");
         },
         { runtime: LEFTOVER, info: "- **Unit Ownership**: team" },
+      );
+    });
+
+    // #26 checks the unit cache against the roster (`offRoster`). At stage level the cache
+    // is not a position at all — the engine writes none there and the hook never reads it —
+    // so there is nothing to check against a roster, whether one resolves or not.
+    const GHOST = LEFTOVER.replace("- **Active Unit**: PU-B-ui", "- **Active Unit**: PU-ghost");
+
+    test("a cached unit off the roster is a leftover at stage level, not an off-roster position", () => {
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.unitDag.state).toBe("ok");
+          expect(m.waits.position.offRoster).toBeUndefined();
+          expect(m.waits.position.unit).toBeUndefined();
+          expect(m.waits.position.verified).toBe(true);
+          expect(m.waits.position.leftoverUnit?.unit).toBe("PU-ghost");
+          const line = /<div class="runline"[\s\S]*?<\/div>/.exec(renderBody(m, "en"))?.[0] ?? "";
+          expect(line).not.toContain(EN.status.runOffRoster("PU-ghost", "absent"));
+        },
+        { runtime: GHOST },
+      );
+      // Per unit the same cache is a position, and #26's check applies.
+      withState(
+        "- [x] units-generation — EXECUTE",
+        (m) => {
+          expect(m.waits.position.unit).toBe("PU-ghost");
+          expect(m.waits.position.offRoster).toBe("absent");
+          expect(m.waits.position.verified).toBe(false);
+        },
+        { runtime: GHOST },
+      );
+    });
+
+    test("an unreadable roster leaves a stage-level position verified", () => {
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.unitDag.state).toBe("malformed");
+          expect(m.waits.position.offRoster).toBeUndefined();
+          expect(m.waits.position.verified).toBe(true);
+          expect(m.warnings.map((w) => w.code)).not.toContain("unit-dag-malformed");
+        },
+        { authoredDag: "malformed", runtime: LEFTOVER },
+      );
+    });
+
+    test("a stale Unit Progress at stage level: the label first, then the stale note", () => {
+      // The table names PU-A-core only; the roster has PU-A-core and PU-B-ui.
+      const UP = [
+        "## Unit Progress",
+        "| unit | owner | functional-design | code-generation | gate |",
+        "| --- | --- | --- | --- | --- |",
+        "| PU-A-core | main | [x] | [-] | [ ] |",
+      ].join("\n");
+      const opts = { runtime: LEFTOVER, info: "- **Unit Ownership**: team", tail: UP };
+      withState(
+        "- [ ] units-generation — SKIP",
+        (m) => {
+          expect(m.unitProgressStale).toEqual({ kind: "roster", missing: ["PU-B-ui"], extra: [] });
+          for (const [loc, x] of [
+            ["en", EN],
+            ["ko", KO],
+          ] as const) {
+            const body = renderBody(m, loc);
+            const label = body.indexOf(x.overview.unitProgressStageLevelNote);
+            const stale = body.indexOf(
+              esc(x.overview.unitProgressStaleRoster(["PU-B-ui"], [], false)),
+            );
+            expect(label).toBeGreaterThan(-1);
+            expect(stale).toBeGreaterThan(label);
+            // The only `next`-time writer of the table is the team unit-major router, which a
+            // stage-level plan returns before reaching — so no rewrite is promised.
+            expect(body).not.toContain(
+              esc(x.overview.unitProgressStaleRoster(["PU-B-ui"], [], true)),
+            );
+          }
+        },
+        opts,
+      );
+      withState(
+        "- [x] units-generation — EXECUTE",
+        (m) => {
+          const body = renderBody(m, "en");
+          expect(body).toContain(esc(EN.overview.sectionUnitProgress));
+          expect(body).toContain(esc(EN.overview.unitProgressStaleRoster(["PU-B-ui"], [], true)));
+        },
+        opts,
       );
     });
 

@@ -253,13 +253,17 @@ const overview: OverviewStrings = {
   batchNote: "배치 안의 유닛은 병렬 가능 — 의존 순서대로 묶인 위상 배치.",
   unitProgressNote:
     "state.md 의 <code>## Unit Progress</code> — 엔진이 수령증·리뷰·게이트를 반영해 매 <code>next</code> 마다 다시 쓰는\n  <b>권위 있는 값</b>입니다. 손으로 고친 내용은 라우팅·완료 근거가 되지 않습니다. 아래 매트릭스는 디스크에서 재구성한 별개의 진단입니다.",
-  unitProgressStaleRoster: (missing, extra) =>
+  unitProgressStaleRoster: (missing, extra, rewritesOnNext) =>
     `이 표는 엔진이 다시 만들 때 쓰는 유닛 목록과 맞지 않습니다(${[
       missing.length ? `표에 없는 유닛: ${missing.join(", ")}` : "",
       extra.length ? `목록에 없는 행: ${extra.join(", ")}` : "",
     ]
       .filter(Boolean)
-      .join(" · ")}). 마지막으로 쓰인 표이며, 엔진은 다음 \`next\` 에서 다시 씁니다.`,
+      .join(" · ")}). 마지막으로 쓰인 표이며, ${
+      rewritesOnNext
+        ? "엔진은 다음 `next` 에서 다시 씁니다"
+        : "stage 단위 실행에서는 `next` 가 이 표를 다시 쓰지 않습니다"
+    }.`,
   unitProgressStaleDag:
     "유닛 목록(unit-of-work-dependency.md)을 읽을 수 없어 엔진이 이 표를 다시 만들지 못합니다 — 보이는 것은 마지막으로 쓰인 표이지 지금의 권위 있는 값이 아닙니다.",
   sectionUnitProgressStageLevel: "유닛 진행 (state.md — 이 계획은 stage 단위로 실행)",

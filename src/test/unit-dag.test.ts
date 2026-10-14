@@ -314,7 +314,7 @@ describe("## Unit Progress is checked against the roster the engine rebuilds it 
         extra: ["PU-B-ui"],
       });
       expect(renderBody(m, "en")).toContain(
-        esc(EN.overview.unitProgressStaleRoster(["PU-C-api"], ["PU-B-ui"])),
+        esc(EN.overview.unitProgressStaleRoster(["PU-C-api"], ["PU-B-ui"], true)),
       );
     });
   });

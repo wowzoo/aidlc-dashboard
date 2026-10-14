@@ -267,15 +267,17 @@ const overview: OverviewStrings = {
     "Units inside a batch can run in parallel — batches are the topological order of their dependencies.",
   unitProgressNote:
     "state.md's <code>## Unit Progress</code> — an <b>authoritative</b> projection the engine rewrites on every\n  <code>next</code> from receipts, reviews and gates. Hand edits are never routing or completion evidence. The matrix below is a separate diagnostic, reconstructed from disk.",
-  unitProgressStaleRoster: (missing, extra) =>
+  unitProgressStaleRoster: (missing, extra, rewritesOnNext) =>
     `This table no longer matches the unit roster the engine rebuilds it from (${[
       missing.length ? `not in the table: ${missing.join(", ")}` : "",
       extra.length ? `not in the roster: ${extra.join(", ")}` : "",
     ]
       .filter(Boolean)
-      .join(
-        " · ",
-      )}). It is the last projection written; the engine rewrites it on the next \`next\`.`,
+      .join(" · ")}). It is the last projection written; ${
+      rewritesOnNext
+        ? "the engine rewrites it on the next `next`"
+        : "at stage level `next` does not rewrite it"
+    }.`,
   unitProgressStaleDag:
     "The unit roster (unit-of-work-dependency.md) cannot be read, and the engine refuses to rebuild this table without it — what is shown is the last projection written, not the current authority.",
   sectionUnitProgressStageLevel: "Unit progress (state.md — this plan runs stages at stage level)",

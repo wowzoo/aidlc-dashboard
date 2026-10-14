@@ -323,8 +323,12 @@ export interface OverviewStrings {
   readonly batchNote: string;
   /** Carries `<code>`/`<b>` markup, so it is interpolated raw — never through esc(). */
   readonly unitProgressNote: string;
-  /** The table's unit set differs from the resolved roster (DashboardModel.unitProgressStale). */
-  unitProgressStaleRoster(missing: string[], extra: string[]): string;
+  /**
+   * The table's unit set differs from the resolved roster (DashboardModel.unitProgressStale).
+   * `rewritesOnNext` is false at stage level: the only `next`-time writer of the table is
+   * the team unit-major router, which a stage-level plan returns before reaching.
+   */
+  unitProgressStaleRoster(missing: string[], extra: string[], rewritesOnNext: boolean): string;
   /** The roster cannot be read, so the engine cannot rebuild the table. */
   readonly unitProgressStaleDag: string;
   /** The Unit Progress section title when the plan runs per-unit stages at stage level. */
