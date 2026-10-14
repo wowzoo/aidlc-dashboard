@@ -8,7 +8,7 @@
 #
 # The same three things install.sh has to get right, for the same reasons:
 #
-#   1. The asset filename carries the version (`aidlc-dashboard-1.7.0.zip`), so
+#   1. The asset filename carries the version (`aidlc-dashboard-1.11.0.zip`), so
 #      `releases/latest/download/<name>` cannot be formed without first resolving
 #      which tag is latest.
 #   2. `data\usage.db` is the operator's collected credit history and it lives
@@ -19,7 +19,7 @@
 #
 # Knobs (environment variables):
 #   AIDLC_DIR       install location (default %USERPROFILE%\.aidlc-dashboard)
-#   AIDLC_VERSION   pin a version instead of latest (e.g. 1.7.0)
+#   AIDLC_VERSION   pin a version instead of latest (e.g. 1.11.0)
 #   AIDLC_NO_BUN=1  do not install bun even if it is missing
 #   AIDLC_NO_BIN=1  do not create the launcher shim
 
@@ -90,7 +90,7 @@ if ($env:AIDLC_VERSION) {
     Die @"
 최신 릴리스를 확인할 수 없다 (네트워크, GitHub API 한도, 또는 저장소에 접근할 수 없음 — 비공개 저장소는 익명 요청에 404 를 준다).
   버전을 지정하면 이 조회를 건너뛴다:
-    `$env:AIDLC_VERSION='1.7.0'; irm <install.ps1 URL> | iex
+    `$env:AIDLC_VERSION='1.11.0'; irm <install.ps1 URL> | iex
 "@
   }
 }

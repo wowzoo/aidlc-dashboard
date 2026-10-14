@@ -6,7 +6,7 @@
 # WHY A SEPARATE SCRIPT AND NOT "download the zip and unzip it". Three things have
 # to happen in order and one of them is destructive if you get it wrong:
 #
-#   1. The asset filename carries the version (`aidlc-dashboard-1.7.0.zip`), so
+#   1. The asset filename carries the version (`aidlc-dashboard-1.11.0.zip`), so
 #      `releases/latest/download/<name>` cannot be formed without first resolving
 #      which tag is latest. A hand-written URL goes stale every release.
 #   2. `data/usage.db` is the operator's collected credit history and it lives
@@ -19,7 +19,7 @@
 #
 # Knobs (env vars):
 #   AIDLC_DIR=~/.aidlc-dashboard   where to install
-#   AIDLC_VERSION=1.7.0            pin a version instead of latest
+#   AIDLC_VERSION=1.11.0           pin a version instead of latest
 #   AIDLC_NO_BUN=1                 do not install bun even if it is missing
 #   AIDLC_NO_BIN=1                 do not create the ~/.local/bin launcher
 
@@ -61,9 +61,9 @@ if [ "$VERSION" = "latest" ]; then
   if [ -z "${TAG:-}" ]; then
     die "최신 릴리스를 확인할 수 없다 (네트워크, GitHub API 한도, 또는 저장소에 접근할 수 없음 — 비공개 저장소는 익명 요청에 404 를 준다).
   버전을 지정하면 이 조회를 건너뛴다:
-    AIDLC_VERSION=1.7.0 sh install.sh
+    AIDLC_VERSION=1.11.0 sh install.sh
   또는 파이프로:
-    curl -fsSL <install.sh URL> | AIDLC_VERSION=1.7.0 sh"
+    curl -fsSL <install.sh URL> | AIDLC_VERSION=1.11.0 sh"
   fi
 else
   TAG="v${VERSION#v}"

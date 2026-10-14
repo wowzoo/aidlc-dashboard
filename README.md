@@ -34,7 +34,7 @@ aidlc-dashboard ~/path/to/workspace   # 바로 그 트리로
 | 변수 | 뜻 |
 |---|---|
 | `AIDLC_DIR` | 설치 위치 (기본 `~/.aidlc-dashboard`) |
-| `AIDLC_VERSION` | 버전 고정 (예: `1.7.0`, 기본은 최신) |
+| `AIDLC_VERSION` | 버전 고정 (예: `1.11.0`, 기본은 최신) |
 | `AIDLC_NO_BUN=1` | bun 이 없어도 설치하지 않는다 |
 | `AIDLC_NO_BIN=1` | `~/.local/bin` 실행기를 만들지 않는다 |
 
