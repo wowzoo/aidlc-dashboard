@@ -69,11 +69,12 @@ export interface DeclaredQuestion extends DeclaredEntry {
 }
 
 /**
- * How one declared artifact read. `missing` is the artifact present with no such
- * section; an artifact that does not exist is not listed at all — the stage has not
- * written it, which is not a gap in this reader.
+ * How one declared artifact read. `missing` is the artifact present with no section this
+ * reader recognises (the template names the section, not its markup); `unreadable` is a
+ * path present but not readable as a file. An artifact that does not exist is not listed
+ * at all — the stage has not written it, which is not a gap in this reader.
  */
-export type DeclaredStatus = "read" | "none" | "unread" | "missing";
+export type DeclaredStatus = "read" | "none" | "unread" | "missing" | "unreadable";
 
 export interface DeclaredLedger {
   source: DeclaredSource;
@@ -122,44 +123,68 @@ function cellsOf(line: string): string[] {
   return m ? (m[1] ?? "").split("|").map((c) => tidy(c)) : [];
 }
 
-/** Column positions, by header name first and by the template's order second. */
-function columns(header: string[]): { question: number; contract?: number; blocks?: number } {
+/**
+ * Column positions by header name. A table with no column named for the question is not
+ * this ledger's shape — guessing a column read `Contract | Status | Blocks` as questions.
+ */
+function columns(
+  header: string[],
+): { question: number; contract?: number; blocks?: number } | undefined {
   const find = (re: RegExp) => {
     const i = header.findIndex((h) => re.test(h));
     return i < 0 ? undefined : i;
   };
-  const contract = find(/^(?:contract|계약)/i);
-  const blocks = find(/^(?:blocks?|blocking|막는|차단)/i);
-  const named = find(/^(?:question|질문|item|항목)/i);
-  if (named !== undefined) return { question: named, contract, blocks };
-  // No column named for the question: the template's middle column when it has the
-  // three, else the first cell — the one place a decision's text can be.
-  if (header.length >= 3) {
-    return { question: 1, contract: contract ?? 0, blocks: blocks ?? header.length - 1 };
-  }
-  return { question: 0, contract, blocks };
+  const question = find(/^(?:questions?|질문|items?|항목)$/i);
+  if (question === undefined) return undefined;
+  return {
+    question,
+    contract: find(/^(?:contracts?|계약)$/i),
+    blocks: find(/^(?:blocks?|blocking|막는 대상|차단)$/i),
+  };
 }
+
+/** The A&OQ heading scan/deferrals.ts reads — its `### Open questions` is that reader's. */
+const AOQ_RE = /^(#{1,6})\s+Assumptions\s*&\s*Open\s*Questions\s*$/i;
 
 /**
  * Parse every declared Open-questions section in one artifact's text. Exported for
  * tests. Visible lines only (scan/visible-lines.ts), so a fenced example is not the
- * ledger. A heading section ends at the next heading of its level or higher; a
- * bold-lead one at the next heading or bold-lead line.
+ * ledger, and an Open questions heading nested in `## Assumptions & Open Questions` is
+ * left to scan/deferrals.ts. A heading section ends at the next heading of its level or
+ * higher; a bold-lead one at the next heading or bold-lead line.
+ *
+ * A section is judged on every block in it, not on whether anything was read: a table
+ * with no Question column, a row with no question, or prose beside nothing read is a
+ * gap (`unread`), and a read bullet does not vouch for an unreadable table beside it.
+ * `None.` — a line, a bullet, a Question cell — or a header with no rows is the empty
+ * declaration.
  */
 export function parseDeclaredOpenQuestions(text: string): ParsedDeclared {
   const out: ParsedDeclared = { items: [], sections: 0, none: 0, unread: 0 };
   const lines = visibleLines(text).lines;
   const seen = new Set<string>();
   const push = (e: DeclaredEntry) => {
-    const key = `${e.contract ?? ""}\u0001${e.text}`.toLowerCase();
-    if (seen.has(key)) return false;
+    const key = [e.contract ?? "", e.text, e.blocks ?? ""].join("\u0001").toLowerCase();
+    if (seen.has(key)) return;
     seen.add(key);
     out.items.push(e);
-    return true;
   };
+  /** Level of the enclosing A&OQ heading, while inside one. */
+  let aoqLevel: number | undefined;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
+    const anyHead = ANY_HEADING_RE.exec(line);
+    if (anyHead) {
+      const lv = (anyHead[1] ?? "").length;
+      const aoq = AOQ_RE.exec(line);
+      if (aoq) {
+        aoqLevel = lv;
+        continue;
+      }
+      if (aoqLevel !== undefined && lv <= aoqLevel) aoqLevel = undefined;
+    }
+    if (aoqLevel !== undefined) continue;
     const head = HEADING_RE.exec(line);
     const bold = !head && BOLD_LEAD_RE.test(line.trim());
     if (!head && !bold) continue;
@@ -171,59 +196,94 @@ export function parseDeclaredOpenQuestions(text: string): ParsedDeclared {
       return bold && ANY_BOLD_LEAD_RE.test(l.trim());
     };
 
+    /** Entries recognised — counted before de-duplication, so a restatement still reads. */
     let found = 0;
-    let bodyLines = 0;
-    let noneLines = 0;
-    let header: string[] | undefined;
-    let cols: ReturnType<typeof columns> | undefined;
+    let noneMarks = 0;
+    let gaps = 0;
+    let prose = 0;
     let bullet: string | undefined;
-    const flush = () => {
+    // The table in progress: header rows until the separator, then body rows.
+    let header: string[] | undefined;
+    let cols: ReturnType<typeof columns>;
+    let inBody = false;
+    let bodyRows = 0;
+
+    const flushBullet = () => {
       const b = bullet;
       bullet = undefined;
       if (b === undefined) return;
       const t = tidy(b.replace(BOLD_ID_RE, "$1"));
-      if (t.length === 0 || NONE_RE.test(t)) return;
-      if (push({ text: t })) found++;
+      if (t.length === 0) return;
+      if (NONE_RE.test(t)) {
+        noneMarks++;
+        return;
+      }
+      found++;
+      push({ text: t });
+    };
+    const closeTable = () => {
+      if (header === undefined) return;
+      // Pipes with no separator are not a table this reader knows.
+      if (!inBody) prose++;
+      else if (cols === undefined) gaps++;
+      else if (bodyRows === 0) noneMarks++; // the header written, no row under it
+      header = undefined;
+      cols = undefined;
+      inBody = false;
+      bodyRows = 0;
     };
 
     let j = i + 1;
     for (; j < lines.length; j++) {
       const l = lines[j] ?? "";
       if (ends(l)) break;
-      if (l.trim().length > 0 && !ANY_HEADING_RE.test(l)) {
-        bodyLines++;
-        if (NONE_RE.test(tidy(l.replace(LIST_MARKER_RE, "")))) noneLines++;
-      }
       if (l.trim().startsWith("|")) {
-        flush();
-        if (TABLE_SEP_RE.test(l)) {
-          if (header) cols = columns(header);
+        flushBullet();
+        if (TABLE_SEP_RE.test(l) && header !== undefined && !inBody) {
+          cols = columns(header);
+          inBody = true;
           continue;
         }
         const cells = cellsOf(l);
-        if (!cols) {
-          // Rows before the separator are the header; only the last one names columns.
+        if (!inBody) {
+          // Rows before the separator are the header; the last one names the columns.
           header = cells;
           continue;
         }
+        bodyRows++;
+        if (cols === undefined) continue;
+        // A header row repeated under the separator is not a question.
+        if (cells.join("|").toLowerCase() === (header ?? []).join("|").toLowerCase()) continue;
         const q = tidy(cells[cols.question] ?? "");
-        if (q.length === 0 || NONE_RE.test(q)) continue;
+        if (q.length === 0) {
+          gaps++;
+          continue;
+        }
+        if (NONE_RE.test(q)) {
+          noneMarks++;
+          continue;
+        }
         const e: DeclaredEntry = { text: q };
         const c = cols.contract === undefined ? "" : tidy(cells[cols.contract] ?? "");
         const b = cols.blocks === undefined ? "" : tidy(cells[cols.blocks] ?? "");
         if (c.length > 0) e.contract = c;
         if (b.length > 0) e.blocks = b;
-        if (push(e)) found++;
+        found++;
+        push(e);
         continue;
       }
       // A table ends at the first non-row line; the next one needs its own header.
-      header = undefined;
-      cols = undefined;
+      closeTable();
+      // A blank line or a deeper heading closes the entry above it; neither is content.
+      if (l.trim().length === 0 || ANY_HEADING_RE.test(l)) {
+        flushBullet();
+        continue;
+      }
       const m = LIST_ITEM_RE.exec(l);
       if (m) {
         // A nested bullet is detail of the entry above it, not an entry of its own.
         if ((m[1] ?? "").length === 0) {
-          flush();
+          flushBullet();
           bullet = m[2] ?? "";
         }
         continue;
@@ -232,13 +292,16 @@ export function parseDeclaredOpenQuestions(text: string): ParsedDeclared {
         bullet = `${bullet} ${l.trim()}`;
         continue;
       }
-      flush();
+      flushBullet();
+      if (NONE_RE.test(tidy(l.replace(LIST_MARKER_RE, "")))) noneMarks++;
+      else prose++;
     }
-    flush();
-    if (found === 0) {
-      if (bodyLines > 0 && noneLines === bodyLines) out.none++;
-      else out.unread++;
-    }
+    flushBullet();
+    closeTable();
+    const outcome =
+      gaps > 0 ? "unread" : found > 0 ? "read" : noneMarks > 0 && prose === 0 ? "none" : "unread";
+    if (outcome === "none") out.none++;
+    else if (outcome === "unread") out.unread++;
     i = j - 1;
   }
   return out;
@@ -256,8 +319,8 @@ function mtime(p: string): string {
 }
 
 /**
- * Read both declared ledgers of a record. An artifact that does not exist is left out
- * of `ledgers`; one that cannot be read is too, rather than reported as empty.
+ * Read both declared ledgers of a record. Only a path that does not exist is left out;
+ * anything else that stops the read is a named gap, never an empty ledger.
  */
 export function readDeclaredOpenQuestions(recordDir: string): DeclaredOpenQuestions {
   const questions: DeclaredQuestion[] = [];
@@ -266,9 +329,12 @@ export function readDeclaredOpenQuestions(recordDir: string): DeclaredOpenQuesti
     const abs = path.join(recordDir, ...d.rel.split("/"));
     let text: string;
     try {
-      if (!fs.statSync(abs).isFile()) continue;
+      if (!fs.statSync(abs).isFile()) throw new Error("not a file");
       text = fs.readFileSync(abs, "utf-8");
-    } catch {
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+        ledgers.push({ source: d.source, rel: d.rel, status: "unreadable", count: 0 });
+      }
       continue;
     }
     const parsed = parseDeclaredOpenQuestions(text);

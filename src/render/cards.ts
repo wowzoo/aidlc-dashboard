@@ -243,9 +243,36 @@ function openQuestionRows(m: DashboardModel): Row[] {
   });
 }
 
+/**
+ * The Open questions requirements-analysis and contract-design declare in their own
+ * artifact (scan/declared-open-questions.ts). Its own tab, because neither of the other
+ * two reads it and it shares an owner cell with neither: without it a run whose open
+ * points lived only there showed two empty tabs.
+ */
+function declaredRows(m: DashboardModel, s: Strings): Row[] {
+  const now = Date.parse(m.generatedAt);
+  const list = m.deferrals.declared.questions;
+  const ages = list.map((q) => (q.since ? (now - Date.parse(q.since)) / 1000 : undefined));
+  const max = Math.max(0, ...ages.filter((a): a is number => a !== undefined && a > 0));
+  return list.map((q, i) => {
+    const age = ages[i];
+    const valid = age !== undefined && Number.isFinite(age) && age >= 0;
+    return {
+      label: `${viewLink(q.rel, q.text)} <span class="mr-sub">· ${esc(
+        s.deferrals.declaredFaces[q.source].label,
+      )}${q.blocks ? ` → ${esc(q.blocks.replace(/`/g, ""))}` : ""}</span>`,
+      value: valid ? dur(age) : "—",
+      pct: valid ? share(age, max) : undefined,
+      tone: "none",
+      tip: s.deferrals.declaredFaces[q.source].tip,
+    };
+  });
+}
+
 export function renderUnresolvedCard(m: DashboardModel, s: Strings): string {
   const decisions = decisionRows(m, s);
   const questions = openQuestionRows(m);
+  const declared = declaredRows(m, s);
   const head: [string, string] = [s.cards.colItemOwner, s.cards.colAge];
   return tabbedCard({
     id: "unresolved",
@@ -271,9 +298,22 @@ export function renderUnresolvedCard(m: DashboardModel, s: Strings): string {
           empty: s.cards.noOpenQs,
         }),
       },
+      {
+        label: s.cards.declaredTab,
+        count: { text: String(declared.length) },
+        body: rowList(declared, {
+          head: [s.cards.colItemOwner, s.cards.colAge],
+          max: CARD_ROWS,
+          moreText: s.cards.moreRows,
+          empty: s.cards.noDeclared,
+        }),
+      },
     ],
-    // Open the tab that has something in it.
-    selected: decisions.length === 0 && questions.length > 0 ? 1 : 0,
+    // Open the first tab that has something in it.
+    selected: Math.max(
+      0,
+      [decisions, questions, declared].findIndex((rows) => rows.length > 0),
+    ),
     more: { href: `#${DRILL.deferrals}`, label: s.cards.moreDeferrals },
   });
 }

@@ -466,7 +466,10 @@ const deferrals: DeferralStrings = {
     `${files}의 <code>Open questions</code> 절은 이 리더가 아는 모양이 아닙니다 —
     <b>비어 있다는 뜻이 아니라 읽지 못했다는 뜻입니다</b>.`,
   declaredMissing: (files) =>
-    `${files}에 <code>Open questions</code> 절이 없습니다 — 그 stage 규약은 이 절을 쓰라고 정합니다.`,
+    `${files}에서 이 리더가 알아보는 <code>Open questions</code> 절을 찾지 못했습니다 — 그 stage 규약은 이 절을
+    쓰라고 정하지만 제목 모양은 정하지 않으므로, 이 리더가 모르는 모양으로 적혀 있을 수 있습니다.`,
+  declaredUnreadable: (files) =>
+    `${files}는 있지만 파일로 읽을 수 없습니다 — <b>그 안의 미결 질문은 읽지 못했습니다</b>.`,
   unreadAlongside: (unread, files) =>
     `<b><code>## Assumptions &amp; Open Questions</code> 절 ${unread}곳은 이 리더가 아는 모양이 아닙니다</b>
     (${files}) — 그 안의 미결은 위 숫자에 들어 있지 않습니다.`,
@@ -483,20 +486,18 @@ const deferrals: DeferralStrings = {
     `산출물에 <code>## Assumptions &amp; Open Questions</code> 절이 없습니다 — 이 실행은
     미결 대장을 남기지 않았거나 아직 산출물을 쓰지 않았습니다. (읽은 산출물 ${artifacts}개)`,
   unreadSections: (sections, unread, emptySections) =>
-    `산출물 ${sections}곳에 <code>## Assumptions &amp; Open Questions</code>
-      절이 있고, 그중 <b>${unread}곳은 이 리더가 아는 모양이 아닙니다</b> — 표(<code>| 항목 | 배정 |</code>)도,
+    `<code>## Assumptions &amp; Open Questions</code> 절이 ${sections}곳 있고, 그중 <b>${unread}곳은 이 리더가 아는 모양이 아닙니다</b> — 표(<code>| 항목 | 배정 |</code>)도,
       <code>[assumption]</code> 태그도, <code>**OQ1**</code> 형태의 대장 id 도 없습니다.
       <b>미결이 없다는 뜻이 아니라 읽지 못했다는 뜻입니다.</b>
       명시적으로 <code>None.</code>을 선언한 절은 ${emptySections}곳입니다.`,
   noOpenPill: "미결 없음",
   noOpenPillTip: "미결 대장 절은 있고 그 안이 비어 있음 — 명시적으로 '없음'을 선언한 상태",
   allNone: (sections) =>
-    ` 산출물 ${sections}곳의 <code>## Assumptions &amp; Open Questions</code> 절이 모두 <code>None.</code>입니다.`,
+    ` <code>## Assumptions &amp; Open Questions</code> 절 ${sections}곳이 모두 <code>None.</code>입니다.`,
   lead: (items, sections, rows, exits) =>
-    `미결 <b>${items}건</b> · 산출물 ${sections}곳에
-  <code>## Assumptions &amp; Open Questions</code> 대장이 있습니다 (원시 ${rows}행 → 중복 정리 후 ${items}건)${
-    exits > 0 ? ` · 이번 차수 밖으로 명시적으로 밀어낸 것 ${exits}건은 위 숫자에 없습니다` : ""
-  }.
+    `미결 <b>${items}건</b> · <code>## Assumptions &amp; Open Questions</code> 절 ${sections}곳 (원시 ${rows}행 → 중복 정리 후 ${items}건)${
+      exits > 0 ? ` · 이번 차수 밖으로 명시적으로 밀어낸 것 ${exits}건은 위 숫자에 없습니다` : ""
+    }.
   엔진 규약은 <b>하류 단계가 미결을 필요로 하면 후속 질문으로 다시 묻는다</b>고 정합니다 — 여기 있는 항목은
   없어진 것이 아니라 <b>다시 물어올 것</b>입니다. 항목이 닫혔다는 표시는 엔진이 쓰지 않으므로
   <b>‘지난 단계’는 버려졌다는 뜻이 아니라 답이 보이지 않는다는 뜻</b>입니다.`,
@@ -942,10 +943,12 @@ const cards: CardStrings = {
   },
   decisionsTab: "미결 결정",
   openQsTab: "Open questions",
+  declaredTab: "stage 선언",
   colItemOwner: "항목 → 담당 stage",
   colAge: "경과",
   noDecisions: "미결 결정 없음",
   noOpenQs: "열린 질문 없음",
+  noDeclared: "stage 가 선언한 미결 질문 없음",
   answersTab: "내 답변",
   stuckTab: "막힘",
   checksTab: "검사 실패",

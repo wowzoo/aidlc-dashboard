@@ -709,6 +709,55 @@ describe("render", () => {
     }
   });
 
+  test("the ok pill is withheld while any other ledger is open or unread", () => {
+    // All A&OQ sections `None.` — but the pill says "no open items" for the panel, so a
+    // declared ledger that could not be read, or an open diary entry, must withhold it.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-pill-"));
+    try {
+      fs.cpSync(FIXTURE, root, { recursive: true });
+      const record = path.join(root, "aidlc/spaces/default/intents/260101-demo-migration");
+      for (const rel of [
+        "inception/units-generation/unit-of-work-dependency.md",
+        "construction/PU-A-core/functional-design/business-rules.md",
+        "construction/PU-B-ui/functional-design/frontend-components.md",
+        "ideation/intent-capture/intent-capture-questions.md",
+      ]) {
+        fs.writeFileSync(path.join(record, rel), "## Assumptions & Open Questions\n\nNone.\n");
+      }
+      fs.writeFileSync(
+        path.join(record, "inception/requirements-analysis/requirements.md"),
+        "## Open Questions\n\n남은 질문은 설계에서 다룬다.\n",
+      );
+      fs.writeFileSync(
+        path.join(record, "inception/contract-design/contract-summary.md"),
+        "## Open Questions\n\nNone.\n",
+      );
+      const pill = strings("ko").deferrals.noOpenPill;
+      const unread = assemble(root);
+      // The empty branch, or the pill assertions below would pass vacuously.
+      expect(unread.deferrals.items).toEqual([]);
+      expect(unread.deferrals.assumptions).toEqual([]);
+      expect(unread.deferrals.declared.ledgers.map((l) => l.status)).toEqual(["unread", "none"]);
+      expect(renderBody(unread)).not.toContain(`>${pill}<`);
+      fs.writeFileSync(
+        path.join(record, "inception/requirements-analysis/requirements.md"),
+        "## Open Questions\n\nNone.\n",
+      );
+      const clear = assemble(root);
+      const open = clear.diaries.records.filter(
+        (r) => r.axis === "openQuestions" && r.questionStatus !== "resolved",
+      );
+      // The fixture's diaries carry open entries, so the pill stays withheld…
+      expect(open.length).toBeGreaterThan(0);
+      expect(renderBody(clear)).not.toContain(`>${pill}<`);
+      // …and appears once nothing anywhere is open (positive control).
+      const none = { ...clear, diaries: { ...clear.diaries, records: [] } };
+      expect(renderBody(none)).toContain(`>${pill}<`);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("the stage-diary card is gone, and no empty slot is left where it was", () => {
     // 결정과 이슈 read memory.md — what the ORCHESTRATOR thought — and measured
     // against the deferral ledger on a real run it shared zero files and zero item

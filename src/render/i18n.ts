@@ -79,10 +79,12 @@ export interface CardStrings {
   readonly cellLabel: Record<CellState, string>;
   readonly decisionsTab: string;
   readonly openQsTab: string;
+  readonly declaredTab: string;
   readonly colItemOwner: string;
   readonly colAge: string;
   readonly noDecisions: string;
   readonly noOpenQs: string;
+  readonly noDeclared: string;
   readonly answersTab: string;
   readonly stuckTab: string;
   readonly checksTab: string;
@@ -481,6 +483,8 @@ export interface DeferralStrings {
   declaredUnread(files: string): string;
   /** Raw markup; `files` is already-escaped markup. */
   declaredMissing(files: string): string;
+  /** Raw markup; `files` is already-escaped markup. */
+  declaredUnreadable(files: string): string;
   /** Raw markup; `files` is already-escaped markup. */
   unreadAlongside(unread: number, files: string): string;
   readonly chipUnassignedTip: string;

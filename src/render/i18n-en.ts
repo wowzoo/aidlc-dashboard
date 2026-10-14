@@ -487,7 +487,10 @@ const deferrals: DeferralStrings = {
     `The <code>Open questions</code> section of ${files} is in a shape this reader does not know —
     <b>not read, which is not the same as empty</b>.`,
   declaredMissing: (files) =>
-    `${files} carries no <code>Open questions</code> section, though its stage file asks for one.`,
+    `No <code>Open questions</code> section this reader recognises was found in ${files} — its stage file asks for
+    one, though not under a fixed heading, so it may be written in a shape this reader does not know.`,
+  declaredUnreadable: (files) =>
+    `${files} is present but could not be read as a file — <b>its open questions were not read</b>.`,
   unreadAlongside: (unread, files) =>
     `<b>${unread} <code>## Assumptions &amp; Open Questions</code> section${unread === 1 ? " is" : "s are"} in a shape
     this reader does not know</b> (${files}) — whatever ${unread === 1 ? "it holds is" : "they hold is"} not in the counts above.`,
@@ -504,18 +507,18 @@ others have nowhere assigned to ask them. <b>They are not summed.</b>`,
     `No artifact carries an <code>## Assumptions &amp; Open Questions</code> section — either this run left no
     open-item ledger, or it has not written artifacts yet. (${artifacts} artifact${artifacts === 1 ? "" : "s"} read)`,
   unreadSections: (sections, unread, emptySections) =>
-    `${sections} artifact${sections === 1 ? "" : "s"} carry an <code>## Assumptions &amp; Open Questions</code>
-      section, and <b>${unread} of them are in a shape this reader does not know</b> — no table
+    `There ${sections === 1 ? "is" : "are"} ${sections} <code>## Assumptions &amp; Open Questions</code>
+      section${sections === 1 ? "" : "s"}, and <b>${unread} of them ${unread === 1 ? "is" : "are"} in a shape this reader does not know</b> — no table
       (<code>| item | assigned |</code>), no <code>[assumption]</code> tag, and no <code>**OQ1**</code>-style ledger id.
       <b>That does not mean there are no open items; it means they were not read.</b>
       ${emptySections} section${emptySections === 1 ? "" : "s"} declared <code>None.</code> explicitly.`,
   noOpenPill: "no open items",
   noOpenPillTip: "The ledger section is present and empty — an explicit declaration of 'none'",
   allNone: (sections) =>
-    ` Every <code>## Assumptions &amp; Open Questions</code> section across ${sections} artifact${sections === 1 ? "" : "s"} reads <code>None.</code>`,
+    ` All ${sections} <code>## Assumptions &amp; Open Questions</code> section${sections === 1 ? "" : "s"} read <code>None.</code>`,
   lead: (items, sections, rows, exits) =>
-    `<b>${items}</b> open item${items === 1 ? "" : "s"} · ${sections} artifact${sections === 1 ? "" : "s"} carry an
-  <code>## Assumptions &amp; Open Questions</code> ledger (${rows} raw row${rows === 1 ? "" : "s"} → ${items} after de-duplication)${
+    `<b>${items}</b> open item${items === 1 ? "" : "s"} · ${sections} <code>## Assumptions &amp; Open Questions</code>
+  section${sections === 1 ? "" : "s"} (${rows} raw row${rows === 1 ? "" : "s"} → ${items} after de-duplication)${
     exits > 0
       ? ` · ${exits} explicitly pushed outside this cycle ${exits === 1 ? "is" : "are"} not in that number`
       : ""
@@ -979,10 +982,12 @@ const cards: CardStrings = {
   },
   decisionsTab: "Open decisions",
   openQsTab: "Open questions",
+  declaredTab: "Stage-declared",
   colItemOwner: "item → owner stage",
   colAge: "age",
   noDecisions: "No open decisions",
   noOpenQs: "No open questions",
+  noDeclared: "No stage-declared open questions",
   answersTab: "Your answers",
   stuckTab: "Stuck",
   checksTab: "Failed checks",

@@ -291,6 +291,10 @@ function gapNotes(d: DashboardModel["deferrals"], s: Strings, withItems: boolean
     d.declared.ledgers.filter((l) => l.status === st).map((l) => l.rel);
   const unread = of("unread");
   if (unread.length > 0) out.push(`<p class="note warn">${t.declaredUnread(files(unread))}</p>`);
+  const unreadable = of("unreadable");
+  if (unreadable.length > 0) {
+    out.push(`<p class="note warn">${t.declaredUnreadable(files(unreadable))}</p>`);
+  }
   const missing = of("missing");
   if (missing.length > 0) out.push(`<p class="note">${t.declaredMissing(files(missing))}</p>`);
   return out.join("");
@@ -425,8 +429,13 @@ function body(m: DashboardModel, s: Strings): string {
         d.emptySections,
       )}</p>${tail}`;
     }
-    // The pill claims "no open items", so it is withheld while another ledger has some.
-    const clear = d.declared.questions.length === 0;
+    // The pill claims "no open items" for the whole panel, so every other ledger has to
+    // agree: nothing declared, every declared ledger read (an unread or unrecognised one
+    // is not "none"), and no open diary entry.
+    const clear =
+      d.declared.questions.length === 0 &&
+      d.declared.ledgers.every((l) => l.status === "none") &&
+      !m.diaries.records.some((r) => r.axis === "openQuestions" && r.questionStatus !== "resolved");
     return `<p class="note">${clear ? pill(t.noOpenPill, "ok", t.noOpenPillTip) : ""}${t.allNone(
       d.sections,
     )}</p>${tail}`;

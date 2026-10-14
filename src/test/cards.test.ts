@@ -257,6 +257,25 @@ describe("Unresolved card", () => {
   });
 });
 
+describe("Unresolved card — stage-declared open questions", () => {
+  test("a run whose only open points are stage-declared does not read 0 and 0", () => {
+    // decisionRows read the A&OQ items and openQuestionRows the diaries, so a run whose
+    // open points lived in requirements.md / contract-summary.md showed two empty tabs.
+    const m: DashboardModel = {
+      ...base,
+      deferrals: { ...base.deferrals, items: [] },
+      diaries: { ...base.diaries, records: [] },
+    };
+    const html = renderUnresolvedCard(m, ko);
+    const q = base.deferrals.declared.questions[0]!;
+    expect(html).toContain(
+      `${ko.cards.declaredTab} <b class="mc-n mute">${base.deferrals.declared.questions.length}</b>`,
+    );
+    expect(html).toContain(`/view?rel=${encodeURIComponent(q.rel)}`);
+    expect(checkedTab(html, "unresolved")).toBe("2");
+  });
+});
+
 describe("grid, drill-downs and sources", () => {
   test("four cards in reading order", () => {
     const html = renderCards(base, ko);
@@ -290,6 +309,7 @@ describe("grid, drill-downs and sources", () => {
 function treeText(m: DashboardModel): string[] {
   return [
     ...m.deferrals.items.map((i) => i.item),
+    ...m.deferrals.declared.questions.map((q) => q.text),
     ...m.diaries.records.map((r) => r.text),
     ...m.blockers.map((b) => b.heading),
   ];

@@ -3265,6 +3265,72 @@ None.
     }
   });
 
+  test("an Open questions subsection inside Assumptions & Open Questions is not this ledger", () => {
+    // That subsection is the A&OQ reader's; reading it here too counted one item twice.
+    const p = parseDeclaredOpenQuestions(
+      "## Assumptions & Open Questions\n\n### Open questions\n\n- **OQ1**: Decide retention.\n\n## Open Questions\n\n- **OQ2**: Decide export.\n",
+    );
+    expect(p.sections).toBe(1);
+    expect(p.items.map((i) => i.text)).toEqual(["OQ2: Decide export."]);
+  });
+
+  test("a section restating an earlier entry is read, not unread", () => {
+    const p = parseDeclaredOpenQuestions("## Open questions\n\n- A\n\n## Open questions\n\n- A\n");
+    expect(p).toMatchObject({ sections: 2, unread: 0, items: [{ text: "A" }] });
+  });
+
+  test("the same question blocking two targets keeps both", () => {
+    const p = parseDeclaredOpenQuestions(
+      "## Open questions\n\n| Contract | Question | Blocks |\n| --- | --- | --- |\n| C1 | Q | U1 |\n| C1 | Q | U2 |\n",
+    );
+    expect(p.items.map((i) => i.blocks)).toEqual(["U1", "U2"]);
+  });
+
+  test("a `None.` row, or a header with no rows, declares the table empty", () => {
+    for (const body of [
+      "| Contract | Question | Blocks |\n| --- | --- | --- |\n| — | None. | — |\n",
+      "| Contract | Question | Blocks |\n| --- | --- | --- |\n",
+    ]) {
+      expect(parseDeclaredOpenQuestions(`## Open questions\n\n${body}`)).toMatchObject({
+        none: 1,
+        unread: 0,
+        items: [],
+      });
+    }
+  });
+
+  test("a repeated header row is not a question", () => {
+    const p = parseDeclaredOpenQuestions(
+      "## Open questions\n\n| Contract | Question | Blocks |\n| --- | --- | --- |\n| Contract | Question | Blocks |\n| C1 | real | U1 |\n",
+    );
+    expect(p.items.map((i) => i.text)).toEqual(["real"]);
+  });
+
+  test("a table with no Question column is a gap, even beside an entry that was read", () => {
+    // Guessing a column turned `Contract | Status | Blocks` into a question ledger, and a
+    // read bullet used to vouch for every other block in its section.
+    const p = parseDeclaredOpenQuestions(
+      "## Open questions\n\n- known question\n\n| Contract | Status | Blocks |\n| --- | --- | --- |\n| C1 | open | U1 |\n",
+    );
+    expect(p.items.map((i) => i.text)).toEqual(["known question"]);
+    expect(p.unread).toBe(1);
+  });
+
+  test("a declared path that cannot be read is a gap, not an artifact not yet written", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-declared-"));
+    // A directory where the artifact should be: present, and not readable as one.
+    fs.mkdirSync(path.join(root, "inception/contract-design/contract-summary.md"), {
+      recursive: true,
+    });
+    try {
+      expect(readDeferrals(root).declared.ledgers).toMatchObject([
+        { source: "contract", status: "unreadable", count: 0 },
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("a declared artifact without the section is reported, not silently skipped", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-dfr-declared-"));
     const abs = path.join(root, "inception/requirements-analysis/requirements.md");
