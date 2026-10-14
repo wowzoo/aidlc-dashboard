@@ -49,6 +49,7 @@ import {
 } from "../scan/stage-catalog";
 import { buildTiming } from "../scan/timing";
 import { unitArtifactMode } from "../scan/unit-artifact-mode";
+import { resolveUnitDag } from "../scan/unit-dag";
 import { buildProvenance, graphLastEvent } from "./freshness";
 import type {
   Blocker,
@@ -447,6 +448,14 @@ export function assemble(
   // it. The scope grid is the catalogue's, refused or not — the plan action is the
   // state's own fact, not a contract judgement.
   const artifactMode = unitArtifactMode(stateText, catalog?.scopeGrid);
+  // The unit roster, resolved as the engine resolves it: the authored DAG first, the
+  // runtime graph only as a cache that still matches it (scan/unit-dag.ts). The engine
+  // asks for it only where per-unit stages run per unit, so a stage-level plan's
+  // malformed file is no stop and gets no warning.
+  const unitDag = resolveUnitDag(recordDir);
+  if (unitDag.state === "malformed" && artifactMode !== "stage-level") {
+    warnings.push({ code: "unit-dag-malformed", reason: unitDag.reason, detail: unitDag.detail });
+  }
 
   const ledger = readAuditLedger(recordDir, isStage, root);
   // A refusal explains an empty readable ledger; `audit-empty` guesses at hooks that
@@ -667,6 +676,7 @@ export function assemble(
           // An unverified version does NOT throw the contract away — it withholds the claim
           // that the judgement matches the engine's. Separate axes, not one.
           stateCompat,
+          unitDag,
         )
       : undefined;
   // Where the engine's routing resolves a unit checkpoint and so reads its proof:
@@ -829,6 +839,10 @@ export function assemble(
     state,
     matrix,
     unitArtifactMode: artifactMode,
+    unitDag:
+      unitDag.state === "ok"
+        ? { state: "ok", healed: unitDag.healed, graphDiffers: unitDag.graphDiffers }
+        : unitDag,
     checkpointProofs,
     sensors,
     questions,

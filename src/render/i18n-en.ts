@@ -99,6 +99,9 @@ const warn: WarnStrings = {
   recordFileUnreadable: (files, questions) =>
     `${plural(files.length, "record path")} could not be read or confirmed (for example no permission, a directory where a file was listed, a dangling link, or a directory link this reader does not follow) — not counted as absent${questions ? ". Part of the questions walk is among them, so the blocker list may be incomplete" : ""}: ${files.join(", ")}`,
 
+  unitDagMalformed: (reason, detail) =>
+    `The units block in inception/units-generation/unit-of-work-dependency.md cannot be read (${reason}: ${detail}). The engine stops at the per-unit Construction stages until it is rewritten, so the unit matrix is withheld rather than drawn from runtime-graph.json's older roster.`,
+
   tokenUsageFailed: (detail) =>
     `Token usage assembly failed — only the usage panel is degraded: ${detail}`,
 
@@ -259,6 +262,11 @@ const overview: OverviewStrings = {
   stageLevelUnitsPill: "stage level",
   unitModeUnknown:
     "Neither the state file nor the scope grid says whether Units Generation runs, so this matrix assumes artifacts are per unit.",
+  unitDagMalformed: (reason) =>
+    `No per-unit matrix — the engine cannot read the units block in unit-of-work-dependency.md (${reason}), so the unit set is unknown until it is rewritten. The runtime graph's older roster is not drawn in its place.`,
+  unitDagMalformedPill: "blocked",
+  unitDagHealed:
+    "Units read from unit-of-work-dependency.md, as the engine reads them — runtime-graph.json still holds an older roster, because it is recompiled only on a transition event.",
 
   tipPartial: (missing) => `missing: ${missing.join(", ")}`,
   tipComplete: (present) => `complete: ${present.join(", ")}`,

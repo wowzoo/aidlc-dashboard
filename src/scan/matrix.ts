@@ -2,14 +2,16 @@
 // progress is not carried by any single file:
 //
 //   - aidlc-state.md      → one checkbox for the WHOLE stage, no per-unit cursor
-//   - runtime-graph.json  → `bolt_dag` has the unit ROSTER + topology + each
-//                           unit's `kind`, but its `stages` rows carry no unit
-//                           field (so no per-unit progress), and it is only
-//                           recompiled at transitions so it lags mid-stage
+//   - the unit DAG        → the unit ROSTER + topology + each unit's `kind`,
+//                           resolved as the engine resolves it (scan/unit-dag.ts):
+//                           the authored unit-of-work-dependency.md first, the
+//                           runtime graph's `bolt_dag` only as a cache that still
+//                           matches it — the graph is recompiled at transitions
+//                           only, and its `stages` rows carry no unit field
 //   - construction/<unit>/<stage>/ dirs → the only live record of which unit has
 //                           produced what
 //
-// So the matrix is `bolt_dag` (structure) × disk (completion) × stage-graph.json
+// So the matrix is the unit DAG (structure) × disk (completion) × stage-graph.json
 // (the artifact contract that says when a unit's segment is actually DONE).
 //
 // WHY THREE STATES. The obvious rule — a cell is present when the segment dir is
@@ -37,6 +39,7 @@ import {
   requiredArtifacts,
   vacuouslyCovered,
 } from "./stage-catalog";
+import { type UnitDag, resolveUnitDag } from "./unit-dag";
 import {
   type ReceiptReason,
   type ReceiptRow,
@@ -153,15 +156,15 @@ function isPerUnitStage(slug: string, catalog: StageCatalog | undefined): boolea
   return PER_UNIT_STAGE_SLUGS.has(slug);
 }
 
-/** One Unit column of the matrix, in bolt_dag roster (topological) order. */
+/** One Unit column of the matrix, in the engine's roster order (`batches.flat()`). */
 export interface MatrixUnit {
-  /** Unit slug, verbatim from bolt_dag.units. */
+  /** Unit slug, verbatim from the resolved DAG. */
   name: string;
   /** Title-cased display name derived from the slug. */
   display: string;
   /** Unit kind (ui/service/library/spec/...) — drives the artifact contract. */
   kind?: string;
-  /** Units this one depends on, verbatim from bolt_dag. */
+  /** Units this one depends on, from whichever DAG source won (display only). */
   dependsOn: string[];
 }
 
@@ -267,11 +270,11 @@ export interface MatrixStage {
 }
 
 export interface ConstructionMatrix {
-  /** Unit roster in bolt_dag order (topological: dependencies before dependents). */
+  /** Unit roster in the engine's order: the batches flattened (topological levels). */
   units: MatrixUnit[];
   /** The per-unit Construction stages present in state.md, in document order. */
   stages: MatrixStage[];
-  /** Topological batches from bolt_dag: units in one batch may run in parallel. */
+  /** Topological batches from the resolved DAG: units in one batch may run in parallel. */
   batches: string[][];
   /**
    * False when no stage catalogue was available (cells are binary only).
@@ -304,56 +307,29 @@ export interface ConstructionMatrix {
   receiptAware: boolean;
 }
 
-/** bolt_dag as this module consumes it. */
+/** The resolved unit DAG as this module consumes it. */
 export interface BoltDag {
   units: MatrixUnit[];
   batches: string[][];
 }
 
 /**
- * Parse the Unit roster + topology out of runtime-graph.json's `bolt_dag`.
- * Returns undefined when the file is unparseable or carries no bolt_dag (a run
- * before units-generation) — the signal to keep the flat render. Roster order is
- * topological (the engine writes dependencies first).
+ * The matrix's view of a resolved DAG (scan/unit-dag.ts), or undefined when there is no
+ * roster to draw — `none` (a run before units-generation) and `malformed` (the engine's
+ * unit set is unknowable, so no roster from anywhere else stands in for it) alike. The
+ * caller tells those two apart on the page.
  */
-export function parseBoltDag(graphText: string): BoltDag | undefined {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(graphText);
-  } catch {
-    return undefined;
-  }
-  if (typeof doc !== "object" || doc === null) return undefined;
-  const dag = (doc as Record<string, unknown>).bolt_dag;
-  if (typeof dag !== "object" || dag === null) return undefined;
-  const rawUnits = (dag as Record<string, unknown>).units;
-  if (!Array.isArray(rawUnits)) return undefined;
-
-  const units: MatrixUnit[] = [];
-  for (const u of rawUnits) {
-    if (typeof u !== "object" || u === null) continue;
-    const r = u as Record<string, unknown>;
-    const name = r.name;
-    if (typeof name !== "string" || name.length === 0) continue;
-    units.push({
+export function boltDagFrom(dag: UnitDag): BoltDag | undefined {
+  if (dag.state !== "ok") return undefined;
+  return {
+    units: dag.units.map((name) => ({
       name,
       display: displayFromSlug(name),
-      kind: typeof r.kind === "string" ? r.kind : undefined,
-      dependsOn: Array.isArray(r.depends_on)
-        ? r.depends_on.filter((d): d is string => typeof d === "string")
-        : [],
-    });
-  }
-  if (units.length === 0) return undefined;
-
-  const rawBatches = (dag as Record<string, unknown>).batches;
-  const batches: string[][] = Array.isArray(rawBatches)
-    ? rawBatches
-        .filter((b): b is unknown[] => Array.isArray(b))
-        .map((b) => b.filter((n): n is string => typeof n === "string"))
-    : [];
-
-  return { units, batches };
+      kind: dag.unitKinds?.get(name),
+      dependsOn: dag.dependsOn.get(name) ?? [],
+    })),
+    batches: dag.batches,
+  };
 }
 
 /** The engine's `isRegularFile`: `statSync(...).isFile()`, so a link to a file counts. */
@@ -551,14 +527,11 @@ export function buildConstructionMatrix(
   };
 }
 
-/** runtime-graph.json lives next to aidlc-state.md in the intent record dir. */
-const RUNTIME_GRAPH_FILE = "runtime-graph.json";
-
 /**
  * Filesystem entry point: given the intent record dir (the folder holding
- * aidlc-state.md and runtime-graph.json), the parsed Construction stages, and
- * the workspace's stage catalogue, reconstruct the matrix. Returns undefined
- * when the graph is missing/unparseable or carries no bolt_dag. Never throws.
+ * aidlc-state.md), the parsed Construction stages, and the workspace's stage
+ * catalogue, reconstruct the matrix. Returns undefined when the unit DAG resolves to
+ * no roster (`none` or `malformed`). Never throws.
  */
 export function scanConstructionMatrix(
   recordDir: string,
@@ -566,14 +539,10 @@ export function scanConstructionMatrix(
   catalog: StageCatalog | undefined,
   lifecycle?: UnitLifecycle,
   stateCompat?: StateCompat,
+  /** The record's resolved DAG; resolved here when the caller has not already. */
+  unitDag: UnitDag = resolveUnitDag(recordDir),
 ): ConstructionMatrix | undefined {
-  let graphText: string;
-  try {
-    graphText = fs.readFileSync(path.join(recordDir, RUNTIME_GRAPH_FILE), "utf-8");
-  } catch {
-    return undefined;
-  }
-  const dag = parseBoltDag(graphText);
+  const dag = boltDagFrom(unitDag);
   if (!dag) return undefined;
   return buildConstructionMatrix(
     dag,

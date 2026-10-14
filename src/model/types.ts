@@ -196,6 +196,8 @@ export type Warning =
   | { code: "state-version-unreadable"; stateVersion?: string }
   | { code: "team-without-unit-major"; constructionIteration?: string }
   | { code: "unit-progress-malformed" }
+  /** The authored unit DAG the engine refuses (`resolveBoltDag` → `malformed`). */
+  | { code: "unit-dag-malformed"; reason: string; detail: string }
   | { code: "unit-progress-missing" }
   | {
       code: "roster-mismatch";
@@ -243,6 +245,15 @@ export interface DashboardModel {
    * skips Units Generation — withholds the matrix: there is no unit to draw a column for.
    */
   unitArtifactMode: UnitArtifactMode;
+  /**
+   * How the unit roster resolved (scan/unit-dag.ts), without the roster itself — the
+   * matrix carries that. `malformed` withholds the matrix (the engine's unit set is
+   * unknowable); `graphDiffers` says the runtime graph's cached roster was outvoted.
+   */
+  unitDag:
+    | { state: "ok"; healed: boolean; graphDiffers: boolean }
+    | { state: "none" }
+    | { state: "malformed"; reason: string; detail: string };
   /**
    * Unit checkpoint proofs the engine cannot count verified (scan/checkpoint-proofs.ts) —
    * only where checkpoints are in force. A diagnostic beside the matrix: the next move is

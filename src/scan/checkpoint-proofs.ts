@@ -31,10 +31,11 @@
 // — the caller decides both. An explicit `aidlc-bolt.ts checkpoint --action status` reads
 // a proof with no such gate; that is a command a person runs, not the run's state.
 //
-// Not reproduced: the unit roster is the runtime graph's `bolt_dag`, the matrix's own,
-// while the engine prefers an authored `unit-of-work-dependency.md` when there is one
-// (`resolveBoltDag`) — a unit dropped from the authored DAG but still cached here would
-// have its old proof read.
+// The unit roster is the matrix's, which is the engine's `resolveBoltDag` (scan/unit-dag.ts):
+// the authored `unit-of-work-dependency.md` first, the runtime graph only as a cache that
+// still matches it. A malformed authored DAG yields no matrix, so no proof is read either;
+// the engine's checkpoint readers likewise take nothing from a DAG that is not `ok`
+// (aidlc-construction-checkpoints.ts, `dag.state !== "ok"`).
 
 import * as fs from "node:fs";
 import * as path from "node:path";

@@ -181,6 +181,8 @@ export interface WarnStrings {
   questionsUnclosedBlock(files: string[]): string;
   /** `questions`: a questions file or dir is among them, so the blocker count is a floor. */
   recordFileUnreadable(files: string[], questions: boolean): string;
+  /** The authored unit DAG the engine refuses (scan/unit-dag.ts); `reason` is the engine's. */
+  unitDagMalformed(reason: string, detail: string): string;
   tokenUsageFailed(detail: string): string;
   creditAssemblyFailed(detail: string): string;
 }
@@ -319,6 +321,11 @@ export interface OverviewStrings {
   readonly stageLevelUnitsPill: string;
   /** No readable Units Generation action: the matrix assumes per-unit placement. */
   readonly unitModeUnknown: string;
+  /** The authored unit DAG is unreadable to the engine: no roster is drawn in its place. */
+  unitDagMalformed(reason: string): string;
+  readonly unitDagMalformedPill: string;
+  /** The authored DAG outvoted a runtime-graph cache that no longer matches it. */
+  readonly unitDagHealed: string;
 
   // Cell tooltips. `unverified` is per CAUSE — see the ReceiptReason note in scan/matrix.ts.
   tipPartial(missing: string[]): string;

@@ -92,6 +92,9 @@ const warn: WarnStrings = {
   recordFileUnreadable: (files, questions) =>
     `기록 경로 ${files.length}곳을 읽거나 확인하지 못했습니다(예: 권한 없음, 파일 자리의 폴더, 끊긴 링크, 따라가지 않는 폴더 링크) — 없는 것으로 치지 않습니다${questions ? ". 질문 파일을 찾는 범위가 포함돼 있어 블로커 목록이 불완전할 수 있습니다" : ""}: ${files.join(", ")}`,
 
+  unitDagMalformed: (reason, detail) =>
+    `inception/units-generation/unit-of-work-dependency.md 의 units 블록을 읽을 수 없습니다(${reason}: ${detail}). 다시 쓸 때까지 엔진은 유닛별 Construction stage 에서 멈추므로, runtime-graph.json 에 남은 이전 유닛 목록으로 매트릭스를 그리지 않습니다.`,
+
   tokenUsageFailed: (detail) => `토큰 사용량 조립 실패 — 사용량 패널만 하락: ${detail}`,
 
   creditAssemblyFailed: (detail) => `크레딧 조립 실패 — 크레딧 패널만 하락: ${detail}`,
@@ -245,6 +248,11 @@ const overview: OverviewStrings = {
   stageLevelUnitsPill: "stage 단위",
   unitModeUnknown:
     "state 파일과 scope grid 어디에서도 Units Generation 의 실행 여부를 읽지 못해, 이 매트릭스는 산출물이 유닛별로 있다고 가정하고 그렸습니다.",
+  unitDagMalformed: (reason) =>
+    `유닛별 매트릭스 없음 — 엔진이 unit-of-work-dependency.md 의 units 블록을 읽지 못해(${reason}) 다시 쓸 때까지 유닛 목록을 알 수 없습니다. runtime graph 에 남은 이전 목록으로 대신 그리지 않습니다.`,
+  unitDagMalformedPill: "막힘",
+  unitDagHealed:
+    "유닛 목록은 엔진처럼 unit-of-work-dependency.md 에서 읽었습니다 — runtime-graph.json 은 전이 이벤트 때만 다시 컴파일돼서 아직 이전 목록을 담고 있습니다.",
 
   tipPartial: (missing) => `미완: ${missing.join(", ")}`,
   tipComplete: (present) => `완료: ${present.join(", ")}`,

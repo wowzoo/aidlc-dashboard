@@ -164,6 +164,11 @@ describe("every code has copy", () => {
       files: ["construction/u/code-generation/code-generation-questions.md"],
       questions: true,
     },
+    "unit-dag-malformed": {
+      code: "unit-dag-malformed",
+      reason: "cyclic",
+      detail: "dependency cycle detected",
+    },
     "engine-version-unsupported": {
       code: "engine-version-unsupported",
       harnessDir: ".kiro",

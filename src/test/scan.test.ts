@@ -15,8 +15,8 @@ import { parseDrops, readHealth } from "../scan/hooks-health";
 import {
   type BoltDag,
   type LifecycleEvent,
+  boltDagFrom,
   buildConstructionMatrix,
-  parseBoltDag,
   readUnitLifecycle,
   scanConstructionMatrix,
 } from "../scan/matrix";
@@ -952,22 +952,23 @@ describe("construction matrix", () => {
     );
   });
 
-  test("bolt_dag parse keeps kind, depends_on and batches", () => {
-    const dag2 = parseBoltDag(
-      JSON.stringify({
-        bolt_dag: {
-          units: [{ name: "PU-A", depends_on: [], kind: "library" }],
-          batches: [["PU-A"]],
-        },
-      }),
-    )!;
+  test("a resolved DAG keeps kind, depends_on and batches", () => {
+    const dag2 = boltDagFrom({
+      state: "ok",
+      batches: [["PU-A"]],
+      units: ["PU-A"],
+      unitKinds: new Map([["PU-A", "library"]]),
+      healed: false,
+      graphDiffers: false,
+      dependsOn: new Map([["PU-A", []]]),
+    })!;
     expect(dag2.units[0]?.kind).toBe("library");
     expect(dag2.batches).toEqual([["PU-A"]]);
   });
 
-  test("no bolt_dag → undefined (keeps the flat render)", () => {
-    expect(parseBoltDag("{}")).toBeUndefined();
-    expect(parseBoltDag("not json")).toBeUndefined();
+  test("no roster → undefined (keeps the flat render), malformed included", () => {
+    expect(boltDagFrom({ state: "none" })).toBeUndefined();
+    expect(boltDagFrom({ state: "malformed", reason: "absent", detail: "" })).toBeUndefined();
   });
 });
 
@@ -3756,7 +3757,9 @@ describe("construction matrix — the engine's exact artifact filename", () => {
     const rec = fs.mkdtempSync(path.join(os.tmpdir(), "mx-files-"));
     fs.writeFileSync(
       path.join(rec, "runtime-graph.json"),
-      JSON.stringify({ bolt_dag: { units: [{ name: "PU-A", kind: "service" }], batches: [] } }),
+      JSON.stringify({
+        bolt_dag: { units: [{ name: "PU-A", kind: "service" }], batches: [["PU-A"]] },
+      }),
     );
     for (const [rel, body] of Object.entries(files)) {
       fs.mkdirSync(path.dirname(path.join(rec, rel)), { recursive: true });
