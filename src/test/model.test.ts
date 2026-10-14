@@ -601,8 +601,8 @@ describe("render", () => {
           expect(m.rework.rejected).toBe(0);
           const en = renderBody(m, "en");
           const ko = renderBody(m, "ko");
-          expect(en).not.toContain(EN.timeline.reworkNone);
-          expect(ko).not.toContain(KO.timeline.reworkNone);
+          expect(en).not.toContain(esc(EN.timeline.reworkNone(m.rework.approved)));
+          expect(ko).not.toContain(esc(KO.timeline.reworkNone(m.rework.approved)));
           expect(en).toContain(EN.timeline.reworkNonePartial(1));
           expect(ko).toContain(KO.timeline.reworkNonePartial(1));
           expect(en).toContain(EN.timeline.partialAuditNote(1));
@@ -643,7 +643,7 @@ describe("render", () => {
         (m) => {
           expect(m.partialAudit).toBeUndefined();
           const en = renderBody(m, "en");
-          expect(en).toContain(EN.timeline.reworkNone);
+          expect(en).toContain(esc(EN.timeline.reworkNone(m.rework.approved)));
           expect(en).not.toContain(EN.timeline.reworkNonePartial(1));
           expect(en).not.toContain(EN.timeline.partialAuditNote(1));
         },
@@ -1150,6 +1150,99 @@ describe("render", () => {
     const body = renderBody(solo as typeof m);
     expect(body).not.toContain("작업자별 분해");
     expect(body).not.toContain("과소계상");
+  });
+});
+
+describe("absence sentences claim only what their source read", () => {
+  const EN = strings("en");
+  const KO = strings("ko");
+  const base = assemble(FIXTURE);
+  const quiet = { ...base.rework, rejected: 0, revisions: 0, jumps: 0, reopened: 0 };
+
+  test("no rejection and no approval is not every gate passing first time", () => {
+    const m = { ...base, rework: { ...quiet, approved: 0 } };
+    for (const lang of ["en", "ko"] as const) {
+      const t = strings(lang).timeline;
+      const html = renderBody(m, lang);
+      expect(html).toContain(esc(t.reworkNone(0)));
+    }
+    const en = renderBody(m, "en");
+    expect(en).not.toContain("every gate passed first time");
+    expect(renderBody(m, "ko")).not.toContain("모든 관문을 한 번에 통과");
+  });
+
+  test("with approvals, the first-time claim is scoped to the gates approved so far", () => {
+    const m = { ...base, rework: { ...quiet, approved: 3 } };
+    expect(renderBody(m, "en")).toContain(esc(EN.timeline.reworkNone(3)));
+    expect(renderBody(m, "ko")).toContain(esc(KO.timeline.reworkNone(3)));
+    expect(EN.timeline.reworkNone(3)).toContain("3");
+    expect(EN.timeline.reworkNone(3)).not.toContain("every gate passed");
+  });
+
+  test("an open decision is named on the timeline line, not denied", () => {
+    const m = {
+      ...base,
+      waits: {
+        ...base.waits,
+        decision: {
+          stage: "code-generation",
+          unit: "PU-A-core",
+          checkpoint: "Construction Unit Approval",
+          since: "2026-01-01T03:00:00Z",
+        },
+      },
+    };
+    const en = renderBody(m, "en");
+    expect(en).toContain(EN.timeline.awaitingDecision("Construction Unit Approval"));
+    expect(en).not.toContain(EN.timeline.awaitingNone);
+    expect(renderBody(m, "ko")).toContain(
+      KO.timeline.awaitingDecision("Construction Unit Approval"),
+    );
+    const unnamed = {
+      ...m,
+      waits: { ...m.waits, decision: { stage: "code-generation", since: "2026-01-01T03:00:00Z" } },
+    };
+    expect(renderBody(unnamed, "en")).toContain(EN.timeline.awaitingDecision(undefined));
+  });
+
+  test("an unread team unit gate says so instead of 'nothing waiting'", () => {
+    const m = { ...base, waits: { ...base.waits, teamGateUnread: true } };
+    const en = renderBody(m, "en");
+    expect(en).toContain(EN.timeline.awaitingTeamUnread);
+    expect(en).not.toContain(EN.timeline.awaitingNone);
+  });
+
+  test("with nothing read open, the line claims only the stage gate", () => {
+    const en = renderBody(base, "en");
+    expect(en).toContain(EN.timeline.awaitingNone);
+    expect(EN.timeline.awaitingNone).not.toContain("nothing is waiting");
+    expect(KO.timeline.awaitingNone).not.toContain("승인을 기다리는 stage 가 없다는 뜻");
+  });
+
+  test("the waits source note names every source the strip reads", () => {
+    for (const x of [EN.status, KO.status]) {
+      expect(x.humanSource).toContain("state");
+      expect(x.humanSource).not.toBe("questions files");
+    }
+  });
+
+  test("the unit-column note appears only beside a clone with no unit, and names the real cause", () => {
+    // The fixture's second clone has no row naming a unit.
+    const en = renderBody(base, "en");
+    expect(en).toContain(EN.timeline.unitColumnNote);
+    expect(EN.timeline.unitColumnNote).not.toContain("Output path");
+    expect(KO.timeline.unitColumnNote).not.toContain("Output path");
+    const all = {
+      ...base,
+      timing: {
+        ...base.timing,
+        workers: base.timing.workers.map((w) => ({
+          ...w,
+          units: w.units.length ? w.units : ["PU-A-core"],
+        })),
+      },
+    };
+    expect(renderBody(all, "en")).not.toContain(EN.timeline.unitColumnNote);
   });
 });
 

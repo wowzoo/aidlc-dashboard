@@ -203,7 +203,7 @@ const status: StatusStrings = {
   humanEngineOnlyTip:
     "stop hook 은 진행 중 stage 의 질문 파일 원문에서 빈 [Answer]: 를 찾으면 턴 종료를 허용합니다. 이 대시보드가 답한 것으로 읽은 자리(코드 블록 속 예시, 다른 절에서 답한 자리 등)이므로 답변 대기로 세지 않지만, 엔진이 여기서 멈출 수 있습니다",
   humanNone: "✓ 답변 대기 없음",
-  humanSource: "questions 파일",
+  humanSource: "questions 파일 · state · 감사 기록 · 엔진 마커",
   checksNone: "현재 stage 검사 기록 없음",
   checksNonePartial: (refused) =>
     `읽은 감사 기록에는 현재 stage 검사 기록 없음 — 감사 기록 경로 ${refused}곳을 읽지 않아 그쪽 기록은 보이지 않습니다`,
@@ -584,8 +584,11 @@ const timeline: TimelineStrings = {
   noneInFlightPartial: (refused) =>
     `읽은 감사 기록에는 진행 중인 stage 없음 (읽지 않은 경로 ${refused}곳)`,
   awaiting: (stage) => `승인 대기 <b>${stage}</b>`,
+  awaitingDecision: (name) => `결정 대기 <b>${name ?? "이름 없는 결정"}</b>`,
+  awaitingTeamUnread:
+    '유닛 관문은 판독하지 않음<span class="mute"> (팀 소유 — 유닛 승인 대기 여부는 여기서 판단하지 않습니다)</span>',
   awaitingNone:
-    '승인 대기 없음<span class="mute"> (지금 관문에서 승인을 기다리는 stage 가 없다는 뜻 — 과거 제출 이력은 아래 재작업 표)</span>',
+    '열린 stage 관문 없음<span class="mute"> (Current Stage 행이 승인 대기가 아님 — 다른 질문은 "내 답변" 탭, 과거 제출 이력은 아래 재작업 표)</span>',
   reworkPending: " · 반려 후 승인 전인 stage 있음",
   mergedNote: (workers, clones) =>
     `기록 ${workers}개(사본 ${clones}개) 병합 — 위 분류는 전 기록을 한 줄로
@@ -593,7 +596,10 @@ const timeline: TimelineStrings = {
   axisSilenceTip: (silence) => `마지막 기록 이후 ${silence} — 기록이 없어 분류하지 않는 구간`,
 
   reworkSummary: (rejected, h) => `재작업 — 반려 ${rejected}건 · ${h}`,
-  reworkNone: "반려·수정 기록 없음 — 모든 관문을 한 번에 통과.",
+  reworkNone: (approved) =>
+    approved === 0
+      ? "아직 승인된 관문이 없고, 반려·수정 기록도 없습니다."
+      : `반려·수정 기록 없음 — 지금까지 승인된 관문 ${approved}건 모두 한 번에 통과.`,
   reworkNonePartial: (refused) =>
     `읽은 감사 기록에는 반려·수정 기록 없음 — 감사 기록 경로 ${refused}곳을 읽지 않아 그쪽의 반려는 보이지 않습니다.`,
   reworkProvisionalTip: "아직 승인되지 않음 — 시간은 계속 늘어남",
@@ -725,8 +731,8 @@ const timeline: TimelineStrings = {
   endedParkedTail: " — 되돌아오지 않은 기록이다.",
   parallelismNote: `실효 병렬도 = 사람-시간 합 ÷ 팀 벽시계. 겹쳐 일한 시간이 있을 때만 의미가 있어
        겹침이 0이면 표시하지 않는다.`,
-  unitColumnNote: `⚠️유닛 열이 "—"인 clone 은 감사 기록의 <code>Output path</code> 가 산출물이 아니라 코드 경로여서
-  유닛 역추적 불가 — 담당 stage 까지만 확실.`,
+  unitColumnNote: `유닛 열이 "—"인 clone 은 유닛을 적은 감사 기록(<code>Unit</code> 필드나 유닛 단위
+  <code>Context</code>)이 없습니다 — 예를 들어 stage 단위 작업만 한 경우입니다. 담당 stage 는 그대로 집계됩니다.`,
 };
 
 const picker: PickerStrings = {

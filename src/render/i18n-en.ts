@@ -216,7 +216,7 @@ const status: StatusStrings = {
   humanEngineOnlyTip:
     "The stop hook lets the turn end when the raw text of the running stage's questions file holds a blank [Answer]:. This dashboard reads that spot as answered (an example in a code block, a placeholder answered in another section), so it is not counted — but the engine may stop here",
   humanNone: "✓ Nothing awaiting you",
-  humanSource: "questions files",
+  humanSource: "questions files · state · audit · engine markers",
   checksNone: "No checks recorded this stage",
   checksNonePartial: (refused) =>
     `No checks recorded this stage in the audit shards read — ${plural(refused, "audit path")} refused, and a check recorded there is not seen`,
@@ -612,8 +612,11 @@ const timeline: TimelineStrings = {
   noneInFlightPartial: (refused) =>
     `No stage in flight in the audit shards read (${plural(refused, "audit path")} refused)`,
   awaiting: (stage) => `awaiting approval: <b>${stage}</b>`,
+  awaitingDecision: (name) => `awaiting decision: <b>${name ?? "unnamed decision"}</b>`,
+  awaitingTeamUnread:
+    'unit gate not read<span class="mute"> (team ownership — whether a unit approval is pending is not determined here)</span>',
   awaitingNone:
-    'no stage awaiting approval<span class="mute"> (nothing is waiting at a gate right now — past submissions are in the rework table below)</span>',
+    'no stage gate open<span class="mute"> (the Current Stage row is not awaiting approval — other asks are in the Your answers tab; past submissions are in the rework table below)</span>',
   reworkPending: " · a stage is rejected and not yet re-approved",
   mergedNote: (workers, clones) =>
     `${workers} ledger${workers === 1 ? "" : "s"} (${clones} clone${clones === 1 ? "" : "s"}) merged — the breakdown above is
@@ -623,7 +626,10 @@ const timeline: TimelineStrings = {
 
   reworkSummary: (rejected, h) =>
     `Rework — ${rejected} rejection${rejected === 1 ? "" : "s"} · ${h}`,
-  reworkNone: "No rejections or revisions — every gate passed first time.",
+  reworkNone: (approved) =>
+    approved === 0
+      ? "No gate has been approved yet, and none was rejected or revised."
+      : `No rejections or revisions — all ${plural(approved, "gate approval")} so far passed first time.`,
   reworkNonePartial: (refused) =>
     `No rejections or revisions in the audit shards read — ${plural(refused, "audit path")} refused, and a rejection recorded there is not seen.`,
   reworkProvisionalTip: "Not approved yet — this time is still growing",
@@ -762,8 +768,8 @@ const timeline: TimelineStrings = {
   endedParkedTail: " — a ledger that never came back.",
   parallelismNote: `Effective parallelism = person-hours ÷ team wall clock. It only means anything when there is
        concurrent work, so it is withheld when overlap is 0.`,
-  unitColumnNote: `⚠️A clone showing "—" for units has an <code>Output path</code> in the ledger that is a code path
-  rather than an artifact, so the unit cannot be traced back — only the stage it worked on is certain.`,
+  unitColumnNote: `A clone showing "—" for units has no audit row that names a unit (a <code>Unit</code> field or a
+  per-unit <code>Context</code>) — for example, it worked only on stage-level stages. Its stages are still attributed.`,
 };
 
 const picker: PickerStrings = {

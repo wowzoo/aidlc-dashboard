@@ -245,6 +245,23 @@ function pct(value: number, total: number): string {
 }
 
 /**
+ * What the run waits on at a gate, in the order the status strip reads it. The state
+ * row's `[?]` is the stage gate; an audit-opened decision (a unit or batch approval)
+ * and a team unit gate never move that row, so "no gate open" there was contradicted by
+ * the waits tab on the same page. Other asks are not gates and stay in that tab.
+ */
+function awaitingLine(m: DashboardModel, x: Strings["timeline"]): string {
+  if (m.gates.awaitingStage) return x.awaiting(esc(m.gates.awaitingStage));
+  const d = m.waits.decision;
+  if (d) {
+    const name = d.checkpoint ?? d.decision;
+    return x.awaitingDecision(name ? esc(name) : undefined);
+  }
+  if (m.waits.teamGateUnread) return x.awaitingTeamUnread;
+  return x.awaitingNone;
+}
+
+/**
  * Rework — the ledger's most valuable signal and, until now, the one the panel was
  * silent about. `m.gates` counted the events and no render module read it, so a run
  * with 11 rejections and 18.9h of redone work looked identical to one with none.
@@ -259,7 +276,7 @@ function reworkBlock(m: DashboardModel, classifiedSec: number, s: Strings): stri
     // "Every gate passed first time" is a claim about the whole run; with a shard
     // refused the rejection may be in it (DashboardModel.partialAudit).
     return `<p class="note">${esc(
-      m.partialAudit ? t.reworkNonePartial(m.partialAudit.refused) : t.reworkNone,
+      m.partialAudit ? t.reworkNonePartial(m.partialAudit.refused) : t.reworkNone(r.approved),
     )}</p>`;
   }
   const share = classifiedSec > 0 ? pct(r.reworkSec, classifiedSec) : "0.0";
@@ -486,7 +503,7 @@ ${
     : ""
 }
 ${par ? `<p class="note">${x.parallelismNote}</p>` : ""}
-<p class="note">${x.unitColumnNote}</p>
+${t.workers.some((w) => w.units.length === 0) ? `<p class="note">${x.unitColumnNote}</p>` : ""}
 </details>`;
 }
 
@@ -570,9 +587,7 @@ function body(m: DashboardModel, s: Strings): string {
           inFlight.map((sp) => `<b>${esc(sp.stage)}</b> ${esc(hours(sp.elapsedSec))}`).join(" · "),
         )
       : esc(partial ? x.noneInFlightPartial(partial.refused) : x.noneInFlight)
-  } · ${m.gates.awaitingStage ? x.awaiting(esc(m.gates.awaitingStage)) : x.awaitingNone}${
-    m.rework.provisional ? esc(x.reworkPending) : ""
-  }</p>`;
+  } · ${awaitingLine(m, x)}${m.rework.provisional ? esc(x.reworkPending) : ""}</p>`;
 
   // On a multi-clone run the merged split is not a per-person figure.
   const mergedNote = t.parallel

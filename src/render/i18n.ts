@@ -581,7 +581,14 @@ export interface TimelineStrings {
   noneInFlightPartial(refused: number): string;
   /** Raw markup. */
   awaiting(stage: string): string;
-  /** Raw markup. */
+  /**
+   * Raw markup; `name` already escaped. An audit-opened decision leaves the state row
+   * alone, so the line names it rather than saying no gate is waiting.
+   */
+  awaitingDecision(name: string | undefined): string;
+  /** Raw markup. Team ownership: the unit gate is decided by claim state not read here. */
+  readonly awaitingTeamUnread: string;
+  /** Raw markup. Claims the stage gate only — other asks live in the waits tab. */
   readonly awaitingNone: string;
   readonly reworkPending: string;
   /** Raw markup. */
@@ -590,7 +597,11 @@ export interface TimelineStrings {
 
   // rework
   reworkSummary(rejected: number, hours: string): string;
-  readonly reworkNone: string;
+  /**
+   * `approved` is the ledger's GATE_APPROVED count. With none, nothing has passed yet,
+   * so "first time" would be vacuous; with some, the claim covers those alone.
+   */
+  reworkNone(approved: number): string;
   /** Never "every gate passed first time": a refused shard can hold the rejection. */
   reworkNonePartial(refused: number): string;
   readonly reworkProvisionalTip: string;
