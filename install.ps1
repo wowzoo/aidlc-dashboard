@@ -262,6 +262,63 @@ if ($bun) {
   $bunOld = Report-Bun
 }
 
+# ---- user PATH (Windows) -----------------------------------------------------
+# The shim is useless until its folder is on PATH, and on Windows it almost never is:
+# `aidlc-dashboard` failed with CommandNotFound on a fresh machine (2026-10-16). So the
+# folder is added to the USER Path (HKCU, no elevation) -- announced first, skipped
+# with AIDLC_NO_PATH=1 -- the way bun's and scoop's installers do it.
+#
+# Through the registry, not [Environment]::SetEnvironmentVariable: that one reads the
+# value EXPANDED, so writing it back would bake `%USERPROFILE%`-style entries into
+# literals. The raw value is read with DoNotExpandEnvironmentNames and written back
+# with the kind it had.
+
+# $raw with $entry appended, or $null when an entry already names the same folder
+# (compared expanded, case-insensitive, trailing slash ignored).
+function Join-PathEntry([string]$raw, [string]$entry) {
+  $norm = { param($p) [Environment]::ExpandEnvironmentVariables($p).Trim().TrimEnd('\', '/') }
+  $want = & $norm $entry
+  $parts = @($raw -split ';' | Where-Object { $_ -and $_.Trim() })
+  foreach ($p in $parts) { if ((& $norm $p) -ieq $want) { return $null } }
+  return (@($parts) + $entry) -join ';'
+}
+
+# Tell running programs the environment changed, so a terminal opened from Explorer
+# sees the new Path without signing out. Best effort: a failure costs only that.
+function Publish-Env {
+  try {
+    if (-not ('AidlcDashboard.NativeMethods' -as [type])) {
+      Add-Type -Namespace AidlcDashboard -Name NativeMethods -MemberDefinition '[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);'
+    }
+    $result = [UIntPtr]::Zero
+    [void][AidlcDashboard.NativeMethods]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result)
+  } catch {
+  }
+}
+
+# Add $entry to the user Path (if absent) and to this session. Returns $true when it
+# wrote the registry, $false when the user Path already had it.
+function Add-UserPath([string]$entry) {
+  $wrote = $false
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+  if (-not $key) { throw 'HKCU\Environment could not be opened for writing' }
+  try {
+    $raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $kind = if ($key.GetValueNames() -contains 'Path') { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+    $new = Join-PathEntry $raw $entry
+    if ($null -ne $new) {
+      $key.SetValue('Path', $new, $kind)
+      $wrote = $true
+      Publish-Env
+    }
+  } finally {
+    $key.Close()
+  }
+  # `irm | iex` runs in the caller's session, so this reaches the user's own window.
+  if ($null -ne (Join-PathEntry $env:Path $entry)) { $env:Path = "$env:Path;$entry" }
+  return $wrote
+}
+
 # ---- launcher ---------------------------------------------------------------
 # A .cmd SHIM calling start.cmd by absolute path. start.cmd does `cd /d "%~dp0"`,
 # so it lands in the install dir no matter where the shim sits -- the same reason
@@ -281,6 +338,19 @@ if ($env:AIDLC_NO_BIN -ne '1') {
     $onPath = ($env:PATH -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ieq $binDir.TrimEnd('\')) })
     if ($onPath) {
       $run = 'aidlc-dashboard'
+    } elseif ($env:OS -eq 'Windows_NT' -and $env:AIDLC_NO_PATH -ne '1') {
+      Say "$(T '\u25b8 \uc0ac\uc6a9\uc790 PATH \uc5d0 \ucd94\uac00: ')$binDir$(T ' \u0028\uac74\ub108\ub6f0\ub824\uba74 AIDLC_NO_PATH=1\u0029')"
+      try {
+        $wrote = Add-UserPath $binDir
+        $run = 'aidlc-dashboard'
+        if ($wrote) {
+          Say (T '  \ucd94\uac00\ud588\ub2e4. \uc0c8\ub85c \uc5ec\ub294 \ud130\ubbf8\ub110\uc5d0\uc11c\ub3c4 aidlc-dashboard \ub85c \uc2e4\ud589\ub418\uace0, \uc774 \ucc3d\uc5d0\ub294 \uc774\ubbf8 \uc801\uc6a9\ud588\ub2e4.')
+        } else {
+          Say (T '  \uc774\ubbf8 \uc0ac\uc6a9\uc790 PATH \uc5d0 \uc788\ub2e4 \u2014 \uc774 \ucc3d\uc5d0\ub3c4 \uc801\uc6a9\ud588\ub2e4.')
+        }
+      } catch {
+        Say "$(T '  \u26a0 PATH \uc5d0 \ucd94\uac00\ud558\uc9c0 \ubabb\ud588\ub2e4 \u2014 \uc9c1\uc811 \ucd94\uac00\ud560 \uac83: ')$binDir$(T ' \u0028')$_$(T '\u0029')"
+      }
     } else {
       Say "$(T '  \u26a0 ')$binDir$(T ' \uc774 PATH \uc5d0 \uc5c6\ub2e4. \uc178 \uc124\uc815\uc5d0 \ucd94\uac00\ud558\uba74 \uc774\ub984\ub9cc\uc73c\ub85c \uc2e4\ud589\ud560 \uc218 \uc788\ub2e4.')"
     }

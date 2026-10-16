@@ -36,7 +36,9 @@ aidlc-dashboard ~/path/to/workspace   # 바로 그 트리로
 | `AIDLC_DIR` | 설치 위치 (기본 `~/.aidlc-dashboard`) |
 | `AIDLC_VERSION` | 버전 고정 (예: `1.11.0`, 기본은 최신) |
 | `AIDLC_NO_BUN=1` | bun 이 없어도 설치하지 않는다 |
+| `AIDLC_BIN_DIR` | 실행기를 둘 폴더 (기본 `~/.local/bin`) |
 | `AIDLC_NO_BIN=1` | `~/.local/bin` 실행기를 만들지 않는다 |
+| `AIDLC_NO_PATH=1` | (Windows) 실행기 폴더를 사용자 PATH 에 추가하지 않는다 |
 
 ### 한 줄 설치 (Windows)
 
@@ -48,7 +50,9 @@ irm https://github.com/wowzoo/aidlc-dashboard/releases/latest/download/install.p
 
 `irm | iex` 는 메모리에서 실행되므로 서명 없는 `.ps1` 을 막는 실행 정책에 걸리지 않는다.
 `%USERPROFILE%\.aidlc-dashboard` 에 풀고 `%USERPROFILE%\.local\bin\aidlc-dashboard.cmd` 실행기를
-만든다. 환경변수는 위 표와 같다(`$env:AIDLC_DIR` 형태로 지정).
+만든 뒤, 그 폴더를 **사용자 PATH 에 추가한다**(관리자 권한 불필요, 추가한다고 먼저 알린다). 설치한 창과
+새로 여는 터미널에서 `aidlc-dashboard` 로 실행된다. 환경변수는 위 표와 같고(`$env:AIDLC_DIR` 형태로
+지정), PATH 를 건드리지 않으려면 `$env:AIDLC_NO_PATH='1'` 로 실행한다.
 
 zip 을 직접 받고 싶으면 [Releases](https://github.com/wowzoo/aidlc-dashboard/releases) 에서 받아 풀고
 `.\start.cmd` 를 쓴다.

@@ -82,3 +82,17 @@ describe("PowerShell scripts stay ASCII (Windows PowerShell 5.1 decodes them as 
     );
   });
 });
+
+describe("every installer setting is documented", () => {
+  // A knob the installers read but the README does not name is one nobody can find —
+  // `AIDLC_BIN_DIR` sat in both scripts undocumented until `AIDLC_NO_PATH` was added.
+  const readme = fs.readFileSync(path.join(ROOT, "README.md"), "utf-8");
+  for (const name of ["install.ps1", "install.sh"]) {
+    test(name, () => {
+      const body = fs.readFileSync(path.join(ROOT, name), "latin1");
+      const vars = [...new Set(body.match(/AIDLC_[A-Z_]+/g) ?? [])].sort();
+      expect(vars.length).toBeGreaterThan(3);
+      expect(vars.filter((v) => !readme.includes(`\`${v}`))).toEqual([]);
+    });
+  }
+});
