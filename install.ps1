@@ -296,6 +296,19 @@ function Publish-Env {
   }
 }
 
+# The machine Path, raw. Read-only (no elevation needed to read HKLM); '' when absent.
+function Get-MachinePathRaw {
+  try {
+    $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment')
+    if (-not $key) { return '' }
+    try { return [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } finally { $key.Close() }
+  } catch {
+    # Unreadable is treated as "not there": the user Path is then made to hold it,
+    # which at worst duplicates a machine entry -- harmless, unlike a missing one.
+    return ''
+  }
+}
+
 # Add $entry to the user Path (if absent) and to this session. Returns $true when it
 # wrote the registry, $false when the user Path already had it.
 function Add-UserPath([string]$entry) {
@@ -336,10 +349,17 @@ if ($env:AIDLC_NO_BIN -ne '1') {
     [IO.File]::WriteAllText($bin, $shim, [Text.Encoding]::ASCII)
     Say "$(T '\u25b8 \uc2e4\ud589\uae30: ')$bin"
     $onPath = ($env:PATH -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ieq $binDir.TrimEnd('\')) })
-    if ($onPath) {
+    # On Windows the question is whether NEW terminals will find it, so it is answered
+    # from the registry, not from this session: a session can carry the folder from a
+    # one-off `$env:Path +=` or a stale inherited environment while the user Path lacks
+    # it -- then the shim worked here and nowhere else (seen 2026-10-16). The machine
+    # Path counts as present; otherwise the user Path is made to hold it.
+    $winPath = $env:OS -eq 'Windows_NT' -and $env:AIDLC_NO_PATH -ne '1'
+    if ($winPath -and $null -eq (Join-PathEntry (Get-MachinePathRaw) $binDir)) {
+      if (-not $onPath) { $env:Path = "$env:Path;$binDir" }
       $run = 'aidlc-dashboard'
-    } elseif ($env:OS -eq 'Windows_NT' -and $env:AIDLC_NO_PATH -ne '1') {
-      Say "$(T '\u25b8 \uc0ac\uc6a9\uc790 PATH \uc5d0 \ucd94\uac00: ')$binDir$(T ' \u0028\uac74\ub108\ub6f0\ub824\uba74 AIDLC_NO_PATH=1\u0029')"
+    } elseif ($winPath) {
+      Say "$(T '\u25b8 \uc0ac\uc6a9\uc790 PATH \ud655\uc778: ')$binDir$(T ' \u0028\uac74\ub108\ub6f0\ub824\uba74 AIDLC_NO_PATH=1\u0029')"
       try {
         $wrote = Add-UserPath $binDir
         $run = 'aidlc-dashboard'
@@ -351,6 +371,8 @@ if ($env:AIDLC_NO_BIN -ne '1') {
       } catch {
         Say "$(T '  \u26a0 PATH \uc5d0 \ucd94\uac00\ud558\uc9c0 \ubabb\ud588\ub2e4 \u2014 \uc9c1\uc811 \ucd94\uac00\ud560 \uac83: ')$binDir$(T ' \u0028')$_$(T '\u0029')"
       }
+    } elseif ($onPath) {
+      $run = 'aidlc-dashboard'
     } else {
       Say "$(T '  \u26a0 ')$binDir$(T ' \uc774 PATH \uc5d0 \uc5c6\ub2e4. \uc178 \uc124\uc815\uc5d0 \ucd94\uac00\ud558\uba74 \uc774\ub984\ub9cc\uc73c\ub85c \uc2e4\ud589\ud560 \uc218 \uc788\ub2e4.')"
     }
