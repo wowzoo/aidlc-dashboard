@@ -1,9 +1,9 @@
-# aidlc-dashboard installer — Windows (PowerShell).
+# aidlc-dashboard installer -- Windows (PowerShell).
 #
 #     irm https://github.com/wowzoo/aidlc-dashboard/releases/latest/download/install.ps1 | iex
 #
 # `irm | iex` runs the script from MEMORY, so the execution policy that blocks an
-# unsigned .ps1 on disk does not apply — which is why the one-liner is this shape
+# unsigned .ps1 on disk does not apply -- which is why the one-liner is this shape
 # rather than "download it and run it".
 #
 # The same three things install.sh has to get right, for the same reasons:
@@ -36,24 +36,34 @@ try {
 }
 
 # Path literals use FORWARD slashes on purpose: .NET accepts them on Windows too,
-# and it is what makes this script runnable under pwsh on macOS/Linux — which is how
+# and it is what makes this script runnable under pwsh on macOS/Linux -- which is how
 # it was verified, since the author had no Windows machine.
 $repo = 'wowzoo/aidlc-dashboard'
 $dir = if ($env:AIDLC_DIR) { $env:AIDLC_DIR } else { Join-Path $HOME '.aidlc-dashboard' }
 $binDir = if ($env:AIDLC_BIN_DIR) { $env:AIDLC_BIN_DIR } else { Join-Path $HOME '.local/bin' }
 $bin = Join-Path $binDir 'aidlc-dashboard.cmd'
 
+# Korean text is written as \uXXXX escapes and decoded by T at run time, so this
+# file stays pure ASCII. It has to: `irm | iex` under Windows PowerShell 5.1 decodes a
+# response with no charset (GitHub serves release assets as application/octet-stream)
+# as ISO-8859-1, and reads a BOM-less file from disk in the ANSI code page -- either
+# way UTF-8 Korean arrived as mojibake. Parentheses inside a $(T '...') are escaped as
+# well (\u0028 \u0029): PowerShell counts them even inside quotes when it looks for the
+# end of $( ) in a double-quoted string, so an unbalanced one swallowed what followed.
+# src/test/ps1-ascii.test.ts pins both. To read a message, run
+# [regex]::Unescape('<the escaped text>') in any PowerShell.
+function T([string]$s) { [regex]::Unescape($s) }
 function Say([string]$m) { Write-Host $m }
 # `throw`, not `exit`: under `irm | iex` the script runs in the caller's session, so
 # `exit` closed the user's PowerShell window before they could read why it failed.
-function Die([string]$m) { throw "✗ $m" }
+function Die([string]$m) { throw "$(T '\u2717 ')$m" }
 
 # ---- which version ----------------------------------------------------------
 if ($env:AIDLC_VERSION) {
   $tag = 'v' + ($env:AIDLC_VERSION -replace '^v', '')
 } else {
-  Say '▸ 최신 릴리스 확인...'
-  # RESOLVED FROM THE REDIRECT, NOT THE API — same reason as install.sh:
+  Say (T '\u25b8 \ucd5c\uc2e0 \ub9b4\ub9ac\uc2a4 \ud655\uc778...')
+  # RESOLVED FROM THE REDIRECT, NOT THE API -- same reason as install.sh:
   # `github.com/<repo>/releases/latest` redirects to `/releases/tag/<tag>`, while
   # `api.github.com` is rate-limited to 60 requests/hour per IP for unauthenticated
   # callers, which a shared corporate NAT spends on the user's behalf. Only the
@@ -76,7 +86,7 @@ if ($env:AIDLC_VERSION) {
     # Last resort within the same response: the tag also appears in the page body.
     if (-not $tag -and $resp.Content -match '/releases/tag/([^"''<>\s]+)') { $tag = $Matches[1] }
   } catch {
-    # Fall through to the API below — the two fail for different reasons.
+    # Fall through to the API below -- the two fail for different reasons.
   }
   if (-not $tag) {
     try {
@@ -88,8 +98,8 @@ if ($env:AIDLC_VERSION) {
   }
   if (-not $tag) {
     Die @"
-최신 릴리스를 확인할 수 없다 (네트워크, GitHub API 한도, 또는 저장소에 접근할 수 없음 — 비공개 저장소는 익명 요청에 404 를 준다).
-  버전을 지정하면 이 조회를 건너뛴다:
+$(T '\ucd5c\uc2e0 \ub9b4\ub9ac\uc2a4\ub97c \ud655\uc778\ud560 \uc218 \uc5c6\ub2e4 \u0028\ub124\ud2b8\uc6cc\ud06c, GitHub API \ud55c\ub3c4, \ub610\ub294 \uc800\uc7a5\uc18c\uc5d0 \uc811\uadfc\ud560 \uc218 \uc5c6\uc74c \u2014 \ube44\uacf5\uac1c \uc800\uc7a5\uc18c\ub294 \uc775\uba85 \uc694\uccad\uc5d0 404 \ub97c \uc900\ub2e4\u0029.')
+$(T '  \ubc84\uc804\uc744 \uc9c0\uc815\ud558\uba74 \uc774 \uc870\ud68c\ub97c \uac74\ub108\ub6f4\ub2e4:')
     `$env:AIDLC_VERSION='1.11.0'; irm <install.ps1 URL> | iex
 "@
   }
@@ -97,7 +107,7 @@ if ($env:AIDLC_VERSION) {
 $ver = $tag -replace '^v', ''
 $asset = "aidlc-dashboard-$ver.zip"
 $url = "https://github.com/$repo/releases/download/$tag/$asset"
-Say "▸ $tag ($asset)"
+Say "$(T '\u25b8 ')$tag ($asset)"
 
 # ---- download ---------------------------------------------------------------
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
@@ -107,34 +117,34 @@ try {
   try {
     Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
   } catch {
-    Die "내려받기 실패: $url — 버전이 없거나 저장소에 접근할 수 없다 ($_)"
+    Die "$(T '\ub0b4\ub824\ubc1b\uae30 \uc2e4\ud328: ')$url$(T ' \u2014 \ubc84\uc804\uc774 \uc5c6\uac70\ub098 \uc800\uc7a5\uc18c\uc5d0 \uc811\uadfc\ud560 \uc218 \uc5c6\ub2e4 \u0028')$_)"
   }
   if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
-    Die "내려받은 파일이 비어 있다: $url"
+    Die "$(T '\ub0b4\ub824\ubc1b\uc740 \ud30c\uc77c\uc774 \ube44\uc5b4 \uc788\ub2e4: ')$url"
   }
 
   $x = Join-Path $tmp 'x'
   try {
     Expand-Archive -LiteralPath $zip -DestinationPath $x -Force
   } catch {
-    Die "압축을 풀 수 없다 ($asset): $_"
+    Die "$(T '\uc555\ucd95\uc744 \ud480 \uc218 \uc5c6\ub2e4 \u0028')$asset): $_"
   }
 
   # The archive carries one top-level dir. Verify the shape rather than trusting
   # it: a wrong layout should fail here, not halfway through the swap below.
   $src = Join-Path $x 'aidlc-dashboard'
   if (-not (Test-Path (Join-Path $src 'src/server.ts'))) {
-    Die '아카이브 구조가 예상과 다르다 (src/server.ts 없음).'
+    Die (T '\uc544\uce74\uc774\ube0c \uad6c\uc870\uac00 \uc608\uc0c1\uacfc \ub2e4\ub974\ub2e4 (src/server.ts \uc5c6\uc74c).')
   }
   if (-not (Test-Path (Join-Path $src 'start.cmd'))) {
-    Die '아카이브 구조가 예상과 다르다 (start.cmd 없음).'
+    Die (T '\uc544\uce74\uc774\ube0c \uad6c\uc870\uac00 \uc608\uc0c1\uacfc \ub2e4\ub974\ub2e4 (start.cmd \uc5c6\uc74c).')
   }
 
   # ---- install --------------------------------------------------------------
   # Swap, not overwrite: the new tree is complete before it is put in place, so a
   # failure above leaves the existing install untouched.
   #
-  # `data\` never passes through $tmp — the same defect install.sh had, reproduced
+  # `data\` never passes through $tmp -- the same defect install.sh had, reproduced
   # there: it moved into the new tree first, the next move failed, and `finally`
   # deleted $tmp with the credit history in it. Old tree aside, new tree in place,
   # THEN `data\` crosses; every failure leaves it on disk and says where.
@@ -147,7 +157,7 @@ try {
     try {
       Move-Item -LiteralPath $dir -Destination $old
     } catch {
-      Die "기존 설치를 옮길 수 없다: $dir — 아무것도 바꾸지 않았다. ($_)"
+      Die "$(T '\uae30\uc874 \uc124\uce58\ub97c \uc62e\uae38 \uc218 \uc5c6\ub2e4: ')$dir$(T ' \u2014 \uc544\ubb34\uac83\ub3c4 \ubc14\uafb8\uc9c0 \uc54a\uc558\ub2e4. \u0028')$_)"
     }
     try {
       Move-Item -LiteralPath $src -Destination $dir
@@ -155,24 +165,24 @@ try {
       try {
         Move-Item -LiteralPath $old -Destination $dir
       } catch {
-        Die "새 설치를 놓지 못했고 되돌리지도 못했다 — 기존 설치는 $old 에 그대로 있다. ($_)"
+        Die "$(T '\uc0c8 \uc124\uce58\ub97c \ub193\uc9c0 \ubabb\ud588\uace0 \ub418\ub3cc\ub9ac\uc9c0\ub3c4 \ubabb\ud588\ub2e4 \u2014 \uae30\uc874 \uc124\uce58\ub294 ')$old$(T ' \uc5d0 \uadf8\ub300\ub85c \uc788\ub2e4. \u0028')$_)"
       }
-      Die "새 설치를 놓을 수 없다: $dir — 기존 설치를 되돌렸다. ($_)"
+      Die "$(T '\uc0c8 \uc124\uce58\ub97c \ub193\uc744 \uc218 \uc5c6\ub2e4: ')$dir$(T ' \u2014 \uae30\uc874 \uc124\uce58\ub97c \ub418\ub3cc\ub838\ub2e4. \u0028')$_)"
     }
     $data = Join-Path $old 'data'
     if (Test-Path $data) {
-      Say '▸ 기존 data\ 보존 (수집한 크레딧 이력)'
+      Say (T '\u25b8 \uae30\uc874 data\\ \ubcf4\uc874 (\uc218\uc9d1\ud55c \ud06c\ub808\ub527 \uc774\ub825)')
       try {
         Move-Item -LiteralPath $data -Destination (Join-Path $dir 'data')
       } catch {
-        Die "data\ 를 옮기지 못했다 — 수집한 이력은 $data 에 그대로 있다. 직접 $(Join-Path $dir 'data') 로 옮길 것. ($_)"
+        Die "$(T 'data\\ \ub97c \uc62e\uae30\uc9c0 \ubabb\ud588\ub2e4 \u2014 \uc218\uc9d1\ud55c \uc774\ub825\uc740 ')$data$(T ' \uc5d0 \uadf8\ub300\ub85c \uc788\ub2e4. \uc9c1\uc811 ')$(Join-Path $dir 'data')$(T ' \ub85c \uc62e\uae38 \uac83. \u0028')$_)"
       }
     }
     Remove-Item -LiteralPath $old -Recurse -Force
-    Say "▸ 갱신: $dir"
+    Say "$(T '\u25b8 \uac31\uc2e0: ')$dir"
   } else {
     Move-Item -LiteralPath $src -Destination $dir
-    Say "▸ 설치: $dir"
+    Say "$(T '\u25b8 \uc124\uce58: ')$dir"
   }
 } finally {
   Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -189,17 +199,17 @@ function Find-Bun {
   return $null
 }
 
-# package.json's `engines.bun` floor — src/test/bun-floor.test.ts pins this copy to it.
+# package.json's `engines.bun` floor -- src/test/bun-floor.test.ts pins this copy to it.
 $minBun = [version]'1.4.0'
 
 # $true = at least $minBun, $false = older, $null = not a version. Only the leading
 # X.Y.Z counts, so a canary of a later release (`1.4.3-canary.1+abc`) reads as that
-# release — but a prerelease of exactly $minBun (`1.4.0-canary.1`) is below it, as
+# release -- but a prerelease of exactly $minBun (`1.4.0-canary.1`) is below it, as
 # semver orders it. The same rule as start.sh / install.sh / src/version.ts.
 function Test-BunVersion([string]$v) {
   if (-not ($v -match '^v?(\d+)\.(\d+)\.(\d+)(-)?')) { return $null }
   $pre = [bool]$Matches[4]
-  # [version] throws on a component past Int32 — that is "not a version", not a crash.
+  # [version] throws on a component past Int32 -- that is "not a version", not a crash.
   try { $have = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])" } catch { return $null }
   if ($have -ne $minBun) { return ($have -gt $minBun) }
   return (-not $pre)
@@ -207,8 +217,8 @@ function Test-BunVersion([string]$v) {
 
 # Prints the version line and returns the version when it is too old (else $null):
 # start.ps1 refuses to run on it, so the closing message has to say so. Returned
-# rather than assigned to an outer variable — under `irm | iex` there is no script
-# scope of our own to assign into. Not upgraded here — that is the user's bun,
+# rather than assigned to an outer variable -- under `irm | iex` there is no script
+# scope of our own to assign into. Not upgraded here -- that is the user's bun,
 # possibly shared with other projects.
 function Report-Bun {
   # A --version that fails is "unknown", whatever it printed.
@@ -217,14 +227,14 @@ function Report-Bun {
     $out = @(& $bun --version)
     if ($LASTEXITCODE -eq 0 -and $out.Count -gt 0) { $v = ([string]$out[0]).Trim() }
   } catch { }
-  Say "▸ bun $(if ($v) { $v } else { '?' }) ($bun)"
+  Say "$(T '\u25b8 bun ')$(if ($v) { $v } else { '?' }) ($bun)"
   $ok = Test-BunVersion $v
   if ($ok -eq $false) {
-    Say "  ⚠ bun $v 은 너무 오래됐다 — $minBun 이상이 필요하다. 업그레이드: & '$bun' upgrade (scoop: scoop update bun, winget: winget upgrade Oven-sh.Bun)"
+    Say "$(T '  \u26a0 bun ')$v$(T ' \uc740 \ub108\ubb34 \uc624\ub798\ub410\ub2e4 \u2014 ')$minBun$(T ' \uc774\uc0c1\uc774 \ud544\uc694\ud558\ub2e4. \uc5c5\uadf8\ub808\uc774\ub4dc: & ''')$bun' upgrade (scoop: scoop update bun, winget: winget upgrade Oven-sh.Bun)"
     return $v
   }
   if ($null -eq $ok) {
-    Say "  ⚠ bun 버전을 읽지 못했다 — $minBun 이상인지 확인하지 못했다."
+    Say "$(T '  \u26a0 bun \ubc84\uc804\uc744 \uc77d\uc9c0 \ubabb\ud588\ub2e4 \u2014 ')$minBun$(T ' \uc774\uc0c1\uc778\uc9c0 \ud655\uc778\ud558\uc9c0 \ubabb\ud588\ub2e4.')"
   }
   return $null
 }
@@ -235,26 +245,26 @@ $bun = Find-Bun
 if ($bun) {
   $bunOld = Report-Bun
 } elseif ($env:AIDLC_NO_BUN -eq '1') {
-  Say '▸ bun 이 없다 — AIDLC_NO_BUN=1 이라 설치를 건너뛴다.'
-  Say '  직접 설치: irm bun.sh/install.ps1 | iex'
+  Say (T '\u25b8 bun \uc774 \uc5c6\ub2e4 \u2014 AIDLC_NO_BUN=1 \uc774\ub77c \uc124\uce58\ub97c \uac74\ub108\ub6f4\ub2e4.')
+  Say (T '  \uc9c1\uc811 \uc124\uce58: irm bun.sh/install.ps1 | iex')
 } else {
   # Said out loud before doing it: this fetches and runs a THIRD-PARTY installer,
   # which is not something to slip in silently even inside an `irm | iex`.
-  Say '▸ bun 이 없다. 공식 설치 스크립트를 실행한다 (https://bun.sh/install.ps1)'
-  Say '  건너뛰려면 $env:AIDLC_NO_BUN=1 로 다시 실행할 것.'
+  Say (T '\u25b8 bun \uc774 \uc5c6\ub2e4. \uacf5\uc2dd \uc124\uce58 \uc2a4\ud06c\ub9bd\ud2b8\ub97c \uc2e4\ud589\ud55c\ub2e4 (https://bun.sh/install.ps1)')
+  Say (T '  \uac74\ub108\ub6f0\ub824\uba74 $env:AIDLC_NO_BUN=1 \ub85c \ub2e4\uc2dc \uc2e4\ud589\ud560 \uac83.')
   try {
     Invoke-RestMethod -UseBasicParsing -Uri 'https://bun.sh/install.ps1' | Invoke-Expression
   } catch {
-    Die "bun 설치 실패: $_  직접 설치 후 다시 실행할 것."
+    Die "$(T 'bun \uc124\uce58 \uc2e4\ud328: ')$_$(T '  \uc9c1\uc811 \uc124\uce58 \ud6c4 \ub2e4\uc2dc \uc2e4\ud589\ud560 \uac83.')"
   }
   $bun = Find-Bun
-  if (-not $bun) { Die 'bun 을 설치했지만 찾을 수 없다. 터미널을 새로 열고 다시 실행할 것.' }
+  if (-not $bun) { Die (T 'bun \uc744 \uc124\uce58\ud588\uc9c0\ub9cc \ucc3e\uc744 \uc218 \uc5c6\ub2e4. \ud130\ubbf8\ub110\uc744 \uc0c8\ub85c \uc5f4\uace0 \ub2e4\uc2dc \uc2e4\ud589\ud560 \uac83.') }
   $bunOld = Report-Bun
 }
 
 # ---- launcher ---------------------------------------------------------------
 # A .cmd SHIM calling start.cmd by absolute path. start.cmd does `cd /d "%~dp0"`,
-# so it lands in the install dir no matter where the shim sits — the same reason
+# so it lands in the install dir no matter where the shim sits -- the same reason
 # install.sh writes a wrapper instead of a symlink.
 #
 # `$run` is what the closing hint tells the user to type, decided HERE: printing
@@ -267,29 +277,29 @@ if ($env:AIDLC_NO_BIN -ne '1') {
     # ASCII: a .cmd read by cmd.exe should not carry a UTF-8 BOM.
     $shim = "@echo off`r`n`"$(Join-Path $dir 'start.cmd')`" %*`r`n"
     [IO.File]::WriteAllText($bin, $shim, [Text.Encoding]::ASCII)
-    Say "▸ 실행기: $bin"
+    Say "$(T '\u25b8 \uc2e4\ud589\uae30: ')$bin"
     $onPath = ($env:PATH -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ieq $binDir.TrimEnd('\')) })
     if ($onPath) {
       $run = 'aidlc-dashboard'
     } else {
-      Say "  ⚠ $binDir 이 PATH 에 없다. 셸 설정에 추가하면 이름만으로 실행할 수 있다."
+      Say "$(T '  \u26a0 ')$binDir$(T ' \uc774 PATH \uc5d0 \uc5c6\ub2e4. \uc178 \uc124\uc815\uc5d0 \ucd94\uac00\ud558\uba74 \uc774\ub984\ub9cc\uc73c\ub85c \uc2e4\ud589\ud560 \uc218 \uc788\ub2e4.')"
     }
   } catch {
-    Say "▸ $binDir 에 실행기를 만들 수 없어 건너뛴다: $_"
+    Say "$(T '\u25b8 ')$binDir$(T ' \uc5d0 \uc2e4\ud589\uae30\ub97c \ub9cc\ub4e4 \uc218 \uc5c6\uc5b4 \uac74\ub108\ub6f4\ub2e4: ')$_"
   }
 }
 
 # ---- done -------------------------------------------------------------------
 Say ''
-Say "설치 완료 — v$ver"
+Say "$(T '\uc124\uce58 \uc644\ub8cc \u2014 v')$ver"
 if ($bunOld) {
   # Repeated at the end because it is the one thing standing between this install and
   # a working launch: start.ps1 stops on this bun.
   Say ''
-  Say "  ⚠ 먼저 bun 을 $minBun 이상으로 올릴 것 (지금 $bunOld): & '$bun' upgrade (scoop: scoop update bun, winget: winget upgrade Oven-sh.Bun)"
+  Say "$(T '  \u26a0 \uba3c\uc800 bun \uc744 ')$minBun$(T ' \uc774\uc0c1\uc73c\ub85c \uc62c\ub9b4 \uac83 \u0028\uc9c0\uae08 ')$bunOld): & '$bun' upgrade (scoop: scoop update bun, winget: winget upgrade Oven-sh.Bun)"
 }
 Say ''
 Say "  $run"
 Say "  $run C:\path\to\workspace"
 Say ''
-Say '  읽기 전용 — 이 대시보드는 워크스페이스에 쓰지 않는다.'
+Say (T '  \uc77d\uae30 \uc804\uc6a9 \u2014 \uc774 \ub300\uc2dc\ubcf4\ub4dc\ub294 \uc6cc\ud06c\uc2a4\ud398\uc774\uc2a4\uc5d0 \uc4f0\uc9c0 \uc54a\ub294\ub2e4.')
