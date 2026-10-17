@@ -98,6 +98,20 @@ bun run src/server.ts --root ~/path/to/ws    # 바로 그 워크스페이스로 
 # → http://localhost:4321
 ```
 
+⚠️**Windows 에서 1.11.3 이하일 때 git 으로 클론한 사본은 한 번 다시 체크아웃한다.** 저장소는 이제
+`.gitattributes` 로 줄바꿈을 고정한다(`.cmd`·`.ps1` 만 CRLF, 나머지 LF). 하지만 Git for Windows 기본값
+(`core.autocrlf=true`)으로 그 전에 받은 사본은 pull 해도 바뀌지 않은 파일이 CRLF 로 남는다. 그러면
+`bun run lint` 가 거의 모든 파일에서 실패한다. `git status` 는 깨끗하게 나오고 `git add --renormalize .`
+로도 바뀌지 않는다. 커밋하지 않은 변경을 커밋하거나 stash 한 뒤 실행한다:
+
+```powershell
+git rm -q --cached -r .
+git reset --hard
+```
+
+`reset --hard` 는 커밋하지 않은 변경을 버린다. 무시되는 `node_modules`·`data/` 는 그대로 남는다. 릴리스
+zip 과 `irm | iex` 설치는 git 을 쓰지 않으므로 해당 없다.
+
 ## 플래그
 
 | 플래그 | 뜻 | 기본값 |
