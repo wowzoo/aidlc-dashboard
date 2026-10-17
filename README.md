@@ -186,10 +186,12 @@ bun run src/server.ts --root ~/path/to/ws    # 바로 그 워크스페이스로 
 - **Claude 토큰 패널은 워크스페이스 경로로 트랜스크립트를 찾는다.** 즉 cwd 가 그 워크스페이스인
   상태로 Claude Code 를 실행했을 때만 잡힌다. 다른 디렉터리에서 실행했거나 워크스페이스를
   옮긴 뒤라면 `데이터 없음` 이 된다. 이때는 찾으려던 경로를 화면에 밝힌다.
-- ⚠️**Windows 쪽(`start.cmd`·`start.ps1`·`install.ps1`)은 Windows 에서 실행 검증하지 못했다.**
-  `install.ps1` 은 PowerShell 7 로 문법을 검사하고 macOS 에서 실제로 돌려 최신 릴리스 해석·내려받기
-  ·압축 해제·`data/` 보존·교체·404 실패까지 확인했지만, `cmd.exe` shim 과 실행 정책은 Windows 에서만
-  확인할 수 있다. macOS 런처는 bash 3.2 더블클릭 경로까지 확인했다.
+- **Windows 쪽(`start.cmd`·`start.ps1`·`install.ps1`)은 Windows Server 2025(Windows 11 24H2 와 같은
+  빌드 26100, Windows PowerShell 5.1, bun 1.4.2)에서 실행 검증했다**: `irm | iex` 설치·재설치(`data/`
+  보존)·사용자 PATH 등록과 새 터미널에서의 `aidlc-dashboard` 실행, `start.cmd` 의 최초 `bun install`·
+  인자 전달(공백·한글 경로, `--port`)·브라우저 자동 열기, `Restricted` 실행 정책에서의 `start.cmd` 우회,
+  bun 이 없을 때의 안내와 종료 코드. PowerShell 7(`pwsh`) 경로와 대화형 콘솔에서의 한글 출력은 따로
+  확인하지 않았다. macOS 런처는 bash 3.2 더블클릭 경로까지 확인했다.
 
 ---
 
