@@ -276,9 +276,24 @@ const HEAD_BYTES = 16 * 1024;
  * 규칙은 실측으로 확인했다(`/`·`.`·`_` → `-`, 대문자 보존):
  *   /Users/me/Development/ai-dlc/_accounts/AcmeCorp/x
  *   → -Users-me-Development-ai-dlc--accounts-AcmeCorp-x
+ *
+ * Windows 에서는 `\`·`:` 도 `-` 가 된다(실측, Windows 의 `~/.claude/projects`):
+ *   C:\work → C--work
+ * 이 둘을 빼면 slug 에 `:`·`\` 가 남아 1차 탐색이 항상 빗나갔다. 2차(cwd) 탐색이 받아 주긴
+ * 하지만 그 경로는 프로젝트 디렉터리 전부를 훑는 비싼 길이다.
  */
 export function projectSlug(root: string): string {
-  return root.replace(/[/._]/g, "-");
+  return root.replace(/[/\\:._]/g, "-");
+}
+
+/**
+ * 트랜스크립트가 기록한 `cwd` 가 `root` 와 같은 디렉터리인가. Windows 는 경로의 대소문자를
+ * 가리지 않고 드라이브 문자도 `c:`/`C:` 로 섞여 기록될 수 있어 대소문자 무시로 비교한다.
+ */
+function sameDir(cwd: string | undefined, root: string): boolean {
+  if (cwd === undefined) return false;
+  if (process.platform !== "win32") return cwd === root;
+  return path.resolve(cwd).toLowerCase() === path.resolve(root).toLowerCase();
 }
 
 /**
@@ -456,7 +471,7 @@ function scanForCwdMatch(base: string, root: string): string | undefined {
         // 건너뛴다.
       }
     }
-    if (firstCwd(newest) === root) return dir;
+    if (sameDir(firstCwd(newest), root)) return dir;
   }
   return undefined;
 }
