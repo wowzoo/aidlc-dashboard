@@ -1542,6 +1542,20 @@ describe("sensor detail", () => {
     expect(b.outputPath).toBe("/demo/src/x.ts");
   });
 
+  test("a CRLF file still yields its findings block", () => {
+    // Git for Windows' default autocrlf checks a workspace out with CRLF; the fence
+    // then read "```json\r\n" and every failure came back with no errors.
+    const lf = `**Fire id**: eeee5555\n\n## Findings\n\n\`\`\`json\n{ "errors": [{ "file": "a.ts", "line": 7, "message": "x" }], "findings_count": 1 }\n\`\`\`\n`;
+    const b = parseSensorDetail(
+      lf.replace(/\n/g, "\r\n"),
+      "type-check-eeee5555.md",
+      "code-generation",
+    )!;
+    expect(b.fireId).toBe("eeee5555");
+    expect(b.findingsCount).toBe(1);
+    expect(b.errors[0]?.line).toBe(7);
+  });
+
   test("upstream-coverage carries unreferenced artifacts", () => {
     const b = parseSensorDetail(
       `**Fire id**: cccc3333\n\n## Findings\n\n\`\`\`json\n{ "unreferenced": ["technology-stack"], "findings_count": 1 }\n\`\`\`\n`,

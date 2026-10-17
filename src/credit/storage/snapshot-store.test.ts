@@ -24,7 +24,14 @@ const tmpDirs: string[] = [];
 const openStores: SnapshotStore[] = [];
 
 afterEach(() => {
-  for (const store of openStores.splice(0)) store.close();
+  // 하나가 던져도 나머지를 닫고 디렉터리를 지운다 — 남은 핸들이 곧 EBUSY 다.
+  for (const store of openStores.splice(0)) {
+    try {
+      store.close();
+    } catch {
+      // 이미 닫혔거나 닫을 수 없는 핸들. 정리는 계속한다.
+    }
+  }
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -316,7 +323,6 @@ describe("SnapshotStore 방어적 역직렬화", () => {
     const reopened = fileStore(dbPath);
     reopened.init();
     expect(reopened.readAll()).toHaveLength(1);
-    reopened.close();
   });
 
   test("case5c: latest()를 거듭 불러도 같은 행을 돌려준다(한 행씩 내려가는 조회의 회귀 방어)", () => {

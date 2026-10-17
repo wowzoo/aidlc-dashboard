@@ -141,6 +141,12 @@ describe("projectSlug", () => {
     );
     expect(projectSlug("/a/.hidden/b")).toBe("-a--hidden-b");
   });
+
+  test("Windows 경로의 `\\`·`:` 도 `-` 로 바꾼다", () => {
+    // 실측: Windows 의 `~/.claude/projects` 에 `C:\aidlc-dashboard` 가 이 이름으로 있다.
+    expect(projectSlug("C:\\aidlc-dashboard")).toBe("C--aidlc-dashboard");
+    expect(projectSlug("C:\\Users\\me\\_ws")).toBe("C--Users-me--ws");
+  });
 });
 
 describe("findTranscriptDir", () => {
