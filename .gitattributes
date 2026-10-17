@@ -1,9 +1,18 @@
+# Everything is LF in the working tree too, whatever core.autocrlf says. Git for
+# Windows installs with autocrlf=true, and a CRLF checkout broke three things there
+# (measured 2026-10-16): Biome's formatter (LF) failed every source file, start.sh /
+# install.sh got `\r` in their shebang and function bodies, and the fixtures the
+# tests patch with "\n"-anchored edits stopped matching. The rules below override this
+# one for the files that need CRLF.
+* text=auto eol=lf
+
 # Windows launchers MUST keep CRLF. cmd.exe mis-parses a LF-only .cmd (a trailing
 # LF can swallow the last line, and `goto`/`if` blocks break), so pin them rather
 # than leaving it to the checkout's core.autocrlf.
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
 
-# The macOS/Linux launcher must stay LF — CRLF would make the shebang line read
+# The macOS/Linux launchers must stay LF — CRLF would make the shebang line read
 # as `#!/usr/bin/env bash\r` and fail with "bad interpreter".
 *.command text eol=lf
+*.sh text eol=lf
