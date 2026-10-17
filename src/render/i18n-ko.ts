@@ -1027,7 +1027,7 @@ const cards: CardStrings = {
   noDecisions: "미결 결정 없음",
   noOpenQs: "열린 질문 없음",
   noDeclared: "stage 가 선언한 미결 질문 없음",
-  notAllRead: "읽은 기록에는 없음 — 읽지 못한 곳은 미결 패널에 적혀 있습니다",
+  notAllRead: "읽은 기록에는 없음 — 일부 기록은 읽거나 해석하지 못했습니다",
   answersTab: "내 답변",
   stuckTab: "막힘",
   checksTab: "검사 실패",

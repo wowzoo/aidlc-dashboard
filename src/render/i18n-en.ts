@@ -1068,7 +1068,7 @@ const cards: CardStrings = {
   noDecisions: "No open decisions",
   noOpenQs: "No open questions",
   noDeclared: "No stage-declared open questions",
-  notAllRead: "None in what could be read — the Unresolved panel names what was not",
+  notAllRead: "None in what could be read — some records could not be read or parsed",
   answersTab: "Your answers",
   stuckTab: "Stuck",
   checksTab: "Failed checks",

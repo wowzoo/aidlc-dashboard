@@ -287,9 +287,10 @@ export function renderUnresolvedCard(m: DashboardModel, s: Strings): string {
   const questions = openQuestionRows(m);
   const declared = declaredRows(m, s);
   const head: [string, string] = [s.cards.colItemOwner, s.cards.colAge];
-  // This card is on the default screen and the full panel is a closed drill-down, so a
-  // tab whose ledger was not wholly read cannot print a plain count or "none" here: the
-  // count is a floor and the empty text says what it is of (the panel names the gaps).
+  // This card is the only surface of these ledgers on the page (the full deferrals box
+  // is unmounted, SHOW_DEFERRALS), so a tab whose ledger was not wholly read cannot
+  // print a plain count or "none": the count is a floor and the empty text says the read
+  // was partial. It names no panel — there is none left to name the gaps.
   const gaps = {
     decisions: m.deferrals.unreadable.length > 0 || m.deferrals.unreadSections.length > 0,
     questions: m.diaries.unreadable.length > 0,
