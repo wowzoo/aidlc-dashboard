@@ -175,8 +175,12 @@ export function parseSensorDetail(
   fileName: string,
   stage: string,
 ): DetailBody | undefined {
+  // Normalized once for both the header and the findings fence: a workspace checked
+  // out with CRLF (Git for Windows' default autocrlf) held "```json\r\n", which the
+  // LF-only fence missed, and every failure read with no errors.
+  const body = text.replace(/\r\n/g, "\n");
   const fields: Record<string, string> = {};
-  for (const line of text.replace(/\r\n/g, "\n").split("\n")) {
+  for (const line of body.split("\n")) {
     const m = FIELD_RE.exec(line);
     if (m) fields[m[1]!] = (m[2] ?? "").trim();
     // Header fields all precede the findings block; stop before parsing JSON.
@@ -194,7 +198,7 @@ export function parseSensorDetail(
   const unreferenced: string[] = [];
   let findingsCount: number | undefined;
 
-  const fence = /```json\n([\s\S]*?)\n```/.exec(text);
+  const fence = /```json\n([\s\S]*?)\n```/.exec(body);
   if (fence) {
     try {
       const j = JSON.parse(fence[1] ?? "") as Record<string, unknown>;

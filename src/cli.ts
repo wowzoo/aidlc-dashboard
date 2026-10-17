@@ -20,6 +20,10 @@ export function expandHome(p: string): string {
   const trimmed = p.trim();
   if (trimmed === "~") return os.homedir();
   if (trimmed.startsWith("~/")) return path.resolve(os.homedir(), trimmed.slice(2));
+  // Windows users type `~\Documents`; elsewhere `\` is an ordinary filename character.
+  if (process.platform === "win32" && trimmed.startsWith("~\\")) {
+    return path.resolve(os.homedir(), trimmed.slice(2));
+  }
   return path.resolve(trimmed);
 }
 

@@ -151,11 +151,19 @@ for ($i = 0; $i -lt $serverArgs.Count; $i++) {
     $port = $serverArgs[$i + 1]
   }
 }
-$url = "http://localhost:$port"
+$url = "http://127.0.0.1:$port"
 
 # ---- open the browser once the port answers ---------------------------------
 # A background job, because the server has to start before there is anything to
 # open. Polling beats a fixed sleep -- a cold start is fast, a big audit log is not.
+#
+# 127.0.0.1, NOT localhost -- for the probe and the browser alike. The server binds
+# 127.0.0.1 only, and `localhost` resolves to ::1 first; Windows answers a refused
+# connect after ~2s of SYN retries, so under Windows PowerShell 5.1 every 1s probe of
+# localhost timed out before it fell back to IPv4 and the browser never opened
+# (measured 2026-10-16: 40 of 40 probes failed, while 127.0.0.1 answered on the
+# first). One address for both also means the browser lands on the socket the probe
+# saw, not on whatever else may hold [::1]:$port.
 $opener = Start-Job -ScriptBlock {
   param($u)
   for ($n = 0; $n -lt 40; $n++) {   # ~10s ceiling
@@ -178,3 +186,9 @@ try {
   # Do not leave the poller behind if the server exits early.
   Remove-Job -Job $opener -Force -ErrorAction SilentlyContinue
 }
+
+# Pass the server's exit status on. `powershell -File` ends with 0 when the script
+# runs off its end, whatever the last native command returned, so without this a
+# server that died (port in use, bad --root) left start.cmd reporting success
+# (measured 2026-10-17).
+exit $LASTEXITCODE

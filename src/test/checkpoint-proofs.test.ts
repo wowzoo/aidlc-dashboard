@@ -319,12 +319,17 @@ describe("checkpoint proofs — Codex review", () => {
     ).toEqual([["unreadable", "hardlink", true]]);
   });
 
-  test("a checkpoint dir that is a file is an error to the engine, not an absence", () => {
-    const rec = fs.mkdtempSync(path.join(os.tmpdir(), "ckpt-notdir-"));
-    fs.writeFileSync(path.join(rec, ".aidlc-construction-checkpoints"), "x");
-    const notes = readCheckpointProofs(rec, ["PU-A"], undefined, "PU-A");
-    expect(notes.map((n) => [n.state, n.state === "unreadable" ? n.cause : null])).toEqual([
-      ["unreadable", "read-failed"],
-    ]);
-  });
+  // POSIX only. The engine's error here is ENOTDIR; Windows reports a path through a file
+  // as ENOENT, which `readProof` itself takes for "no proof" — so we read absence there too.
+  test.skipIf(process.platform === "win32")(
+    "a checkpoint dir that is a file is an error to the engine, not an absence",
+    () => {
+      const rec = fs.mkdtempSync(path.join(os.tmpdir(), "ckpt-notdir-"));
+      fs.writeFileSync(path.join(rec, ".aidlc-construction-checkpoints"), "x");
+      const notes = readCheckpointProofs(rec, ["PU-A"], undefined, "PU-A");
+      expect(notes.map((n) => [n.state, n.state === "unreadable" ? n.cause : null])).toEqual([
+        ["unreadable", "read-failed"],
+      ]);
+    },
+  );
 });

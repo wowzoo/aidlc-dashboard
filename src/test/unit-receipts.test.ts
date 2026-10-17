@@ -565,7 +565,7 @@ describe("team ownership, end to end", () => {
         dagPath,
         fs
           .readFileSync(dagPath, "utf-8")
-          .replace(/```yaml\n[\s\S]*?```/, "```yaml\nunits: [unclosed\n```"),
+          .replace(/```yaml\r?\n[\s\S]*?```/, "```yaml\nunits: [unclosed\n```"),
       );
       const m = assemble(root);
       expect(m.matrix).toBeUndefined();

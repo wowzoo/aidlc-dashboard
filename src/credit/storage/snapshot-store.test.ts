@@ -17,8 +17,21 @@ import { SnapshotStore, isValidSnapshot } from "./snapshot-store";
 
 /** 각 테스트가 만든 임시 디렉터리 정리 목록. */
 const tmpDirs: string[] = [];
+/**
+ * 파일 DB 를 연 스토어 목록. 디렉터리를 지우기 전에 닫는다 — Windows 는 열린 파일을 지우지
+ * 못해 `rmSync` 가 EBUSY 로 던졌다(POSIX 는 열린 파일도 unlink 한다).
+ */
+const openStores: SnapshotStore[] = [];
 
 afterEach(() => {
+  // 하나가 던져도 나머지를 닫고 디렉터리를 지운다 — 남은 핸들이 곧 EBUSY 다.
+  for (const store of openStores.splice(0)) {
+    try {
+      store.close();
+    } catch {
+      // 이미 닫혔거나 닫을 수 없는 핸들. 정리는 계속한다.
+    }
+  }
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -29,6 +42,13 @@ function tmpDbPath(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "u1-snap-"));
   tmpDirs.push(dir);
   return path.join(dir, "usage.db");
+}
+
+/** 파일 DB 스토어를 연다. afterEach 가 닫는다. */
+function fileStore(dbPath: string): SnapshotStore {
+  const store = new SnapshotStore(dbPath);
+  openStores.push(store);
+  return store;
 }
 
 /** init 까지 마친 in-memory 스토어를 만든다. */
@@ -132,13 +152,13 @@ describe("SnapshotStore 정렬·연속성", () => {
   test("case8: 재시작 연속성 — 같은 파일 재오픈 후 이력 유지·maxSequence 시드 정확", () => {
     const dbPath = tmpDbPath();
 
-    const first = new SnapshotStore(dbPath);
+    const first = fileStore(dbPath);
     first.init();
     first.append(success(1, "2026-08-16T10:00:00.000Z"));
     first.append(failure(2, "2026-08-16T10:05:00.000Z"));
 
     // 새 커넥션으로 재오픈(서버 재시작 시뮬레이션).
-    const second = new SnapshotStore(dbPath);
+    const second = fileStore(dbPath);
     second.init();
     expect(second.readAll()).toHaveLength(2);
     expect(second.maxSequence()).toBe(2);
@@ -171,7 +191,7 @@ describe("SnapshotStore 조회 계약", () => {
 describe("SnapshotStore 방어적 역직렬화", () => {
   test("case5: 손상 레코드 방어 skip — 잘못된 JSON·필수 메타 결손 행을 직접 INSERT해도 정상 행만, 무예외", () => {
     const dbPath = tmpDbPath();
-    const store = new SnapshotStore(dbPath);
+    const store = fileStore(dbPath);
     store.init();
     store.append(success(1, "2026-08-16T10:00:00.000Z"));
     store.append(success(4, "2026-08-16T13:00:00.000Z"));
@@ -206,7 +226,7 @@ describe("SnapshotStore 방어적 역직렬화", () => {
     // renderCredit 의 fmtNumber 에서 `undefined.toLocaleString()` 으로 페이지 전체가
     // 500 이 됐다(NFR1.5 위반). 저장 계층에서 계약을 세우는 것이 그 구멍의 수선이다.
     const dbPath = tmpDbPath();
-    const store = new SnapshotStore(dbPath);
+    const store = fileStore(dbPath);
     store.init();
     store.append(success(1, "2026-08-16T10:00:00.000Z"));
 
@@ -265,7 +285,7 @@ describe("SnapshotStore 방어적 역직렬화", () => {
 
   test("case5b: latest()도 손상 최상단 행을 skip하고 다음 유효 행 반환, 무예외", () => {
     const dbPath = tmpDbPath();
-    const store = new SnapshotStore(dbPath);
+    const store = fileStore(dbPath);
     store.init();
     store.append(success(1, "2026-08-16T10:00:00.000Z"));
 
@@ -284,7 +304,7 @@ describe("SnapshotStore 방어적 역직렬화", () => {
 
   test("case5d: 파일 DB는 WAL 로 열리고 close() 가 WAL 을 본 파일로 접는다", () => {
     const dbPath = tmpDbPath();
-    const store = new SnapshotStore(dbPath);
+    const store = fileStore(dbPath);
     store.init();
     store.append(success(1, "2026-08-16T10:00:00.000Z"));
 
@@ -300,10 +320,9 @@ describe("SnapshotStore 방어적 역직렬화", () => {
       expect(fs.statSync(`${dbPath}-wal`).size).toBe(0);
     }
     // 그래서 닫은 뒤 재오픈으로 데이터가 읽힌다(BR1.3 재시작 연속성).
-    const reopened = new SnapshotStore(dbPath);
+    const reopened = fileStore(dbPath);
     reopened.init();
     expect(reopened.readAll()).toHaveLength(1);
-    reopened.close();
   });
 
   test("case5c: latest()를 거듭 불러도 같은 행을 돌려준다(한 행씩 내려가는 조회의 회귀 방어)", () => {

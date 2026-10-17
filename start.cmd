@@ -25,4 +25,8 @@ if errorlevel 1 (
   pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" %*
 )
 
-endlocal
+REM Hand start.ps1's exit status back to the caller: a bare `endlocal` at the end
+REM returned 0 even when start.ps1 stopped with 1 (bun missing or too old -- seen on
+REM Windows 2026-10-16). %ERRORLEVEL% is expanded when this line is parsed, i.e.
+REM before endlocal runs.
+endlocal & exit /b %ERRORLEVEL%
