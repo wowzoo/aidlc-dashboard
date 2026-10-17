@@ -232,7 +232,7 @@ describe("the run position checks the unit cache against the resolved roster", (
         fs
           .readFileSync(sp, "utf-8")
           .replace(
-            "## Runtime State\n",
+            /## Runtime State\r?\n/,
             `## Runtime State\n- **Unit Stage**: code-generation\n- **Active Unit**: ${unit}\n`,
           ),
       );

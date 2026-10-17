@@ -474,7 +474,10 @@ describe("render", () => {
         const dep = path.join(root, REC, "inception/units-generation/unit-of-work-dependency.md");
         if (opts.authoredDag === "drop") fs.rmSync(dep);
         if (opts.authoredDag === "malformed")
-          fs.writeFileSync(dep, fs.readFileSync(dep, "utf-8").replace(/```yaml[\s\S]*?```\n/, ""));
+          fs.writeFileSync(
+            dep,
+            fs.readFileSync(dep, "utf-8").replace(/```yaml[\s\S]*?```\r?\n/, ""),
+          );
         for (const [rel, body] of Object.entries(opts.files ?? {})) {
           fs.mkdirSync(path.dirname(path.join(root, REC, rel)), { recursive: true });
           fs.writeFileSync(path.join(root, REC, rel), body);
@@ -1950,8 +1953,11 @@ describe("cli", () => {
   test("expands a leading ~ (the picker's text field bypasses the shell)", () => {
     expect(expandHome("~")).toBe(os.homedir());
     expect(expandHome("~/Documents")).toBe(path.join(os.homedir(), "Documents"));
-    expect(expandHome("/abs/path")).toBe("/abs/path");
+    expect(expandHome("/abs/path")).toBe(path.resolve("/abs/path")); // C:\abs\path on Windows
     expect(expandHome("  ~/x  ")).toBe(path.join(os.homedir(), "x")); // trims
+    if (process.platform === "win32") {
+      expect(expandHome("~\\Documents")).toBe(path.join(os.homedir(), "Documents"));
+    }
   });
 });
 
@@ -1995,7 +2001,7 @@ describe("folder picker", () => {
     const b = browse("/definitely/not/a/real/path");
     // The scan layer names the FAILURE (dir + OS message); the sentence around it is
     // render's (`explorer.browseFailed`), which is why this is not a `.error` string.
-    expect(b.browseFailure).toMatchObject({ dir: "/definitely/not/a/real/path" });
+    expect(b.browseFailure).toMatchObject({ dir: path.resolve("/definitely/not/a/real/path") });
     expect(b.browseFailure?.message.length).toBeGreaterThan(0);
     expect(b.dir).toBe(os.homedir()); // still renders something usable
   });
@@ -2018,14 +2024,19 @@ describe("folder picker", () => {
   test("renders the picker with select links and escapes names", () => {
     const parent = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-pick-"));
     try {
-      const hostile = path.join(parent, "we<ird&name");
+      // `<` cannot be in a Windows file name; `&` can, and still needs escaping there.
+      const [name, escaped] =
+        process.platform === "win32"
+          ? ["we&ird name", "we&amp;ird name"]
+          : ["we<ird&name", "we&lt;ird&amp;name"];
+      const hostile = path.join(parent, name);
       fs.mkdirSync(path.join(hostile, "aidlc"), { recursive: true });
       const html = renderPicker(browse(parent), false);
       expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
       expect(html).toContain("/select?dir=");
       expect(html).toContain("AI-DLC 워크스페이스");
-      expect(html).not.toContain("we<ird&name"); // raw form must not survive
-      expect(html).toContain("we&lt;ird&amp;name");
+      expect(html).not.toContain(name); // raw form must not survive
+      expect(html).toContain(escaped);
     } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }
