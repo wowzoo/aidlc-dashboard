@@ -3,8 +3,9 @@
 // One self-contained HTML document, no framework and no build step — the whole
 // dashboard is a string. Collapsible sections are native <details> and card tabs are
 // radio inputs shown by CSS, so the client-side JavaScript is only the refresh poll
-// (which restores open sections and picked tabs across the swap), opening a
-// drill-down from a card link, and the event-stream filter.
+// (which restores open sections and picked tabs across the swap), a KPI tile folding
+// and unfolding its full panel, a card link opening the panel it targets, and the
+// event-stream filter.
 //
 // Refresh model: the browser re-fetches the rendered body every `pollMs` and
 // swaps it in. Deliberately NOT a file watcher — the inspected tree is usually a
@@ -14,10 +15,10 @@
 import type { DashboardModel, Locale } from "../model/types";
 import { VERSION } from "../version";
 import { DRILL, TAB_CSS } from "./card-kit";
-import { renderCards, renderDrills, renderSources } from "./cards";
+import { kpiPanels, renderCards, renderDeferralBox, renderSources } from "./cards";
 import { esc } from "./common";
 import { type Strings, strings } from "./i18n";
-import { KPI_CSS, renderKpis } from "./kpi";
+import { KPI_CSS, KPI_MORE, renderKpis } from "./kpi";
 import { DEFAULT_LOCALE } from "./locale";
 import { renderRunLine } from "./status";
 import { warningTextIn } from "./warnings";
@@ -543,20 +544,25 @@ ${TAB_CSS}
 .mr.empty { color:var(--mute); }
 .mr-rest, .mr-note { padding:4px 8px 0; color:var(--mute); font-size:var(--fs-1); }
 
-/* Drill-downs: the full panels, one closed <details> each. */
-.drills { display:flex; flex-direction:column; gap:8px; }
-.drills-h { margin:6px 0 0; font-size:var(--fs-3); font-weight:600; color:var(--mute); }
-/* A drill-down is ONE surface. The panels inside were written as cards of their own, so
-   mounting them unchanged put a card inside a card and repeated the title the summary
-   had just given. Inside a drill they lose their chrome and become sections split by a
-   rule; the first one's h2 is the summary's own title, so it is not shown twice. */
-details.drill { border:1px solid var(--line); border-radius:var(--r-box); background:var(--card); }
-details.drill > summary { list-style:none; display:flex; align-items:center; gap:8px; margin:0;
-  padding:12px 15px; font-size:var(--fs-4); font-weight:650; color:var(--fg); }
-details.drill > summary::-webkit-details-marker { display:none; }
-details.drill > summary::before { content:'▸'; color:var(--mute); font-size:var(--fs-2); width:10px; }
-details.drill[open] > summary::before { content:'▾'; }
-details.drill[open] > summary { border-bottom:1px solid var(--line); }
+/* The KPI tiles' full panels: ONE closed <details>, the checked tile's panel shown
+   (render/kpi.ts generates the per-position rules). The panels inside were written as
+   cards of their own, so mounting them unchanged put a card inside a card and repeated
+   the title the summary had just given. Inside they lose their chrome and become
+   sections split by a rule; the first one's h2 is the summary's own title, so it is not
+   shown twice. */
+details.kpi-more { border:1px solid var(--line); border-radius:var(--r-box); background:var(--card); }
+details.kpi-more > summary { list-style:none; display:flex; align-items:center; gap:8px; margin:0;
+  padding:12px 15px; font-size:var(--fs-4); font-weight:650; color:var(--fg); cursor:pointer; }
+details.kpi-more > summary::-webkit-details-marker { display:none; }
+details.kpi-more > summary::before { content:'▸'; color:var(--mute); font-size:var(--fs-2); width:10px; }
+details.kpi-more[open] > summary::before { content:'▾'; }
+details.kpi-more[open] > summary { border-bottom:1px solid var(--line); }
+/* Two classes, so this outranks .drill-body's display below — at equal specificity the
+   later rule won and every tile's panel showed at once. */
+.kpi-more > summary > .kpi-st, .kpi-panels > .kpi-p { display:none; }
+/* The usage tile's chart above already draws this trend; the panel keeps its window
+   toggle and its text summary, not a second copy of the line. */
+.kpi-p .credit-chart { display:none; }
 .drill-body { display:flex; flex-direction:column; padding:0 15px 13px; }
 .drill-body > section.card { border:0; border-radius:0; background:none; padding:13px 0 0; overflow:visible; }
 .drill-body > section.card + section.card { border-top:1px solid var(--line); margin-top:13px; }
@@ -658,21 +664,54 @@ const SCRIPT = (pollMs: number, s: Strings) => {
     });
   }
 
-  // A card's "see all" link targets a closed <details>; an anchor alone would scroll
-  // to it without opening it.
+  // A card's "see all" link targets a panel under the KPI tiles, or something inside
+  // one (the unit matrix): an anchor alone would scroll to a closed <details> without
+  // opening it, or to a panel CSS is hiding because another tile is chosen. So pick the
+  // panel's tile — through a change event, so the poll keeps the pick — and unfold.
   function openDrill(id) {
-    var d = document.getElementById(id);
-    if (!d || d.tagName !== 'DETAILS') return false;
-    d.open = true;
-    d.scrollIntoView({ block: 'start' });
+    var el = document.getElementById(id);
+    if (!el) return false;
+    var p = el.closest && el.closest('.kpi-p');
+    if (p) {
+      var i = Array.prototype.indexOf.call(p.parentNode.children, p);
+      var r = document.getElementById('mc-kpi-' + i);
+      if (r && !r.checked) {
+        r.checked = true;
+        r.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (r) kpiLast = r.value;
+      var more = document.getElementById(${j(KPI_MORE)});
+      if (more && !more.open) more.open = true;
+    } else if (el.tagName === 'DETAILS') {
+      if (!el.open) el.open = true;
+    }
+    else return false;
+    el.scrollIntoView({ block: 'start' });
     return true;
   }
+  // A KPI tile is its panel's switch: the chosen tile folds or unfolds it, another tile
+  // is picked and unfolds it. Read off the RADIO's click, which a tile's label sends in
+  // every engine and the keyboard sends too (Space, arrows), against the last pick kept
+  // here — not off \`checked\` in the label's own handler, because whether the label
+  // checks its radio before or after that handler runs differs between engines.
+  // \`open\` is written only when it changes: happy-dom, which the tests run this in,
+  // flips an open <details> that is told to open again.
+  var kpiStart = document.querySelector('input.kpi-r:checked');
+  var kpiLast = kpiStart ? kpiStart.value : null;
+  document.addEventListener('click', function (e) {
+    var r = e.target;
+    var more = document.getElementById(${j(KPI_MORE)});
+    if (!r || !r.classList || !r.classList.contains('kpi-r') || !more) return;
+    var want = r.value === kpiLast ? !more.open : true;
+    kpiLast = r.value;
+    if (more.open !== want) more.open = want;
+  });
   document.addEventListener('click', function (e) {
     var a = e.target && e.target.closest && e.target.closest('a[data-drill]');
     if (a && openDrill(a.dataset.drill)) e.preventDefault();
   });
   // The usage panel's window toggle and its refresh redirect both land on \`?cw=\`, and
-  // that panel now sits in a closed drill-down — without this, choosing a window would
+  // that panel sits folded under the tiles — without this, choosing a window would
   // reload onto a page with the panel it just changed folded away.
   if (location.hash) openDrill(location.hash.slice(1));
   else if (/[?&]cw=/.test(location.search)) openDrill(${j(DRILL.usage)});
@@ -845,9 +884,9 @@ function warnings(m: DashboardModel, s: Strings): string {
  * own at /api/body so the poll swaps only this.
  *
  * Top to bottom: the run line (is it moving), the warnings (what this read could not
- * do — degradation stays visible above everything it degrades), the 2×2 cards (the
- * summary), the drill-downs (the full panels, closed), and the sources line (how old
- * each input is).
+ * do — degradation stays visible above everything it degrades), the KPI tiles with the
+ * full panels they open (closed), the 2×2 cards (the summary), the deferrals box when
+ * mounted, and the sources line (how old each input is).
  *
  * The unanswered asks and the deferral ledger are BOTH reachable because they answer
  * different questions from different files: a blank `[Answer]:` in `*-questions.md`
@@ -864,9 +903,9 @@ export function renderBody(m: DashboardModel, locale: Locale = DEFAULT_LOCALE): 
   };
   return `${renderRunLine(m, s)}
 ${warnings(m, s)}
-${renderKpis(m, s)}
+${keyed(renderKpis(m, s, kpiPanels(m, s)), "x")}
 ${renderCards(m, s)}
-${keyed(renderDrills(m, s), "x")}
+${renderDeferralBox(m, s)}
 ${renderSources(m, s)}`;
 }
 

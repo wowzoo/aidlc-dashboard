@@ -16,12 +16,18 @@
 
 import { esc } from "./common";
 
-/** In-page ids of the drill-down sections the cards link to (render/cards.ts). */
+/**
+ * In-page ids the cards' "see all" links target. The first three are the KPI tiles'
+ * full panels (render/kpi.ts), `matrix` is the unit matrix inside the overview panel,
+ * and `deferrals` is the deferrals box, unmounted while SHOW_DEFERRALS is off
+ * (render/cards.ts).
+ */
 export const DRILL = {
   overview: "drill-overview",
   timeline: "drill-timeline",
-  deferrals: "drill-deferrals",
   usage: "drill-usage",
+  matrix: "matrix",
+  deferrals: "deferrals",
 } as const;
 
 /** Upper bound on tabs per card; TAB_CSS is generated for this many positions. Five

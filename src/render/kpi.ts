@@ -20,6 +20,15 @@
 // carry the `mc-r` class, so page.ts's poll restores the reader's pick with no code
 // of its own, and the chart is switched by CSS alone.
 //
+// A TILE ALSO OPENS ITS FULL PANEL, under the chart and above the cards: progress the
+// overview (phases, stages, the unit matrix), usage the credit or token panel, time
+// the timing analysis. These used to sit in closed drill-downs at the foot of the page,
+// so the reader had to know to scroll there; the tile they were already looking at is
+// the more obvious switch. The panels share ONE <details> — closed on load, so the
+// page still opens on the summary — and CSS shows the one matching the checked radio.
+// page.ts's script makes a click on the chosen tile fold or unfold it and a click on
+// another tile pick and unfold; the summary line is the keyboard path.
+//
 // Both timing charts share one time axis: the recorded span, then a band for the
 // stretch after the last event, labelled with its length. Without that band the last
 // bar touches the right edge and reads as "the run ended here" (the same rule as the
@@ -388,10 +397,26 @@ export const KPI_CSS = Array.from({ length: TILES }, (_, i) => {
   const n = i + 1;
   return `.kpi-r:nth-of-type(${n}):checked ~ .kpi-charts > .kpi-c:nth-child(${n}) { display:block; }
 .kpi-r:nth-of-type(${n}):checked ~ .kpi-tiles > label:nth-of-type(${n}) { border-color:var(--accent); background:var(--card); }
-.kpi-r:nth-of-type(${n}):focus-visible ~ .kpi-tiles > label:nth-of-type(${n}) { outline:2px solid var(--accent); outline-offset:2px; }`;
+.kpi-r:nth-of-type(${n}):focus-visible ~ .kpi-tiles > label:nth-of-type(${n}) { outline:2px solid var(--accent); outline-offset:2px; }
+.kpi-r:nth-of-type(${n}):checked ~ .kpi-more > summary > .kpi-st:nth-child(${n}) { display:inline; }
+.kpi-r:nth-of-type(${n}):checked ~ .kpi-more > .kpi-panels > .kpi-p:nth-child(${n}) { display:flex; }`;
 }).join("\n");
 
-export function renderKpis(m: DashboardModel, s: Strings): string {
+/** In-page id of the one <details> holding every tile's full panel. */
+export const KPI_MORE = "kpi-more";
+
+/** A tile's full panel: the id links target, the summary title, and the markup. */
+export interface KpiPanel {
+  id: string;
+  title: string;
+  html: string;
+}
+
+/**
+ * The strip. `panels` are the full panels in tile order (progress, usage, time);
+ * without them the strip is tiles and charts only, as it was before the panels moved.
+ */
+export function renderKpis(m: DashboardModel, s: Strings, panels?: readonly KpiPanel[]): string {
   const tiles = [progressTile(m, s), usageTile(m, s), timeTile(m, s)];
   const group = "mc-kpi";
   const radios = tiles
@@ -407,13 +432,23 @@ export function renderKpis(m: DashboardModel, s: Strings): string {
       (t, i) =>
         `<label for="${group}-${i}" class="kpi${t.missing ? " missing" : ""}"${
           t.tip ? ` title="${esc(t.tip)}"` : ""
-        }><span class="kpi-l">${esc(t.label)}</span><b class="kpi-v">${esc(t.value)}</b><span class="kpi-s">${esc(
+        }${panels ? ` aria-controls="${KPI_MORE}"` : ""}><span class="kpi-l">${esc(t.label)}</span><b class="kpi-v">${esc(t.value)}</b><span class="kpi-s">${esc(
           t.sub,
         )}</span>${t.note ? `<span class="kpi-s kpi-n">${esc(t.note)}</span>` : ""}</label>`,
     )
     .join("");
+  const more = panels
+    ? `
+<details class="kpi-more" id="${KPI_MORE}"><summary>${panels
+        .map((p) => `<span class="kpi-st">${esc(p.title)}</span>`)
+        .join("")}</summary>
+<div class="kpi-panels">${panels
+        .map((p) => `<div class="kpi-p drill-body" id="${esc(p.id)}">\n${p.html}\n</div>`)
+        .join("")}</div>
+</details>`
+    : "";
   return `<section class="kpis" aria-label="${esc(s.kpi.heading)}">
 ${radios}<div class="kpi-tiles">${labels}</div>
-<div class="kpi-charts">${tiles.map((t) => t.chart).join("")}</div>
+<div class="kpi-charts">${tiles.map((t) => t.chart).join("")}</div>${more}
 </section>`;
 }

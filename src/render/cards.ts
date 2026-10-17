@@ -1,12 +1,12 @@
-// The 2×2 card grid under the page header, the drill-down sections below it, and the
+// The 2×2 card grid under the page header, the full panels the KPI tiles open, and the
 // sources line at the bottom.
 //
 // A CARD IS A SUMMARY, NOT A SECOND COPY OF A PANEL. Each card answers one question in
 // a handful of bar-backed rows — which stage took the time, which unit is short of its
 // contract, what is still unresolved, whether anything needs the human — and links to
 // the full panel for the rest. The full panels are the existing renderers, mounted
-// unchanged inside closed <details> ("drill-downs"), so no reading this dashboard
-// already made is lost or re-implemented: the cards only choose what to show first.
+// unchanged under the KPI tiles (render/kpi.ts), so no reading this dashboard already
+// made is lost or re-implemented: the cards only choose what to show first.
 //
 // Two rules carry over from the panels they summarise:
 //   - A number that was not measured is not drawn. A stage with no audit span shows
@@ -24,6 +24,7 @@ import { DRILL, type Row, type RowTone, rowList, share, tabbedCard, viewLink } f
 import { dur, esc, hours } from "./common";
 import { renderDeferrals } from "./deferrals";
 import type { Strings } from "./i18n";
+import type { KpiPanel } from "./kpi";
 import { STAGE_GLYPH, cellGlyph, cellTip, renderOverview } from "./overview";
 import { renderRunHealth } from "./status";
 import { renderTimeline } from "./timeline";
@@ -163,7 +164,7 @@ function unitRows(st: MatrixStage, s: Strings): Row[] {
 }
 
 export function renderUnitCard(m: DashboardModel, s: Strings): string {
-  const more = { href: `#${DRILL.overview}`, label: s.cards.moreMatrix };
+  const more = { href: `#${DRILL.matrix}`, label: s.cards.moreMatrix };
   const stages = m.matrix?.stages.filter((st) => st.execute && st.status !== "skipped") ?? [];
   if (stages.length === 0) {
     return tabbedCard({
@@ -336,7 +337,9 @@ export function renderUnresolvedCard(m: DashboardModel, s: Strings): string {
       0,
       [decisions, questions, declared].findIndex((rows) => rows.length > 0),
     ),
-    more: { href: `#${DRILL.deferrals}`, label: s.cards.moreDeferrals },
+    more: SHOW_DEFERRALS
+      ? { href: `#${DRILL.deferrals}`, label: s.cards.moreDeferrals }
+      : undefined,
   });
 }
 
@@ -353,29 +356,33 @@ ${renderRunHealth(m, s)}
 }
 
 /**
- * The full panels, unchanged, each inside a closed <details>. They are what the cards
- * summarise, and they stay one click away rather than on the page by default — the
- * page should open on the summary, not on 20 screens of tables.
+ * The full panels, unchanged, in KPI tile order: progress → overview, usage → credit
+ * or tokens, time → timing. They open under the tiles rather than on the page by
+ * default — the page should open on the summary, not on 20 screens of tables.
  */
-export function renderDrills(m: DashboardModel, s: Strings): string {
+export function kpiPanels(m: DashboardModel, s: Strings): KpiPanel[] {
   const usage =
     m.usage.kind === "claude"
       ? renderTokens(m.usage.tokens, m.usage.tokens.trend.window, s)
       : renderCredit(m.usage.credit, m.usage.credit.trend.window, s);
   const usageTitle = m.usage.kind === "claude" ? s.usage.tokenSection : s.usage.creditSection;
-  const drill = (id: string, title: string, html: string) =>
-    `<details class="drill" id="${id}"><summary>${esc(title)}</summary>
-<div class="drill-body">
-${html}
-</div>
-</details>`;
-  return `<section class="drills" aria-label="${esc(s.cards.drillsHeading)}">
-<h2 class="drills-h">${esc(s.cards.drillsHeading)}</h2>
-${drill(DRILL.overview, s.overview.sectionProgress, renderOverview(m, s))}
-${drill(DRILL.timeline, s.timeline.section, renderTimeline(m, s))}
-${drill(DRILL.deferrals, s.deferrals.section, renderDeferrals(m, s))}
-${drill(DRILL.usage, usageTitle, usage)}
-</section>`;
+  return [
+    { id: DRILL.overview, title: s.overview.sectionProgress, html: renderOverview(m, s) },
+    { id: DRILL.usage, title: usageTitle, html: usage },
+    { id: DRILL.timeline, title: s.timeline.section, html: renderTimeline(m, s) },
+  ];
+}
+
+// SHOW_DEFERRALS — 미뤄둔 결정 as a box under the grid. Off by the owner's call
+// (2026-10-17): readers do not read the whole ledger here, and the run's own terminal
+// answers it when asked. Unmounted, not deleted — the ledger is still read, the
+// Unresolved card still summarises it, and turning this on brings the box back with the
+// card's "see all" link to it.
+const SHOW_DEFERRALS = false;
+
+/** The deferrals ledger in full, as its own box — empty while SHOW_DEFERRALS is off. */
+export function renderDeferralBox(m: DashboardModel, s: Strings): string {
+  return SHOW_DEFERRALS ? renderDeferrals(m, s) : "";
 }
 
 /** Sources in the order a reader checks them: the ledger, the state file, then the rest. */
