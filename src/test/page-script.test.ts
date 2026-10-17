@@ -2,7 +2,7 @@
 //
 // The string tests elsewhere prove the script CONTAINS the restore code; they would
 // pass if that code never ran or restored the wrong thing. This runs it: the reader
-// picks tabs and opens a drill-down, the server then sends a body whose default tab
+// picks tabs and opens a tile's panel, the server then sends a body whose default tab
 // has moved, and the swap must keep exactly what the READER chose — and nothing the
 // server chose, because a server-picked default (Run Health opens on its first
 // problem) has to be free to move when the run changes.
@@ -34,9 +34,13 @@ afterEach(async () => {
 });
 
 /** Load the page with its script running and `fetch` answered by `body`. */
-async function load(body: () => string, bodyStatus = 200): Promise<Window> {
+async function load(
+  body: () => string,
+  bodyStatus = 200,
+  url = "http://127.0.0.1/",
+): Promise<Window> {
   const w = new Window({
-    url: "http://127.0.0.1/",
+    url,
     settings: {
       enableJavaScriptEvaluation: true,
       suppressInsecureJavaScriptEnvironmentWarning: true,
@@ -57,12 +61,18 @@ async function load(body: () => string, bodyStatus = 200): Promise<Window> {
   return w;
 }
 
+/**
+ * The checked radio's value, read from the PROPERTY. happy-dom's `:checked` can still
+ * match a radio whose `checked` attribute the server rendered after a script moved the
+ * pick, so a selector would report the server's default instead of the reader's.
+ */
 const checked = (w: Window, group: string) =>
   (
-    w.document.querySelector(`input.mc-r[name="${group}"]:checked`) as unknown as {
+    [...w.document.querySelectorAll(`input.mc-r[name="${group}"]`)] as unknown as {
+      checked: boolean;
       value: string;
-    } | null
-  )?.value;
+    }[]
+  ).find((r) => r.checked)?.value;
 
 function pick(w: Window, group: string, value: string): void {
   const r = w.document.querySelector(
@@ -75,6 +85,13 @@ function pick(w: Window, group: string, value: string): void {
   r.dispatchEvent(new w.Event("change", { bubbles: true }));
 }
 
+/** The one <details> holding the KPI tiles' full panels. */
+const more = (w: Window) => w.document.getElementById("kpi-more") as unknown as { open: boolean };
+
+/** Click an element the way a reader does. */
+const click = (w: Window, selector: string) =>
+  (w.document.querySelector(selector) as unknown as { click(): void }).click();
+
 /** Click reload and wait until the swap has landed. */
 async function refresh(w: Window): Promise<void> {
   (w.document.getElementById("reload-btn") as unknown as { click(): void }).click();
@@ -85,7 +102,7 @@ async function refresh(w: Window): Promise<void> {
 }
 
 describe("poll swap in a real DOM", () => {
-  test("the reader's tab picks and open drill-down survive; the server's defaults move", async () => {
+  test("the reader's tab picks and open tile panel survive; the server's defaults move", async () => {
     const w = await load(() => renderBody(after, "ko"));
     expect(checked(w, "mc-health")).toBe("0");
     expect(w.document.getElementById("card-health")?.innerHTML).toContain(
@@ -95,8 +112,7 @@ describe("poll swap in a real DOM", () => {
 
     pick(w, "mc-unresolved", "1");
     pick(w, "mc-kpi", "2");
-    const usage = w.document.getElementById("drill-usage") as unknown as { open: boolean };
-    usage.open = true;
+    more(w).open = true;
 
     await refresh(w);
     const fetches = (w as unknown as { fetches: string[] }).fetches;
@@ -108,9 +124,7 @@ describe("poll swap in a real DOM", () => {
     // Restored: what the reader chose.
     expect(checked(w, "mc-unresolved")).toBe("1");
     expect(checked(w, "mc-kpi")).toBe("2");
-    expect((w.document.getElementById("drill-usage") as unknown as { open: boolean }).open).toBe(
-      true,
-    );
+    expect(more(w).open).toBe(true);
     // Not restored: what the server chose. Run Health follows the run.
     expect(checked(w, "mc-health")).toBe("2");
     expect(checked(w, "mc-stage")).toBe(stageDefault);
@@ -122,6 +136,68 @@ describe("poll swap in a real DOM", () => {
     expect(checked(w, "mc-health")).toBe("2");
     expect(checked(w, "mc-unresolved")).toBe("0");
     expect(checked(w, "mc-kpi")).toBe("0");
+  });
+});
+
+describe("a KPI tile opens its full panel", () => {
+  test("the chosen tile folds and unfolds; another tile is picked and unfolds", async () => {
+    const w = await load(() => renderBody(before, "ko"));
+    // Closed on load, on the progress tile.
+    expect(more(w).open).toBe(false);
+    expect(checked(w, "mc-kpi")).toBe("0");
+    click(w, 'label[for="mc-kpi-0"]');
+    expect(more(w).open).toBe(true);
+    expect(checked(w, "mc-kpi")).toBe("0");
+    click(w, 'label[for="mc-kpi-0"]');
+    expect(more(w).open).toBe(false);
+    // Closed, another tile: picked AND unfolded in one click.
+    click(w, 'label[for="mc-kpi-2"]');
+    expect(checked(w, "mc-kpi")).toBe("2");
+    expect(more(w).open).toBe(true);
+    // Open, another tile: the panel switches and stays open.
+    click(w, 'label[for="mc-kpi-1"]');
+    expect(checked(w, "mc-kpi")).toBe("1");
+    expect(more(w).open).toBe(true);
+  });
+
+  test("only the chosen tile's panel is shown — the cascade, not just the markup", async () => {
+    // .drill-body (the panels' inner layout) sets display AFTER the hide rule; at equal
+    // specificity it won and all three panels showed at once in a real browser.
+    const w = await load(() => renderBody(before, "ko"));
+    const shown = () =>
+      ["drill-overview", "drill-usage", "drill-timeline"].map(
+        (id) => w.getComputedStyle(w.document.getElementById(id) as never).display !== "none",
+      );
+    expect(shown()).toEqual([true, false, false]);
+    click(w, 'label[for="mc-kpi-2"]');
+    expect(shown()).toEqual([false, false, true]);
+  });
+
+  test("a card link picks the tile its target is under and unfolds it", async () => {
+    const w = await load(() => renderBody(before, "ko"));
+    // The Unit card's matrix link: inside the progress panel.
+    click(w, "#card-unit a.mc-more");
+    expect(checked(w, "mc-kpi")).toBe("0");
+    expect(more(w).open).toBe(true);
+    // Run Health's link: the timing panel, under the time tile.
+    more(w).open = false;
+    click(w, "#card-health a.mc-more");
+    expect(checked(w, "mc-kpi")).toBe("2");
+    expect(more(w).open).toBe(true);
+    // A link pick is a reader's pick: the poll keeps it.
+    await refresh(w);
+    expect(checked(w, "mc-kpi")).toBe("2");
+    expect(more(w).open).toBe(true);
+    // And after the swap the chosen tile still folds on the FIRST click: the pick lives
+    // in the script, which the swap does not replace, and the poll restores the same radio.
+    click(w, 'label[for="mc-kpi-2"]');
+    expect(more(w).open).toBe(false);
+  });
+
+  test("a usage window reload (?cw=) lands on the usage panel, unfolded", async () => {
+    const w = await load(() => renderBody(before, "ko"), 200, "http://127.0.0.1/?cw=30d");
+    expect(checked(w, "mc-kpi")).toBe("1");
+    expect(more(w).open).toBe(true);
   });
 });
 

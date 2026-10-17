@@ -9,6 +9,8 @@
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { assemble } from "../model/assemble";
+import { renderDeferrals } from "./deferrals";
+import { strings } from "./i18n";
 import { EN } from "./i18n-en";
 import { KO } from "./i18n-ko";
 import { renderBody } from "./page";
@@ -89,7 +91,9 @@ describe("rendered output follows the locale", () => {
   const m = assemble(FIXTURE);
 
   test("?lang=en renders the panels in English", () => {
-    const html = renderBody(m, "en");
+    // The deferrals panel is rendered but unmounted (SHOW_DEFERRALS), so it is checked
+    // on its own beside the body.
+    const html = renderBody(m, "en") + renderDeferrals(m, strings("en"));
     for (const marker of [
       "Progress",
       "Construction unit matrix",
@@ -102,7 +106,7 @@ describe("rendered output follows the locale", () => {
   });
 
   test("and drops the Korean panel headings it replaced", () => {
-    const html = renderBody(m, "en");
+    const html = renderBody(m, "en") + renderDeferrals(m, strings("en"));
     for (const gone of [
       "진행 개요",
       "시간 분석",
@@ -115,7 +119,7 @@ describe("rendered output follows the locale", () => {
   });
 
   test("Korean is unchanged — the same panels, in Korean", () => {
-    const html = renderBody(m, "ko");
+    const html = renderBody(m, "ko") + renderDeferrals(m, strings("ko"));
     for (const marker of ["진행 개요", "시간 분석", "미뤄둔 결정", "작업 추정"]) {
       expect(html).toContain(marker);
     }

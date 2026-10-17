@@ -488,7 +488,7 @@ function checksTab(r: ChecksReading, m: DashboardModel, s: Strings): Tab {
 
 export function renderRunHealth(m: DashboardModel, s: Strings): string {
   const st = buildStatus(m);
-  const more = { href: `#${DRILL.timeline}`, label: s.cards.moreTimeline };
+  const more = { href: `#${DRILL.timeline}`, label: s.cards.moreWaits };
 
   if (st.run.state === "complete") {
     // A finished run: past blocks and failed checks are history (model/status.ts). What

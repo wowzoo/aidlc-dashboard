@@ -1083,7 +1083,7 @@ const cards: CardStrings = {
   moreTimeline: "Open the full Gantt timeline",
   moreMatrix: "Open the stage × unit matrix",
   moreDeferrals: "Open the full list",
-  drillsHeading: "Details",
+  moreWaits: "See where the run waited",
   sourcesLabel: "Sources",
   sourceAge: (age) => `${age} ago`,
   sourceMissing: "no record",

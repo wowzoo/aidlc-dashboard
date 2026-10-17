@@ -21,6 +21,7 @@ import { warningTextIn } from "../render/warnings";
 const KO = strings("ko");
 const EN = strings("en");
 import { renderUnitCard, renderUnresolvedCard } from "../render/cards";
+import { renderDeferrals } from "../render/deferrals";
 import { renderBody, renderPage } from "../render/page";
 import { renderPicker } from "../render/picker";
 import { listStageArtifacts } from "../scan/artifacts";
@@ -29,6 +30,14 @@ import { openArtifact } from "../scan/open-file";
 import { findHarnessDir } from "../scan/stage-catalog";
 import { readWorkspaceSummary } from "../scan/summary";
 import { MAX_VIEW_BYTES, readArtifactSource } from "../scan/view-file";
+
+/**
+ * The page body plus the deferrals panel. The page no longer mounts that panel
+ * (SHOW_DEFERRALS in render/cards.ts) but still renders it, so its readings are
+ * checked on the panel itself, next to the body's own.
+ */
+const withDeferrals = (m: Parameters<typeof renderBody>[0], locale: "ko" | "en" = "ko") =>
+  renderBody(m, locale) + renderDeferrals(m, strings(locale));
 
 const FIXTURE = path.join(import.meta.dir, "..", "..", "fixtures", "reference");
 /** The fixture's stop-guard signature, in the 2.11 shape: stage, state digest, directive. */
@@ -328,26 +337,49 @@ describe("render", () => {
     expect(body).toContain("c-partial");
   });
 
-  test("orders the page: run line, cards, then the full panels closed, then sources", () => {
+  test("orders the page: KPI tiles with their panels closed, then cards, then sources", () => {
     const body = renderBody(m);
     const at = (needle: string) => {
       const i = body.indexOf(needle);
       expect(i).toBeGreaterThanOrEqual(0);
       return i;
     };
-    // The four cards, in reading order.
+    // Each tile's full panel sits under the tiles, in tile order, inside ONE closed
+    // <details> — the page opens on the summary.
+    expect(at('class="kpi-tiles"')).toBeLessThan(at('id="kpi-more"'));
+    expect(at('id="kpi-more"')).toBeLessThan(at('id="drill-overview"'));
+    expect(at('id="drill-overview"')).toBeLessThan(at('id="matrix"'));
+    expect(at('id="matrix"')).toBeLessThan(at('id="drill-usage"'));
+    expect(at('id="drill-usage"')).toBeLessThan(at('id="credit"'));
+    expect(at('id="credit"')).toBeLessThan(at('id="drill-timeline"'));
+    expect(at('id="drill-timeline"')).toBeLessThan(at('id="timeline"'));
+    expect(body).not.toMatch(/<details[^>]*id="kpi-more"[^>]* open/);
+    // Then the four cards, in reading order, then sources.
+    expect(at('id="timeline"')).toBeLessThan(at('id="card-stage"'));
     expect(at('id="card-stage"')).toBeLessThan(at('id="card-unit"'));
     expect(at('id="card-unit"')).toBeLessThan(at('id="card-unresolved"'));
     expect(at('id="card-unresolved"')).toBeLessThan(at('id="card-health"'));
-    // Every full panel survives, behind the cards, inside a closed drill-down.
-    expect(at('id="card-health"')).toBeLessThan(at('id="drill-overview"'));
-    for (const id of ["matrix", "timeline", "deferrals", "credit"]) at(`id="${id}"`);
-    expect(at('id="drill-overview"')).toBeLessThan(at('id="matrix"'));
-    expect(at('id="drill-timeline"')).toBeLessThan(at('id="timeline"'));
-    expect(at('id="drill-deferrals"')).toBeLessThan(at('id="deferrals"'));
-    expect(at('id="drill-usage"')).toBeLessThan(at('id="credit"'));
-    expect(body).not.toMatch(/<details[^>]*class="drill"[^>]* open/);
-    expect(at('id="credit"')).toBeLessThan(at('<div class="sources">'));
+    expect(at('id="card-health"')).toBeLessThan(at('<div class="sources">'));
+    // The old foot-of-page drill-downs are gone, and the deferrals box is unmounted
+    // (SHOW_DEFERRALS) — with no "see all" link left pointing at it.
+    expect(body).not.toContain('class="drill"');
+    expect(body).not.toContain('id="deferrals"');
+    expect(body).not.toContain('href="#deferrals"');
+    // Every card link lands on something that exists, and the matrix link on the matrix.
+    const links = [...body.matchAll(/<a class="mc-more" href="#([^"]+)"/g)].map((x) => x[1]);
+    expect(links).toEqual(["drill-timeline", "matrix", "drill-timeline"]);
+    for (const id of links) at(`id="${id}"`);
+  });
+
+  test("with the matrix withheld, the Unit card's link still lands — on why there is none", () => {
+    const none = { ...m, matrix: undefined };
+    const body = renderBody(none);
+    expect(body).toContain('href="#matrix"');
+    expect(body.match(/ id="matrix"/g)?.length).toBe(1);
+    const at = body.indexOf(' id="matrix"');
+    expect(body.slice(at, body.indexOf("</section>", at))).toContain(
+      strings("ko").overview.noUnitsPill,
+    );
   });
 
   test("the timing panel never prints a day unit", () => {
@@ -1056,7 +1088,7 @@ describe("render", () => {
   });
 
   test("the deferral panel names the route, the limit and the count", () => {
-    const body = renderBody(m);
+    const body = withDeferrals(m);
     expect(body).toContain("미뤄둔 결정");
     expect(body).toContain("지난 단계로 배정됨 · 2건");
     expect(body).toContain("현재 단계가 물어야 할 것 · 1건");
@@ -1084,7 +1116,7 @@ describe("render", () => {
     // requirements-analysis and contract-design write Open questions in their own
     // primary artifact, outside `## Assumptions & Open Questions`; on run E five items
     // lived there and the panel showed none of them.
-    const body = renderBody(m);
+    const body = withDeferrals(m);
     expect(body).toContain("stage 선언 미결 질문");
     expect(body).toContain("stage 산출물이 직접 선언한 미결 질문 3건 — 배정 없음");
     expect(body).toContain("OQ1: The retention window for migrated records");
@@ -1093,7 +1125,7 @@ describe("render", () => {
     // Not summed with the owner-bearing items: those counts are what they were.
     expect(body).toContain("지난 단계로 배정됨 · 2건");
     expect(m.deferrals.items.some((i) => i.item.includes("retention window"))).toBe(false);
-    const en = renderBody(m, "en");
+    const en = withDeferrals(m, "en");
     expect(en).toContain("stage-declared open questions");
     expect(en).toContain("blocks <code>PU-B-ui</code>");
   });
@@ -1113,7 +1145,7 @@ describe("render", () => {
       );
       const after = assemble(root);
       expect(after.deferrals.items.length).toBeGreaterThan(0);
-      const body = renderBody(after);
+      const body = withDeferrals(after);
       expect(body).toContain("절 1곳은 이 리더가 아는 모양이 아닙니다");
       expect(body).toContain("<code>inception/units-generation/unit-of-work-dependency.md</code>");
       expect(body).toContain(
@@ -1196,7 +1228,7 @@ describe("render", () => {
             files: [AOQ],
             questions: false,
           });
-          const body = renderBody(noDiary(m), "en");
+          const body = withDeferrals(noDiary(m), "en");
           expect(body).not.toContain(pill);
           expect(body).toContain(EN.deferrals.aoqUnreadable(`<code>${AOQ}</code>`));
         },
@@ -1235,7 +1267,7 @@ describe("render", () => {
         },
         (m) => {
           expect(m.deferrals.sections).toBe(0);
-          const body = renderBody(m, "en");
+          const body = withDeferrals(m, "en");
           expect(body).toContain(EN.deferrals.noSections(m.deferrals.artifacts, 1));
           expect(body).not.toContain(EN.deferrals.noSections(m.deferrals.artifacts, 0));
         },
@@ -1250,7 +1282,7 @@ describe("render", () => {
         },
         (m) => {
           expect(m.warnings.map((w) => w.code)).not.toContain("record-file-unreadable");
-          expect(renderBody(noDiary(m), "en")).toContain(pill);
+          expect(withDeferrals(noDiary(m), "en")).toContain(pill);
         },
       );
     });
@@ -1269,7 +1301,7 @@ describe("render", () => {
           });
           // The rest of the diaries are read, but one that could not be may hold an
           // open question, so the panel cannot say "no open items".
-          expect(renderBody(noDiary(m), "en")).not.toContain(pill);
+          expect(withDeferrals(noDiary(m), "en")).not.toContain(pill);
         },
       );
     });
@@ -1283,7 +1315,7 @@ describe("render", () => {
             files: [QFILE],
             questions: true,
           });
-          const body = renderBody(m, "en");
+          const body = withDeferrals(m, "en");
           expect(body).toContain(EN.status.humanUnreadable(1));
           expect(body).toContain(EN.warn.recordFileUnreadable([QFILE], true));
           // Not a floor: an unread file can also un-explain a marker's ask, so the
@@ -1291,7 +1323,7 @@ describe("render", () => {
           expect(body).toMatch(/class="mc-n warn">\d+\?</);
           // A finished run lists its loose ends, and this is one of them.
           const done = { ...m, state: { ...m.state, complete: true } };
-          expect(renderBody(done, "en")).toContain(EN.status.humanUnreadable(1));
+          expect(withDeferrals(done, "en")).toContain(EN.status.humanUnreadable(1));
         },
       );
     });
@@ -1316,12 +1348,12 @@ describe("render", () => {
               blockers: [],
               waits: { ...m.waits, hooks: { state: "live" as const } },
             };
-            const body = renderBody(bare, "en");
+            const body = withDeferrals(bare, "en");
             expect(body).toContain(EN.status.humanUnreadable(1));
             expect(body).not.toContain(EN.status.humanNone);
             // Positive control: with nothing unread, the same bare model is "nothing".
             const read = { ...bare, questions: { ...bare.questions, unreadable: [] } };
-            expect(renderBody(read, "en")).toContain(EN.status.humanNone);
+            expect(withDeferrals(read, "en")).toContain(EN.status.humanNone);
           },
         );
       },
@@ -1357,7 +1389,7 @@ describe("render", () => {
       expect(unread.deferrals.items).toEqual([]);
       expect(unread.deferrals.assumptions).toEqual([]);
       expect(unread.deferrals.declared.ledgers.map((l) => l.status)).toEqual(["unread", "none"]);
-      expect(renderBody(unread)).not.toContain(`>${pill}<`);
+      expect(withDeferrals(unread)).not.toContain(`>${pill}<`);
       fs.writeFileSync(
         path.join(record, "inception/requirements-analysis/requirements.md"),
         "## Open Questions\n\nNone.\n",
@@ -1368,10 +1400,10 @@ describe("render", () => {
       );
       // The fixture's diaries carry open entries, so the pill stays withheld…
       expect(open.length).toBeGreaterThan(0);
-      expect(renderBody(clear)).not.toContain(`>${pill}<`);
+      expect(withDeferrals(clear)).not.toContain(`>${pill}<`);
       // …and appears once nothing anywhere is open (positive control).
       const none = { ...clear, diaries: { ...clear.diaries, records: [] } };
-      expect(renderBody(none)).toContain(`>${pill}<`);
+      expect(withDeferrals(none)).toContain(`>${pill}<`);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

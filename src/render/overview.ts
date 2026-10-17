@@ -421,6 +421,8 @@ export function renderOverview(m: DashboardModel, s: Strings): string {
                 m.unitDag.stop === "construction" ? "warn" : "mute",
               )}</p>`
             : `<p class="note">${esc(s.overview.noUnits)} ${pill(s.overview.noUnitsPill, "mute")}</p>`,
+        // Same id as the matrix: the Unit card's link lands here, on why there is none.
+        "matrix",
       ),
     );
   }

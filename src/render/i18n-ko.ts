@@ -1042,7 +1042,7 @@ const cards: CardStrings = {
   moreTimeline: "Gantt 타임라인 전체 보기",
   moreMatrix: "stage × unit 매트릭스 보기",
   moreDeferrals: "미결 전체 보기",
-  drillsHeading: "자세히 보기",
+  moreWaits: "대기 시간 분석 보기",
   sourcesLabel: "출처",
   sourceAge: (age) => `${age} 전`,
   sourceMissing: "기록 없음",
