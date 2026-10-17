@@ -102,7 +102,8 @@ export interface CardStrings {
   readonly moreTimeline: string;
   readonly moreMatrix: string;
   readonly moreDeferrals: string;
-  readonly drillsHeading: string;
+  /** Run Health's link: the timing panel, read for where the run waited. */
+  readonly moreWaits: string;
   readonly sourcesLabel: string;
   /** `age` already formatted. */
   sourceAge(age: string): string;

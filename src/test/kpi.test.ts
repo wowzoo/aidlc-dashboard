@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { assemble } from "../model/assemble";
 import type { DashboardModel } from "../model/types";
+import { kpiPanels } from "../render/cards";
 import { esc, hours } from "../render/common";
 import { strings } from "../render/i18n";
 import { KPI_CSS, renderKpis } from "../render/kpi";
@@ -39,6 +40,31 @@ describe("KPI strip", () => {
         `.kpi-r:nth-of-type(${n}):checked ~ .kpi-charts > .kpi-c:nth-child(${n})`,
       );
     }
+  });
+
+  test("each tile opens its full panel: one closed <details>, panels in tile order", () => {
+    const html = renderKpis(base, ko, kpiPanels(base, ko));
+    expect(html.match(/<details /g)?.length).toBeGreaterThanOrEqual(1);
+    expect(html).toMatch(/<details class="kpi-more" id="kpi-more">/);
+    // Progress → overview, usage → credit (this fixture is a Kiro run), time → timing.
+    const ids = [...html.matchAll(/<div class="kpi-p drill-body" id="([^"]+)">/g)].map((x) => x[1]);
+    expect(ids).toEqual(["drill-overview", "drill-usage", "drill-timeline"]);
+    const titles = [...html.matchAll(/<span class="kpi-st">([^<]+)<\/span>/g)].map((x) => x[1]);
+    expect(titles).toEqual([
+      ko.overview.sectionProgress,
+      ko.usage.creditSection,
+      ko.timeline.section,
+    ]);
+    for (let n = 1; n <= 3; n++) {
+      expect(KPI_CSS).toContain(
+        `.kpi-r:nth-of-type(${n}):checked ~ .kpi-more > .kpi-panels > .kpi-p:nth-child(${n})`,
+      );
+      expect(KPI_CSS).toContain(
+        `.kpi-r:nth-of-type(${n}):checked ~ .kpi-more > summary > .kpi-st:nth-child(${n})`,
+      );
+    }
+    // Without panels the strip is tiles and charts, as before.
+    expect(renderKpis(base, ko)).not.toContain("kpi-more");
   });
 
   test("progress is state.md's figure and says so", () => {
