@@ -251,6 +251,22 @@ describe("Unresolved card", () => {
     expect(html).toContain(`→ ${it.ownerStage}`);
   });
 
+  test("a ledger read only in part says so without sending the reader to a panel that is gone", () => {
+    // The empty text used to say the full panel names what was not read. That panel is
+    // unmounted (SHOW_DEFERRALS), so the card has to carry the partial read on its own:
+    // a floor count and a sentence that points nowhere.
+    const m: DashboardModel = {
+      ...base,
+      deferrals: { ...base.deferrals, items: [], unreadSections: ["inception/x/y.md"] },
+    };
+    for (const s of [ko, en]) {
+      const html = renderUnresolvedCard(m, s);
+      expect(html).toContain(`${s.cards.decisionsTab} <b class="mc-n mute">0+</b>`);
+      expect(html).toContain(esc(s.cards.notAllRead));
+      expect(s.cards.notAllRead).not.toMatch(/패널|panel/i);
+    }
+  });
+
   test("opens the questions tab when there are no decisions but there are questions", () => {
     const m: DashboardModel = { ...base, deferrals: { ...base.deferrals, items: [] } };
     expect(checkedTab(renderUnresolvedCard(m, ko), "unresolved")).toBe("1");
