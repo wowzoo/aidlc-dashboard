@@ -147,6 +147,21 @@ describe("projectSlug", () => {
     expect(projectSlug("C:\\aidlc-dashboard")).toBe("C--aidlc-dashboard");
     expect(projectSlug("C:\\Users\\me\\_ws")).toBe("C--Users-me--ws");
   });
+
+  // 아래 셋은 Claude Code 를 그 경로에서 실제로 실행해 생긴 디렉터리 이름이다(2026-10-17).
+  test("영숫자가 아닌 글자는 공백·한글·괄호도 하나씩 `-` 가 된다", () => {
+    expect(projectSlug("C:\\Temp\\slug 검증 (x)\\a.b_c-d~e")).toBe("C--Temp-slug-----x--a-b-c-d-e");
+  });
+
+  test("200자는 그대로, 넘으면 앞 200자에 원래 경로의 해시를 붙인다", () => {
+    const at = (n: number) => `C:\\Temp\\sb\\${"z".repeat(n - 11)}`;
+    expect(projectSlug(at(200))).toBe(`C--Temp-sb-${"z".repeat(189)}`);
+    expect(projectSlug(at(201))).toBe(`C--Temp-sb-${"z".repeat(189)}-b1r6e`);
+    const long = `C:\\Temp\\slug-long\\${"abcdefghij".repeat(20)}`;
+    expect(projectSlug(long)).toBe(
+      `C--Temp-slug-long-${"abcdefghij".repeat(20).slice(0, 182)}-qhz8u3`,
+    );
+  });
 });
 
 describe("findTranscriptDir", () => {

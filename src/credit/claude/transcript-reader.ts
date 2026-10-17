@@ -273,17 +273,35 @@ const HEAD_BYTES = 16 * 1024;
 /**
  * 워크스페이스 경로를 Claude Code 트랜스크립트 디렉터리 이름으로 변환한다.
  *
- * 규칙은 실측으로 확인했다(`/`·`.`·`_` → `-`, 대문자 보존):
+ * 규칙은 실측으로 확인했다(2026-10-17, Windows 의 Claude Code 로 경로를 바꿔 가며 실행):
+ * 영숫자가 아닌 UTF-16 코드 단위는 하나하나 `-` 가 된다. 대문자는 보존한다.
  *   /Users/me/Development/ai-dlc/_accounts/AcmeCorp/x
  *   → -Users-me-Development-ai-dlc--accounts-AcmeCorp-x
+ *   C:\Temp\slug 검증 (x)\a.b_c-d~e → C--Temp-slug-----x--a-b-c-d-e
+ * 결과가 200자를 넘으면 앞 200자 뒤에 `-` 와 원래 경로의 해시(`hashSlugSource`)를 붙인다.
+ * 200자는 그대로, 201자부터 잘렸다.
  *
- * Windows 에서는 `\`·`:` 도 `-` 가 된다(실측, Windows 의 `~/.claude/projects`):
- *   C:\work → C--work
- * 이 둘을 빼면 slug 에 `:`·`\` 가 남아 1차 탐색이 항상 빗나갔다. 2차(cwd) 탐색이 받아 주긴
- * 하지만 그 경로는 프로젝트 디렉터리 전부를 훑는 비싼 길이다.
+ * 예전에는 `/`·`.`·`_` 만(뒤에 `\`·`:` 를 더해) 바꿨다. 공백·한글·괄호가 든 경로는 slug 가
+ * 빗나가 2차(cwd) 탐색으로 떨어졌는데, 그 길은 프로젝트 디렉터리 전부를 훑어 비싸고 가장 새
+ * 파일의 첫 cwd 만 보므로 하위 디렉터리 세션이 끼면 `데이터 없음` 이 됐다.
  */
 export function projectSlug(root: string): string {
-  return root.replace(/[/\\:._]/g, "-");
+  const slug = root.replace(/[^a-zA-Z0-9]/g, "-");
+  if (slug.length <= MAX_SLUG) return slug;
+  return `${slug.slice(0, MAX_SLUG)}-${hashSlugSource(root)}`;
+}
+
+/** Claude Code 가 slug 를 자르는 길이(실측). */
+const MAX_SLUG = 200;
+
+/**
+ * 잘린 slug 끝에 붙는 해시. Java `String.hashCode` 와 같은 32비트 해시의 절댓값을 36진수로
+ * 쓴다. 실측한 두 경로의 접미사(`qhz8u3`·`b1r6e`)와 맞는다. slug 가 아니라 원래 경로를 해시한다.
+ */
+function hashSlugSource(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(36);
 }
 
 /**
