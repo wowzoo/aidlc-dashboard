@@ -156,18 +156,26 @@ $url = "http://localhost:$port"
 # ---- open the browser once the port answers ---------------------------------
 # A background job, because the server has to start before there is anything to
 # open. Polling beats a fixed sleep -- a cold start is fast, a big audit log is not.
+#
+# The probe asks 127.0.0.1, NOT localhost. The server binds 127.0.0.1 only, and
+# `localhost` resolves to ::1 first; Windows answers a refused connect after ~2s of
+# SYN retries, so under Windows PowerShell 5.1 every 1s probe of localhost timed out
+# before it fell back to IPv4 and the browser never opened (measured 2026-10-16:
+# 40 of 40 probes failed, while 127.0.0.1 answered on the first). The browser itself
+# still opens $url -- browsers race both families and land on IPv4 at once.
+$probe = "http://127.0.0.1:$port/healthz"
 $opener = Start-Job -ScriptBlock {
-  param($u)
+  param($u, $p)
   for ($n = 0; $n -lt 40; $n++) {   # ~10s ceiling
     try {
-      Invoke-WebRequest -Uri "$u/healthz" -TimeoutSec 1 -UseBasicParsing | Out-Null
+      Invoke-WebRequest -Uri $p -TimeoutSec 1 -UseBasicParsing | Out-Null
       Start-Process $u
       return
     } catch {
       Start-Sleep -Milliseconds 250
     }
   }
-} -ArgumentList $url
+} -ArgumentList $url, $probe
 
 Write-Host "> $url$(T '  \u0028Ctrl+C \ub85c \uc885\ub8cc\u0029')"
 Write-Host ''
