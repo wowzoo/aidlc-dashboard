@@ -267,6 +267,23 @@ describe("Unresolved card", () => {
     }
   });
 
+  test("the decisions tab says what its rows are — records, not open asks", () => {
+    // With the full box unmounted this card is the ledger's only surface, so the limits
+    // the panel used to state have to be on it: an artifact record, no close marker so
+    // no way to tell whether it was answered, and owners per stage, not per unit.
+    for (const s of [ko, en]) {
+      const html = renderUnresolvedCard(base, s);
+      const decisions = html.slice(
+        0,
+        html.indexOf('<div class="mc-p">', html.indexOf('<div class="mc-p">') + 1),
+      );
+      expect(decisions).toContain(esc(s.cards.decisionsNote));
+      // The owner tips say what the record says, and promise no ask the ledger cannot see.
+      expect(s.deferrals.faces.current.tip).not.toMatch(/이번 차례|this turn/);
+      expect(s.deferrals.faces.ahead.tip).not.toMatch(/다시 물어옵니다|will be asked/);
+    }
+  });
+
   test("opens the questions tab when there are no decisions but there are questions", () => {
     const m: DashboardModel = { ...base, deferrals: { ...base.deferrals, items: [] } };
     expect(checkedTab(renderUnresolvedCard(m, ko), "unresolved")).toBe("1");

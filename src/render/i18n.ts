@@ -87,6 +87,8 @@ export interface CardStrings {
   readonly noDeclared: string;
   /** A tab's empty text when part of its ledger could not be read or parsed. */
   readonly notAllRead: string;
+  /** Under the decisions tab: what its rows are, and what the ledger cannot say. */
+  readonly decisionsNote: string;
   readonly answersTab: string;
   readonly stuckTab: string;
   readonly checksTab: string;

@@ -310,6 +310,7 @@ export function renderUnresolvedCard(m: DashboardModel, s: Strings): string {
           max: CARD_ROWS,
           moreText: s.cards.moreRows,
           empty: empty(s.cards.noDecisions, gaps.decisions),
+          note: s.cards.decisionsNote,
         }),
       },
       {

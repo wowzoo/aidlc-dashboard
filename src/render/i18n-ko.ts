@@ -447,11 +447,11 @@ const deferrals: DeferralStrings = {
     },
     current: {
       label: "현재 단계",
-      tip: "지금 진행 중인 단계가 이 결정을 물어야 합니다 — 이번 차례에 청구되는 몫",
+      tip: "지금 진행 중인 단계에 배정된 기록입니다 — 규약상 이 단계의 작업에 필요할 때 다시 묻습니다",
     },
     ahead: {
       label: "예정 단계",
-      tip: "아직 시작하지 않은 단계로 배정됐습니다 — 그 단계에 가면 다시 물어옵니다",
+      tip: "아직 끝나지 않은 단계에 배정된 기록입니다 — 규약상 그 단계의 작업에 필요할 때 다시 묻습니다",
     },
     outOfScope: {
       label: "범위 밖 단계",
@@ -1028,6 +1028,8 @@ const cards: CardStrings = {
   noOpenQs: "열린 질문 없음",
   noDeclared: "stage 가 선언한 미결 질문 없음",
   notAllRead: "읽은 기록에는 없음 — 일부 기록은 읽거나 해석하지 못했습니다",
+  decisionsNote:
+    "산출물에 남은 기록을 모은 것입니다. 엔진이 닫힘 표시를 쓰지 않아 답했는지는 알 수 없고, 배정은 unit 이 아니라 stage 단위입니다.",
   answersTab: "내 답변",
   stuckTab: "막힘",
   checksTab: "검사 실패",
