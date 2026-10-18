@@ -464,11 +464,11 @@ const deferrals: DeferralStrings = {
     },
     current: {
       label: "current stage",
-      tip: "The stage running now is the one that should ask this — it is due this turn",
+      tip: "Assigned to the stage running now — by the stage protocol it is asked again when that stage's work needs it",
     },
     ahead: {
       label: "later stage",
-      tip: "Assigned to a stage that has not started yet — it will be asked when the run gets there",
+      tip: "Assigned to a stage that has not finished — by the stage protocol it is asked again when that stage's work needs it",
     },
     outOfScope: {
       label: "out of scope",
@@ -1069,6 +1069,8 @@ const cards: CardStrings = {
   noOpenQs: "No open questions",
   noDeclared: "No stage-declared open questions",
   notAllRead: "None in what could be read — some records could not be read or parsed",
+  decisionsNote:
+    "Collected from what the artifacts recorded. The engine writes no close marker, so whether one was answered is unknown, and owners are per stage, not per unit.",
   answersTab: "Your answers",
   stuckTab: "Stuck",
   checksTab: "Failed checks",
