@@ -73,8 +73,8 @@ export type UnitDagParse =
 /**
  * The engine's `BoltDagResolution`, plus two fields this reader needs: `dependsOn` (see
  * the header) and `graphDiffers` — a cache existed and the authored file outvoted it,
- * which is the stale-graph case the page says out loud. `healed` keeps the engine's
- * meaning: true whenever the authored file supplied the roster.
+ * which is the stale-graph case the page says out loud. The engine's `healed` is gone
+ * from 2.11.1's resolution, and this reader never displayed it, so it is not carried.
  */
 export type UnitDag =
   | {
@@ -82,7 +82,6 @@ export type UnitDag =
       batches: string[][];
       units: string[];
       unitKinds: Map<string, string> | null;
-      healed: boolean;
       graphDiffers: boolean;
       dependsOn: Map<string, string[]>;
     }
@@ -378,7 +377,6 @@ function readCache(recordDir: string): OkDag | null {
       batches: typedBatches,
       units,
       unitKinds: unitKinds.size > 0 ? unitKinds : null,
-      healed: false,
       graphDiffers: false,
       dependsOn,
     };
@@ -425,7 +423,6 @@ export function resolveUnitDag(recordDir: string): UnitDag {
     batches: parsed.batches,
     units: parsed.batches.flat(),
     unitKinds: unitKinds.size > 0 ? unitKinds : null,
-    healed: true,
     graphDiffers: cached !== null,
     dependsOn: new Map(parsed.units.map((u) => [u.name, u.depends_on])),
   };

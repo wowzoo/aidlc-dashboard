@@ -54,7 +54,6 @@ describe("resolveUnitDag — the engine's resolveBoltDag", () => {
       expect(r.state).toBe("ok");
       if (r.state !== "ok") return;
       expect(r.units).toEqual(["a", "b"]);
-      expect(r.healed).toBe(false);
       expect(r.unitKinds?.get("b")).toBe("ui");
     });
   });
@@ -63,10 +62,9 @@ describe("resolveUnitDag — the engine's resolveBoltDag", () => {
     record({}, (dir) => expect(resolveUnitDag(dir)).toEqual({ state: "none" }));
   });
 
-  test("a matching authored file keeps the cache (healed: false)", () => {
+  test("a matching authored file keeps the cache", () => {
     record({ graph: GRAPH_AB, dep: DEP_AB }, (dir) => {
       const r = resolveUnitDag(dir);
-      expect(r.state === "ok" && r.healed).toBe(false);
       expect(r.state === "ok" && r.graphDiffers).toBe(false);
     });
   });
@@ -81,7 +79,6 @@ describe("resolveUnitDag — the engine's resolveBoltDag", () => {
       if (r.state !== "ok") return;
       expect(r.batches).toEqual([["a", "c"], ["b"]]);
       expect(r.units).toEqual(["a", "c", "b"]);
-      expect(r.healed).toBe(true);
       expect(r.graphDiffers).toBe(true);
       // Kinds are compared too: the authored file dropped them, so the cache is stale.
       expect(r.unitKinds).toBeNull();
@@ -156,7 +153,7 @@ describe("the page reads the resolved roster", () => {
   test("the fixture's authored DAG matches its graph: matrix as before, no warning", () => {
     const m = assemble(FIXTURE);
     expect(m.matrix?.units.map((u) => u.name)).toEqual(["PU-A-core", "PU-B-ui"]);
-    expect(m.unitDag).toEqual({ state: "ok", healed: false, graphDiffers: false });
+    expect(m.unitDag).toEqual({ state: "ok", graphDiffers: false });
     expect(m.warnings.map((w) => w.code)).not.toContain("unit-dag-malformed");
   });
 
@@ -212,7 +209,7 @@ describe("the page reads the resolved roster", () => {
         const m = assemble(root);
         expect(m.matrix?.units.map((u) => u.name)).toEqual(["PU-A-core", "PU-B-ui", "PU-C-api"]);
         expect(m.matrix?.units.find((u) => u.name === "PU-C-api")?.kind).toBe("service");
-        expect(m.unitDag).toEqual({ state: "ok", healed: true, graphDiffers: true });
+        expect(m.unitDag).toEqual({ state: "ok", graphDiffers: true });
         expect(renderBody(m, "en")).toContain(esc(EN.overview.unitDagHealed));
       },
     );

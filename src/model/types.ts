@@ -254,7 +254,7 @@ export interface DashboardModel {
    * unknowable); `graphDiffers` says the runtime graph's cached roster was outvoted.
    */
   unitDag:
-    | { state: "ok"; healed: boolean; graphDiffers: boolean }
+    | { state: "ok"; graphDiffers: boolean }
     | { state: "none" }
     | { state: "malformed"; reason: string; detail: string; stop: UnitDagStop };
   /**
