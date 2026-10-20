@@ -2884,6 +2884,26 @@ irrelevant
     expect(p.declaredNone).toBe(false);
   });
 
+  test("`None.` under one of the section's two names is the empty declaration", () => {
+    const p = parseDeferralSections(
+      "## Assumptions & Open Questions\n\n- Assumptions: None.\n- **Open questions**: None.\n",
+    );
+    expect(p.outcomes).toEqual(["none"]);
+    expect(p.rows).toEqual([]);
+    expect(p.declaredNone).toBe(true);
+    // The 2.11.1 shape: an untagged prose bullet beside it keeps the section unread,
+    // and the labelled line is not an item either.
+    const q = parseDeferralSections(
+      "## Assumptions & Open Questions\n\n- 경계는 요구사항에서 도출됨.\n- Open questions: None.\n",
+    );
+    expect(q.outcomes).toEqual(["unread"]);
+    expect(q.rows).toEqual([]);
+    // Any other label is prose.
+    expect(
+      parseDeferralSections("## Assumptions & Open Questions\n\n- Risks: None.\n").outcomes,
+    ).toEqual(["unread"]);
+  });
+
   test("the header row is not an item — the |---| separator is what admits rows", () => {
     // Without the separator guard the header itself becomes an open item called
     // "항목", which then reads as a permanent unresolved decision on the page.
@@ -3254,6 +3274,24 @@ None.
     expect(
       parseDeclaredOpenQuestions("## Open questions\n\n남은 질문은 설계에서 다룬다.\n"),
     ).toMatchObject({ sections: 1, none: 0, unread: 1, items: [] });
+  });
+
+  test("`Open questions: None.` on one line is the empty declaration, in the A&OQ or out", () => {
+    // The 2.11.1 requirements.md shape: the ledger as one bullet inside the A&OQ.
+    expect(
+      parseDeclaredOpenQuestions(
+        "## Assumptions & Open Questions\n\n- 가정은 설계에서 확정한다.\n- Open questions: None.\n",
+      ),
+    ).toMatchObject({ sections: 1, none: 1, unread: 0, items: [] });
+    expect(parseDeclaredOpenQuestions("**Open questions**: None.\n")).toMatchObject({
+      sections: 1,
+      none: 1,
+    });
+    // A label followed by prose is not invented into an entry, and declares nothing.
+    expect(parseDeclaredOpenQuestions("- Open questions: 결제 방식은 미정.\n")).toMatchObject({
+      sections: 0,
+      items: [],
+    });
   });
 
   test("`## Assumptions & Open Questions` and fenced examples are not this ledger", () => {

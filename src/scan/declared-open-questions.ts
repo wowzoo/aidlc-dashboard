@@ -112,6 +112,21 @@ const TABLE_ROW_RE = /^\s*\|(.*?)\|?\s*$/;
 const LIST_ITEM_RE = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
 const LIST_MARKER_RE = /^\s*(?:[-*+]|\d+[.)])\s+/;
 const NONE_RE = /^(?:none|n\/a|not applicable|없음|해당\s*없음)[.!。]?$/i;
+/**
+ * `Open questions: None.` on one line — the section's name and the empty declaration
+ * together. A 2.11.1 requirements.md wrote its ledger as exactly this bullet, inside
+ * `## Assumptions & Open Questions`, and with no heading to find the ledger read as
+ * missing. Only `None.` is taken from a labelled line: a label followed by prose is not
+ * a shape this reader knows, so it is not invented into an entry.
+ */
+const LABELLED_RE =
+  /^(?:\*\*)?\s*open\s+questions?\s*(?:\*\*)?\s*[:：—–]\s*(?:\*\*)?\s*(.*?)\s*(?:\*\*)?$/i;
+
+/** `None.`, bare or after the section's own name. */
+function isNone(text: string): boolean {
+  const labelled = LABELLED_RE.exec(text);
+  return NONE_RE.test(labelled ? (labelled[1] ?? "") : text);
+}
 /** A bold id at the head of an entry — `**OQ1**:` → `OQ1:`, as scan/deferrals.ts keeps it. */
 const BOLD_ID_RE = /^\*\*([A-Z][A-Z0-9.-]*\d[A-Z0-9.-]*[a-z]?)\*\*/;
 
@@ -185,6 +200,14 @@ export function parseDeclaredOpenQuestions(text: string): ParsedDeclared {
       }
       if (aoqLevel !== undefined && lv <= aoqLevel) aoqLevel = undefined;
     }
+    // A labelled `None.` is the whole section on one line, inside the A&OQ or out of it.
+    if (!anyHead && LABELLED_RE.test(tidy(line.replace(LIST_MARKER_RE, "")))) {
+      if (isNone(tidy(line.replace(LIST_MARKER_RE, "")))) {
+        out.sections++;
+        out.none++;
+      }
+      continue;
+    }
     if (aoqLevel !== undefined) continue;
     const head = HEADING_RE.exec(line);
     const bold = !head && BOLD_LEAD_RE.test(line.trim());
@@ -215,7 +238,7 @@ export function parseDeclaredOpenQuestions(text: string): ParsedDeclared {
       if (b === undefined) return;
       const t = tidy(b.replace(BOLD_ID_RE, "$1"));
       if (t.length === 0) return;
-      if (NONE_RE.test(t)) {
+      if (isNone(t)) {
         noneMarks++;
         return;
       }
@@ -294,7 +317,7 @@ export function parseDeclaredOpenQuestions(text: string): ParsedDeclared {
         continue;
       }
       flushBullet();
-      if (NONE_RE.test(tidy(l.replace(LIST_MARKER_RE, "")))) noneMarks++;
+      if (isNone(tidy(l.replace(LIST_MARKER_RE, "")))) noneMarks++;
       else prose++;
     }
     flushBullet();

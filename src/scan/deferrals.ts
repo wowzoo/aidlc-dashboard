@@ -222,6 +222,20 @@ const TABLE_SEP_RE = /^\s*\|[\s:|-]*-{2,}[\s:|-]*\|?\s*$/;
 const TABLE_ROW_RE = /^\s*\|(.*?)\|?\s*$/;
 /** An explicit "nothing open" body. */
 const NONE_RE = /^(?:none|n\/a|not applicable|없음|해당\s*없음)[.!。]?$/i;
+/**
+ * The same sentinel under one of the section's own two names — `Open questions: None.`,
+ * `**Assumptions**: None.`. A 2.11.1 requirements.md wrote its open questions this way,
+ * inside this section, and the bare test read the line as unknown prose. Only the two
+ * names count; any other label is prose and stays unread.
+ */
+const LABELLED_NONE_RE =
+  /^(?:\*\*)?\s*(?:open\s+questions?|assumptions?)\s*(?:\*\*)?\s*[:：—–]\s*(?:\*\*)?\s*(.*?)\s*(?:\*\*)?$/i;
+
+/** `None.`, bare or under one of the section's two names. */
+function isNone(text: string): boolean {
+  const labelled = LABELLED_NONE_RE.exec(text);
+  return NONE_RE.test(labelled ? (labelled[1] ?? "") : text);
+}
 /** The engine writes the tag inside backticks (`` `[assumption]` ``); accept both. */
 const ASSUMPTION_TAG_RE = /`?\[assumption\]`?/i;
 /**
@@ -353,7 +367,7 @@ export function parseDeferralSections(text: string): ParsedSection {
         if (t.length > 0) out.assumptions.push(t);
         return;
       }
-      if (NONE_RE.test(tidy(b))) return;
+      if (isNone(tidy(b))) return;
       const id = LEDGER_ID_RE.exec(b);
       const kind = id
         ? (id[2] ?? "") === "AS"
@@ -387,7 +401,7 @@ export function parseDeferralSections(text: string): ParsedSection {
       // open" even when the two mandated subsections are present.
       if (!s && line.trim().length > 0) {
         bodyLines++;
-        if (NONE_RE.test(tidy(line.replace(LIST_MARKER_RE, "")))) noneLines++;
+        if (isNone(tidy(line.replace(LIST_MARKER_RE, "")))) noneLines++;
       }
       if (s) {
         flushBullet();
