@@ -54,8 +54,8 @@
 // cross-shard tie on events built without block positions. A ledger from before the
 // `Run floor` field is read as the engine reads it: no row is current.
 //
-// GENERATION. This reads 2.11.0 — the dashboard's one supported engine. A tree from an
-// older engine is read by these same rules, under the page's version warning; the
+// GENERATION. These are the 2.11.0 rules. A tree from an older engine is read by these
+// same rules; the
 // 2.10.0 release's own rules (every jump reset every stage, no policy flooring, no
 // UNIT_SKIPPED) are not reproduced.
 

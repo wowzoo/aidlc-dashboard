@@ -28,8 +28,8 @@
 // only when it carries that checkpoint's gate name, the same key (Batch number /
 // Unit), the matching Kind, and the same Fingerprint when one was recorded.
 //
-// These are the 2.11.0 rules; an older tree is read by them too, under the page's
-// version warning (2.10 closed a decision on QUESTION_ANSWERED alone).
+// These are the 2.11.0 rules; an older tree is read by them too (2.10 closed a decision
+// on QUESTION_ANSWERED alone).
 //
 // Fields are read from the block's own `**Field**:` lines, as the engine reads them.
 

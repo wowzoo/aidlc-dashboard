@@ -83,9 +83,6 @@ const warn: WarnStrings = {
   harnessCoexist: (harnesses, chosen) =>
     `harness 디렉터리 ${harnesses.join("·")} 가 공존 — 사용량 패널을 ${chosen === "claude" ? "Claude Code 토큰" : "Kiro 크레딧"}으로 자동 선택했습니다. 다른 쪽을 보려면 --usage ${chosen === "claude" ? "kiro" : "claude"} 를 지정하세요.`,
 
-  engineVersionUnsupported: (harnessDir, found, supported) =>
-    `${found ? `엔진 ${found}` : "엔진 버전 표시(aidlc-stamp.json) 없음 또는 형식 오류"} (${harnessDir}) — 이 대시보드는 AI-DLC ${supported} 기준으로만 읽습니다. 다른 버전의 기록도 ${supported} 규칙으로 읽으므로 일부 패널이 비거나 틀릴 수 있습니다.`,
-
   questionsUnclosedBlock: (files) =>
     `닫히지 않은 코드 블록·주석이 있는 질문 파일 ${files.length}개 — 숨기지 않고 본문으로 읽었습니다(블로커를 감추지 않으려고). 엔진은 다르게 읽을 수 있으니 파일을 확인하세요: ${files.join(", ")}`,
 

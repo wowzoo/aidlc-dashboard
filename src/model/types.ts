@@ -212,9 +212,6 @@ export type Warning =
       missingFromState: string[];
     }
   | { code: "harness-coexist"; harnesses: string[]; chosen: "kiro" | "claude" }
-  /** The harness is not the engine release this dashboard reads (2.11.0). `found` absent =
-   *  no `aidlc-stamp.json`, or one that fails the engine's own identity checks. */
-  | { code: "engine-version-unsupported"; harnessDir: string; found?: string; supported: string }
   /** Questions files with a fence/comment/raw block never closed, read as text. */
   | { code: "questions-unclosed-block"; files: string[] }
   /** Record files (or dirs) that exist and could not be read — questions, A&OQ
