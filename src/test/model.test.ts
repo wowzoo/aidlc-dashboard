@@ -1803,11 +1803,6 @@ describe("harness-agnostic", () => {
     fs.cpSync(path.join(FIXTURE, "aidlc"), path.join(dir, "aidlc"), { recursive: true });
     if (harness) {
       fs.cpSync(path.join(FIXTURE, ".kiro"), path.join(dir, harness), { recursive: true });
-      // A real install's stamp names its own harness dir; renaming the dir without it would
-      // be an identity the engine itself rejects.
-      const stamp = path.join(dir, harness, "tools", "data", "aidlc-stamp.json");
-      const st = JSON.parse(fs.readFileSync(stamp, "utf-8"));
-      fs.writeFileSync(stamp, JSON.stringify({ ...st, harnessDir: harness }));
     }
     return dir;
   }
@@ -2675,56 +2670,6 @@ describe("usage kind survives a broken catalogue", () => {
       expect(assemble(dir, undefined, { window: "30d" }).usage.kind).toBe("claude");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-});
-
-describe("one engine generation", () => {
-  test("a 2.11.0 stamp reads clean; another release, a malformed stamp, or none is said", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "aidlc-gen-"));
-    try {
-      fs.cpSync(FIXTURE, root, { recursive: true });
-      const stamp = path.join(root, ".kiro", "tools", "data", "aidlc-stamp.json");
-      const write = (o: Record<string, unknown>) =>
-        fs.writeFileSync(
-          stamp,
-          JSON.stringify({ schemaVersion: 1, distribution: "kiro", harnessDir: ".kiro", ...o }),
-        );
-      const versionWarning = () =>
-        assemble(root).warnings.find((w) => w.code === "engine-version-unsupported");
-      expect(versionWarning()).toBeUndefined();
-      // A later patch was not checked against, so it is said too.
-      write({ frameworkVersion: "2.11.3" });
-      expect(versionWarning()).toMatchObject({ found: "2.11.3", supported: "2.11.0" });
-      write({ frameworkVersion: "2.10.1-preview.20261007.1" });
-      expect(versionWarning()).toEqual({
-        code: "engine-version-unsupported",
-        harnessDir: ".kiro",
-        found: "2.10.1-preview.20261007.1",
-        supported: "2.11.0",
-      });
-      // A stamp failing the engine's identity checks identifies nothing.
-      for (const bad of [
-        { frameworkVersion: "2.11.0", harnessDir: ".claude" },
-        { frameworkVersion: "2.11.0", schemaVersion: 2 },
-        { frameworkVersion: "2.11.0evil" },
-      ]) {
-        write(bad);
-        expect(versionWarning()).toEqual({
-          code: "engine-version-unsupported",
-          harnessDir: ".kiro",
-          supported: "2.11.0",
-        });
-      }
-      fs.rmSync(stamp);
-      expect(versionWarning()).toEqual({
-        code: "engine-version-unsupported",
-        harnessDir: ".kiro",
-        supported: "2.11.0",
-      });
-      expect(renderBody(assemble(root), "ko")).toContain("AI-DLC 2.11.0 기준으로만 읽습니다");
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

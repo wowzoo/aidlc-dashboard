@@ -159,8 +159,6 @@ export interface StageCatalog {
    * enforce, and a spelling change degrades to silence instead of a false claim.
    */
   stateVersion?: string;
-  /** The harness's engine version (`aidlc-stamp.json`), when it declares one. */
-  frameworkVersion?: string;
   /** The compiled scope grid, when the harness ships one. */
   scopeGrid?: ScopeGrid;
 }
@@ -251,10 +249,6 @@ export function readStageCatalog(root: string, harnessDir?: string): StageCatalo
       return v ? { stateVersion: v } : {};
     })(),
     ...(() => {
-      const f = readFrameworkVersion(root, harness);
-      return f ? { frameworkVersion: f } : {};
-    })(),
-    ...(() => {
       const g = readScopeGrid(root, harness);
       return g ? { scopeGrid: g } : {};
     })(),
@@ -286,47 +280,6 @@ function readScopeGrid(root: string, harness: string): ScopeGrid | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** The engine's release grammar (aidlc-runtime-paths.ts `FRAMEWORK_VERSION`). */
-const FRAMEWORK_VERSION_RE =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-preview\.\d{8}\.[1-9]\d*)?$/;
-
-/**
- * `frameworkVersion` from `<harness>/tools/data/aidlc-stamp.json` — the engine's own
- * projection identity, validated as the engine validates it: `harnessDir` names this
- * harness, `schemaVersion` is 1, `distribution` is a slug, and the version is a release
- * id. A stamp failing any of these identifies nothing, so it reads as no stamp — a
- * `frameworkVersion: "2.11.0"` alone must not silence the version warning.
- */
-function readFrameworkVersion(root: string, harness: string): string | undefined {
-  try {
-    const j = JSON.parse(
-      fs.readFileSync(path.join(root, harness, "tools", "data", "aidlc-stamp.json"), "utf-8"),
-    ) as Record<string, unknown>;
-    const v = j?.frameworkVersion;
-    const ok =
-      j?.harnessDir === harness &&
-      j?.schemaVersion === 1 &&
-      typeof j?.distribution === "string" &&
-      /^[a-z0-9][a-z0-9-]*$/.test(j.distribution) &&
-      typeof v === "string" &&
-      FRAMEWORK_VERSION_RE.test(v);
-    return ok ? (v as string) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The engine release this dashboard reads: exactly 2.11.0, the source every rule here was
- * transcribed from and checked against. Any other release — a later 2.11 patch included,
- * since nothing here was checked against it — is read by the same rules, under a warning.
- */
-export const SUPPORTED_ENGINE = "2.11.0";
-
-export function supportedEngine(frameworkVersion: string | undefined): boolean {
-  return frameworkVersion === SUPPORTED_ENGINE;
 }
 
 /**

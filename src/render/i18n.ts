@@ -177,11 +177,6 @@ export interface WarnStrings {
     missingFromState: string[],
   ): string;
   harnessCoexist(harnesses: string[], chosen: "kiro" | "claude"): string;
-  engineVersionUnsupported(
-    harnessDir: string,
-    found: string | undefined,
-    supported: string,
-  ): string;
   questionsUnclosedBlock(files: string[]): string;
   /** `questions`: a questions file or dir is among them, so the blocker count is a floor. */
   recordFileUnreadable(files: string[], questions: boolean): string;

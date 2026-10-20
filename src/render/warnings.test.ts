@@ -170,11 +170,6 @@ describe("every code has copy", () => {
       detail: "dependency cycle detected",
       stop: "construction",
     },
-    "engine-version-unsupported": {
-      code: "engine-version-unsupported",
-      harnessDir: ".kiro",
-      supported: "2.11.0",
-    },
     "token-usage-failed": { code: "token-usage-failed", detail: "x" },
     "credit-assembly-failed": { code: "credit-assembly-failed", detail: "x" },
   };

@@ -41,8 +41,6 @@ export function warningTextIn(w: Warning, s: Strings): string {
       return t.rosterMismatch(w.stateVersion, w.unknownToCatalog, w.missingFromState);
     case "harness-coexist":
       return t.harnessCoexist(w.harnesses, w.chosen);
-    case "engine-version-unsupported":
-      return t.engineVersionUnsupported(w.harnessDir, w.found, w.supported);
     case "questions-unclosed-block":
       return t.questionsUnclosedBlock(w.files);
     case "record-file-unreadable":
