@@ -913,7 +913,7 @@ export function assemble(
     unitArtifactMode: artifactMode,
     unitDag:
       unitDag.state === "ok"
-        ? { state: "ok", healed: unitDag.healed, graphDiffers: unitDag.graphDiffers }
+        ? { state: "ok", graphDiffers: unitDag.graphDiffers }
         : unitDag.state === "malformed"
           ? { ...unitDag, stop: unitDagStop }
           : unitDag,

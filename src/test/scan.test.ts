@@ -975,7 +975,6 @@ describe("construction matrix", () => {
       batches: [["PU-A"]],
       units: ["PU-A"],
       unitKinds: new Map([["PU-A", "library"]]),
-      healed: false,
       graphDiffers: false,
       dependsOn: new Map([["PU-A", []]]),
     })!;
